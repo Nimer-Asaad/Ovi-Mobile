@@ -1,0 +1,346 @@
+// Ovi Mobile — Prisma schema (Phase 1 draft)
+//
+// Portability note:
+// Prisma's native `enum` type is not supported by SQLite, only by
+// PostgreSQL/MySQL/CockroachDB. Since this schema must run unchanged on
+// SQLite (dev) and PostgreSQL (production), every "enum-like" field below is
+// a `String` constrained to a fixed set of values. The canonical list of
+// allowed values for each lives in `src/lib/constants.ts` and is mirrored as
+// TypeScript string-literal union types in `src/types/index.ts`. When we cut
+// over to PostgreSQL we can optionally promote these to real `enum` columns
+// without changing application code.
+//
+// Money note:
+// All monetary fields are `Int`, storing the smallest currency unit
+// (e.g. agorot for ILS). This avoids floating-point rounding issues and
+// works identically on SQLite and PostgreSQL, where Prisma's `Decimal`
+// type is unsupported on SQLite.
+//
+// This is a Phase 1 draft: models cover the full domain described in the
+// project brief so later phases can build on a stable shape, but no
+// application code (auth, CRUD, checkout) is wired up yet.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Identity
+// ---------------------------------------------------------------------------
+
+/// Role values: "ADMIN" | "RETAIL_CUSTOMER" | "WHOLESALE_MERCHANT" | "SALES_REPRESENTATIVE"
+/// See src/lib/constants.ts -> ROLES
+model User {
+  id           String   @id @default(cuid())
+  role         String
+  name         String
+  email        String   @unique
+  phone        String?
+  passwordHash String?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  merchantProfile         Merchant?
+  salesRepresentativeProfile SalesRepresentative?
+
+  ordersPlaced      Order[]         @relation("OrderCustomer")
+  stockMovements    StockMovement[] @relation("StockMovementCreatedBy")
+
+  @@map("users")
+}
+
+/// MerchantStatus values: "PENDING" | "APPROVED" | "REJECTED" | "SUSPENDED"
+/// Wholesale pricing is only visible once status = "APPROVED".
+model Merchant {
+  id             String    @id @default(cuid())
+  userId         String    @unique
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  businessName   String
+  taxId          String?
+  status         String    @default("PENDING")
+  approvedAt     DateTime?
+  assignedRepId  String?
+  assignedRep    SalesRepresentative? @relation("RepMerchants", fields: [assignedRepId], references: [id])
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  orders Order[] @relation("OrderMerchant")
+
+  @@map("merchants")
+}
+
+model SalesRepresentative {
+  id           String   @id @default(cuid())
+  userId       String   @unique
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  employeeCode String   @unique
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  assignedMerchants Merchant[]      @relation("RepMerchants")
+  carStockLocation  StockLocation?
+  ordersCreated     Order[]         @relation("OrderCreatedByRep")
+  stockRequests     StockRequest[]
+  stockReturns      StockReturn[]
+
+  @@map("sales_representatives")
+}
+
+// ---------------------------------------------------------------------------
+// Catalog
+// ---------------------------------------------------------------------------
+
+model Category {
+  id        String     @id @default(cuid())
+  name      String
+  nameAr    String?
+  slug      String     @unique
+  parentId  String?
+  parent    Category?  @relation("CategoryTree", fields: [parentId], references: [id])
+  children  Category[] @relation("CategoryTree")
+  products  Product[]
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  @@map("categories")
+}
+
+model Brand {
+  id        String    @id @default(cuid())
+  name      String    @unique
+  slug      String    @unique
+  logoUrl   String?
+  products  Product[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@map("brands")
+}
+
+model Supplier {
+  id          String    @id @default(cuid())
+  name        String
+  contactName String?
+  phone       String?
+  email       String?
+  address     String?
+  products    Product[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@map("suppliers")
+}
+
+model Product {
+  id                 String   @id @default(cuid())
+  sku                String   @unique
+  name               String
+  nameAr             String?
+  description        String?
+  descriptionAr      String?
+  categoryId         String?
+  category           Category? @relation(fields: [categoryId], references: [id])
+  brandId            String?
+  brand              Brand?    @relation(fields: [brandId], references: [id])
+  supplierId         String?
+  supplier           Supplier? @relation(fields: [supplierId], references: [id])
+
+  /// Smallest currency unit (e.g. agorot). Price shown to retail customers.
+  retailPriceCents   Int
+  /// Smallest currency unit. Only visible to approved wholesale merchants.
+  wholesalePriceCents Int
+  /// Smallest currency unit. Internal cost, admin-only.
+  costCents          Int?
+
+  isActive           Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  inventoryItems  InventoryItem[]
+  stockMovements  StockMovement[]
+  orderItems      OrderItem[]
+  stockRequestItems StockRequestItem[]
+  stockReturnItems  StockReturnItem[]
+
+  @@map("products")
+}
+
+// ---------------------------------------------------------------------------
+// Inventory
+// ---------------------------------------------------------------------------
+
+/// StockLocationType values: "WAREHOUSE" | "REP_CAR"
+/// A REP_CAR location always belongs to exactly one SalesRepresentative.
+model StockLocation {
+  id            String   @id @default(cuid())
+  type          String
+  name          String
+  isDefault     Boolean  @default(false)
+  salesRepId    String?  @unique
+  salesRep      SalesRepresentative? @relation(fields: [salesRepId], references: [id])
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  inventoryItems      InventoryItem[]
+  movementsFrom       StockMovement[] @relation("MovementFromLocation")
+  movementsTo         StockMovement[] @relation("MovementToLocation")
+
+  @@map("stock_locations")
+}
+
+/// Current on-hand quantity of a product at a location. Derived data — the
+/// source of truth is the StockMovement ledger; this table is a maintained
+/// aggregate for fast reads.
+model InventoryItem {
+  id         String   @id @default(cuid())
+  productId  String
+  product    Product  @relation(fields: [productId], references: [id])
+  locationId String
+  location   StockLocation @relation(fields: [locationId], references: [id])
+  quantity   Int      @default(0)
+  updatedAt  DateTime @updatedAt
+
+  @@unique([productId, locationId])
+  @@map("inventory_items")
+}
+
+/// StockMovementType values:
+/// "PURCHASE_IN" | "TRANSFER" | "SALE_OUT" | "RETURN_IN" | "ADJUSTMENT" |
+/// "REP_ASSIGNMENT" | "REP_RETURN"
+///
+/// Immutable ledger — every inventory change (purchases, transfers, sales,
+/// returns, adjustments, rep stock assignment/return) is recorded here and
+/// is never edited or deleted, only appended to.
+model StockMovement {
+  id             String    @id @default(cuid())
+  type           String
+  productId      String
+  product        Product   @relation(fields: [productId], references: [id])
+  fromLocationId String?
+  fromLocation   StockLocation? @relation("MovementFromLocation", fields: [fromLocationId], references: [id])
+  toLocationId   String?
+  toLocation     StockLocation? @relation("MovementToLocation", fields: [toLocationId], references: [id])
+  quantity       Int
+  note           String?
+  createdById    String?
+  createdBy      User?     @relation("StockMovementCreatedBy", fields: [createdById], references: [id])
+  createdAt      DateTime  @default(now())
+
+  @@map("stock_movements")
+}
+
+// ---------------------------------------------------------------------------
+// Orders
+// ---------------------------------------------------------------------------
+
+/// OrderStatus values:
+/// "PENDING" | "CONFIRMED" | "PROCESSING" | "SHIPPED" | "DELIVERED" |
+/// "CANCELLED" | "RETURNED"
+///
+/// OrderSource values: "RETAIL" | "WHOLESALE" | "REP_SALE"
+model Order {
+  id              String   @id @default(cuid())
+  orderNumber     String   @unique
+  source          String
+  status          String   @default("PENDING")
+
+  customerId      String?
+  customer        User?    @relation("OrderCustomer", fields: [customerId], references: [id])
+
+  merchantId      String?
+  merchant        Merchant? @relation("OrderMerchant", fields: [merchantId], references: [id])
+
+  createdByRepId  String?
+  createdByRep    SalesRepresentative? @relation("OrderCreatedByRep", fields: [createdByRepId], references: [id])
+
+  currency        String   @default("ILS")
+  subtotalCents   Int
+  discountCents   Int      @default(0)
+  totalCents      Int
+
+  shippingAddress String?
+  notes           String?
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  items OrderItem[]
+
+  @@map("orders")
+}
+
+model OrderItem {
+  id            String  @id @default(cuid())
+  orderId       String
+  order         Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId     String
+  product       Product @relation(fields: [productId], references: [id])
+  quantity      Int
+  unitPriceCents Int
+  totalCents    Int
+
+  @@map("order_items")
+}
+
+// ---------------------------------------------------------------------------
+// Sales representative stock workflow
+// ---------------------------------------------------------------------------
+
+/// StockRequestStatus values: "PENDING" | "APPROVED" | "REJECTED" | "FULFILLED"
+model StockRequest {
+  id            String   @id @default(cuid())
+  salesRepId    String
+  salesRep      SalesRepresentative @relation(fields: [salesRepId], references: [id])
+  status        String   @default("PENDING")
+  note          String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  items StockRequestItem[]
+
+  @@map("stock_requests")
+}
+
+model StockRequestItem {
+  id             String   @id @default(cuid())
+  stockRequestId String
+  stockRequest   StockRequest @relation(fields: [stockRequestId], references: [id], onDelete: Cascade)
+  productId      String
+  product        Product  @relation(fields: [productId], references: [id])
+  quantity       Int
+
+  @@map("stock_request_items")
+}
+
+/// StockReturnStatus values: "PENDING" | "APPROVED" | "REJECTED" | "COMPLETED"
+model StockReturn {
+  id           String   @id @default(cuid())
+  salesRepId   String
+  salesRep     SalesRepresentative @relation(fields: [salesRepId], references: [id])
+  status       String   @default("PENDING")
+  note         String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  items StockReturnItem[]
+
+  @@map("stock_returns")
+}
+
+model StockReturnItem {
+  id            String   @id @default(cuid())
+  stockReturnId String
+  stockReturn   StockReturn @relation(fields: [stockReturnId], references: [id], onDelete: Cascade)
+  productId     String
+  product       Product  @relation(fields: [productId], references: [id])
+  quantity      Int
+
+  @@map("stock_return_items")
+}

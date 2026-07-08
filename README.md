@@ -1,66 +1,38 @@
 # Ovi Mobile
 
-Ovi Mobile is an Arabic-first, RTL-first commerce and management platform for mobile accessories.
+Premium mobile accessories e-commerce and wholesale management platform for Palestine. Single Next.js App Router application with TypeScript, Tailwind CSS, and Prisma.
 
-This repository is a pnpm workspace monorepo managed with Turborepo.
+## Status
+
+Phase 1 — project foundation only. No authentication, CRUD, or checkout yet.
 
 ## Requirements
 
-- Node.js 20.11 or newer
-- pnpm 10 or newer
-- Docker, for the optional local PostgreSQL service
+- Node.js 20.11+
 
-## Install
+## Setup
 
 ```bash
-pnpm install
-```
-
-## Environment
-
-Copy the example environment files before running services locally:
-
-```bash
+npm install
 cp .env.example .env
-cp apps/web/.env.example apps/web/.env
-cp apps/api/.env.example apps/api/.env
+npm run db:push
+npm run db:seed
+npm run dev
 ```
 
-Update local values as needed. Never commit real secrets.
+The app runs at `http://localhost:3000`.
 
-## Local Development
+## Structure
 
-Start PostgreSQL:
+- `src/app` — routes (public site + `/admin` dashboard)
+- `src/components/ui` — reusable primitives (Button, Card, Badge)
+- `src/components/layout` — Header, Footer, AdminSidebar, AdminTopbar
+- `src/lib` — `prisma.ts` (client singleton), `constants.ts`, `utils.ts`
+- `src/types` — shared TypeScript types
+- `prisma/schema.prisma` — data model draft (SQLite now, PostgreSQL-ready later)
+- `prisma/seed.ts` — seed script skeleton
 
-```bash
-docker compose -f infrastructure/docker-compose.yml up -d
-```
+## Notes
 
-Run all apps:
-
-```bash
-pnpm dev
-```
-
-The web app defaults to `http://localhost:3000`.
-The API defaults to `http://localhost:4000/api`, with Swagger docs at `http://localhost:4000/docs`.
-
-## Checks
-
-```bash
-pnpm lint
-pnpm typecheck
-pnpm build
-pnpm test
-```
-
-## Workspace Layout
-
-- `apps/web` - Next.js App Router frontend.
-- `apps/api` - NestJS REST API.
-- `packages/config` - shared TypeScript, ESLint, and formatting configuration.
-- `packages/contracts` - DTO-friendly shared contract placeholders.
-- `packages/api-client` - reusable typed HTTP client base.
-- `packages/ui` - minimal shared UI foundations.
-- `infrastructure` - local development infrastructure.
-- `docs` - project documentation.
+- Money is stored as `Int` in the smallest currency unit (agorot/cents) — never `Float`/`Decimal` — since SQLite has no native decimal type and this keeps the schema identical across SQLite and PostgreSQL.
+- Default document direction is RTL/Arabic (`lang="ar" dir="rtl"`), set in `src/app/layout.tsx`.
