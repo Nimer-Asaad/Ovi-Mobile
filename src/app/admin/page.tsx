@@ -1,35 +1,55 @@
+import { prisma } from "@/lib/prisma";
 import { Badge } from "@/components/ui/Badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
+import { LOW_STOCK_THRESHOLD } from "@/lib/constants";
 
-interface StatCard {
-  label: string;
-  value: string;
-  badge: { text: string; variant: "gold" | "success" | "warning" | "neutral" };
+type BadgeVariant = "gold" | "success" | "warning" | "neutral";
+
+async function getLowStockCount(): Promise<number> {
+  const activeProducts = await prisma.product.findMany({
+    where: { isActive: true },
+    select: { inventoryItems: { select: { quantity: true } } },
+  });
+
+  return activeProducts.filter(
+    (product) =>
+      product.inventoryItems.reduce((sum, item) => sum + item.quantity, 0) < LOW_STOCK_THRESHOLD,
+  ).length;
 }
 
-/**
- * Admin dashboard skeleton. Stat cards are placeholders — real counts wire
- * up once the corresponding modules (catalog, merchants, orders) exist.
- */
-const STAT_CARDS: StatCard[] = [
-  { label: "إجمالي المنتجات", value: "—", badge: { text: "قريباً", variant: "neutral" } },
-  { label: "طلبات انضمام التجار", value: "—", badge: { text: "قريباً", variant: "warning" } },
-  { label: "المندوبون النشطون", value: "—", badge: { text: "قريباً", variant: "neutral" } },
-  { label: "طلبات اليوم", value: "—", badge: { text: "قريباً", variant: "gold" } },
-];
+export default async function AdminDashboardPage() {
+  const [totalProducts, activeProducts, categoriesCount, brandsCount, suppliersCount, lowStockCount] =
+    await Promise.all([
+      prisma.product.count(),
+      prisma.product.count({ where: { isActive: true } }),
+      prisma.category.count(),
+      prisma.brand.count(),
+      prisma.supplier.count(),
+      getLowStockCount(),
+    ]);
 
-export default function AdminDashboardPage() {
+  const statCards: { label: string; value: number; badge: { text: string; variant: BadgeVariant } }[] = [
+    { label: "إجمالي المنتجات", value: totalProducts, badge: { text: "مباشر", variant: "gold" } },
+    { label: "المنتجات المفعّلة", value: activeProducts, badge: { text: "مباشر", variant: "success" } },
+    { label: "الأقسام", value: categoriesCount, badge: { text: "مباشر", variant: "neutral" } },
+    { label: "العلامات التجارية", value: brandsCount, badge: { text: "مباشر", variant: "neutral" } },
+    { label: "الموردون", value: suppliersCount, badge: { text: "مباشر", variant: "neutral" } },
+    {
+      label: "مخزون منخفض",
+      value: lowStockCount,
+      badge: lowStockCount > 0 ? { text: "تنبيه", variant: "warning" } : { text: "جيد", variant: "success" },
+    },
+  ];
+
   return (
     <div className="flex flex-col gap-6">
       <div>
         <h2 className="text-xl font-semibold text-neutral-bg">نظرة عامة</h2>
-        <p className="mt-1 text-sm text-neutral-bg/60">
-          هذه لوحة تحكم أولية — البيانات الحقيقية سيتم ربطها في المراحل القادمة.
-        </p>
+        <p className="mt-1 text-sm text-neutral-bg/60">إحصائيات مباشرة من كتالوج المنتجات.</p>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {STAT_CARDS.map((stat) => (
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {statCards.map((stat) => (
           <Card key={stat.label}>
             <CardHeader>
               <CardTitle>{stat.label}</CardTitle>
@@ -47,8 +67,8 @@ export default function AdminDashboardPage() {
           <CardTitle>خارطة الطريق</CardTitle>
         </CardHeader>
         <CardContent>
-          هذا الهيكل يمثل المرحلة الأولى فقط: الأساس، التصميم، ومخطط قاعدة البيانات.
-          تسجيل الدخول، إدارة المنتجات، والطلبات ستُضاف في المراحل التالية.
+          الأساس، المصادقة، وإدارة الكتالوج (الأقسام، العلامات التجارية، الموردون، المنتجات) مكتملة الآن.
+          السلة، الطلبات، وإدارة المخزون ستُضاف في المراحل التالية.
         </CardContent>
       </Card>
     </div>

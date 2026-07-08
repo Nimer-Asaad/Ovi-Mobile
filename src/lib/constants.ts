@@ -68,6 +68,10 @@ export const STOCK_RETURN_STATUSES = {
 
 export const DEFAULT_CURRENCY = "ILS" as const;
 
+/** Active products with total on-hand quantity below this are "low stock"
+ * on the admin dashboard. */
+export const LOW_STOCK_THRESHOLD = 5;
+
 /** Admin dashboard sidebar navigation (skeleton — links are placeholders). */
 export const ADMIN_NAV_ITEMS = [
   { label: "Overview", labelAr: "نظرة عامة", href: "/admin" },

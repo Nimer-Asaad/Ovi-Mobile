@@ -22,3 +22,15 @@ export function formatCurrencyFromCents(
     currencyDisplay: "symbol",
   }).format(cents / 100);
 }
+
+/** URL-safe slug, Unicode-letter aware (so Arabic-only names still produce a
+ * usable slug instead of an empty string). */
+export function slugify(input: string): string {
+  return input
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_]+/g, "-")
+    .replace(/[^\p{L}\p{N}-]+/gu, "")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+}

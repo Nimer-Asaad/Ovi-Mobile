@@ -13,7 +13,9 @@ export function Header() {
         </Link>
 
         <nav className="hidden items-center gap-6 text-sm text-neutral-bg/80 md:flex">
-          <span className="cursor-default">المنتجات</span>
+          <Link href="/products" className="transition-colors hover:text-gold-champagne">
+            المنتجات
+          </Link>
           <span className="cursor-default">الأقسام</span>
           <span className="cursor-default">تواصل معنا</span>
         </nav>

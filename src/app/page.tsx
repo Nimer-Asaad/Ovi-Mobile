@@ -1,13 +1,17 @@
+import Link from "next/link";
+import { prisma } from "@/lib/prisma";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
 import { Button } from "@/components/ui/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 
-/**
- * Home page skeleton. Real product/category data arrives in Phase 3
- * (catalog); this page currently renders static placeholder sections only.
- */
-export default function HomePage() {
+export default async function HomePage() {
+  const categories = await prisma.category.findMany({
+    where: { isActive: true },
+    orderBy: { createdAt: "asc" },
+    take: 4,
+  });
+
   return (
     <div className="flex min-h-screen flex-col">
       <Header />
@@ -24,28 +28,34 @@ export default function HomePage() {
             منصة عوفي موبايل لإدارة المبيعات والمخزون والتجار والمندوبين — قريباً.
           </p>
           <div className="mt-8 flex items-center justify-center gap-3">
-            <Button variant="primary" size="lg">
-              تصفح المنتجات
-            </Button>
+            <Link href="/products">
+              <Button variant="primary" size="lg">
+                تصفح المنتجات
+              </Button>
+            </Link>
             <Button variant="outline" size="lg">
               انضم كتاجر جملة
             </Button>
           </div>
         </section>
 
-        <section className="mx-auto max-w-6xl px-4 pb-20">
-          <h2 className="mb-6 text-xl font-semibold text-neutral-bg">الأقسام المميزة</h2>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {["سماعات", "شواحن", "كفرات", "كابلات"].map((category) => (
-              <Card key={category}>
-                <CardHeader>
-                  <CardTitle>{category}</CardTitle>
-                </CardHeader>
-                <CardContent>قسم قيد الإضافة — سيتم ربطه بالمنتجات في المرحلة القادمة.</CardContent>
-              </Card>
-            ))}
-          </div>
-        </section>
+        {categories.length > 0 && (
+          <section className="mx-auto max-w-6xl px-4 pb-20">
+            <h2 className="mb-6 text-xl font-semibold text-neutral-bg">الأقسام المميزة</h2>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              {categories.map((category) => (
+                <Link key={category.id} href={`/products?category=${category.slug}`}>
+                  <Card className="h-full transition-colors hover:border-gold-champagne/50">
+                    <CardHeader>
+                      <CardTitle>{category.nameAr ?? category.name}</CardTitle>
+                    </CardHeader>
+                    <CardContent>تصفح منتجات هذا القسم</CardContent>
+                  </Card>
+                </Link>
+              ))}
+            </div>
+          </section>
+        )}
       </main>
 
       <Footer />

@@ -4,8 +4,9 @@ Premium mobile accessories e-commerce and wholesale management platform for Pale
 
 ## Status
 
-Phase 2 — authentication and role-based access control added. No product CRUD,
-checkout, inventory movements, or finance yet.
+Phase 3 — catalog management added (categories, brands, suppliers, products)
+plus a public product listing. No cart, checkout, inventory movements, or
+finance yet.
 
 ## Requirements
 
@@ -25,18 +26,21 @@ The app runs at `http://localhost:3000`.
 
 ## Structure
 
-- `src/app` — routes (public site, `/admin` dashboard, `/login`, `/register`,
-  `/register/merchant`, `/dashboard`, `/merchant`, `/merchant/pending`, `/rep`)
-- `src/components/ui` — reusable primitives (Button, Card, Badge, Input)
+- `src/app` — routes (public site, `/products`, `/admin` catalog management,
+  `/login`, `/register`, `/register/merchant`, `/dashboard`, `/merchant`,
+  `/merchant/pending`, `/rep`)
+- `src/components/ui` — reusable primitives (Button, Card, Badge, Input, Select, Textarea)
 - `src/components/layout` — Header, Footer, AdminSidebar, AdminTopbar
 - `src/components/auth` — LogoutButton
+- `src/components/admin` — AdminTable, AdminStatusBadge, ActiveToggleForm
+- `src/components/catalog` — ProductCard
 - `src/lib` — `prisma.ts` (client singleton), `constants.ts`, `utils.ts`
 - `src/lib/auth` — password hashing, DB-backed sessions, route guards
-- `src/lib/validation` — Zod schemas for auth forms
+- `src/lib/validation` — Zod schemas for auth and catalog forms
 - `src/middleware.ts` — coarse cookie-presence gate for protected routes
 - `src/types` — shared TypeScript types
 - `prisma/schema.prisma` — data model (SQLite now, PostgreSQL-ready later)
-- `prisma/seed.ts` — seed script (admin + one account per role)
+- `prisma/seed.ts` — seed script (accounts + sample catalog + demo stock)
 
 ## Authentication
 

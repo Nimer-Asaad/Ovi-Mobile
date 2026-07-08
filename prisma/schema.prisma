@@ -124,6 +124,7 @@ model Category {
   parent    Category?  @relation("CategoryTree", fields: [parentId], references: [id])
   children  Category[] @relation("CategoryTree")
   products  Product[]
+  isActive  Boolean    @default(true)
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
 
@@ -136,6 +137,7 @@ model Brand {
   slug      String    @unique
   logoUrl   String?
   products  Product[]
+  isActive  Boolean   @default(true)
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
@@ -149,7 +151,9 @@ model Supplier {
   phone       String?
   email       String?
   address     String?
+  notes       String?
   products    Product[]
+  isActive    Boolean   @default(true)
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
@@ -178,6 +182,7 @@ model Product {
   costCents          Int?
 
   isActive           Boolean  @default(true)
+  isFeatured         Boolean  @default(false)
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
