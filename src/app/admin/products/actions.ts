@@ -6,7 +6,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth/guards";
 import { ROLES } from "@/lib/constants";
-import { productSchema } from "@/lib/validation/catalog";
+import { productSchema, productImagesSchema } from "@/lib/validation/catalog";
 import type { z } from "zod";
 
 export interface ProductFormState {
@@ -15,6 +15,7 @@ export interface ProductFormState {
 }
 
 const DUPLICATE_SKU_MESSAGE = "رمز المنتج (SKU) مستخدم بالفعل";
+const DUPLICATE_IMAGE_MESSAGE = "لا يمكن استخدام نفس رابط الصورة أكثر من مرة";
 
 function parseProductForm(formData: FormData) {
   return productSchema.safeParse({
@@ -31,6 +32,16 @@ function parseProductForm(formData: FormData) {
   });
 }
 
+function parseImagesForm(formData: FormData) {
+  return productImagesSchema.safeParse({
+    mainImageUrl: formData.get("mainImageUrl")?.toString().trim() || undefined,
+    imageUrl2: formData.get("imageUrl2")?.toString().trim() || undefined,
+    imageUrl3: formData.get("imageUrl3")?.toString().trim() || undefined,
+    imageUrl4: formData.get("imageUrl4")?.toString().trim() || undefined,
+    imageUrl5: formData.get("imageUrl5")?.toString().trim() || undefined,
+  });
+}
+
 function fieldErrorsFrom(error: z.ZodError) {
   const fieldErrors: Record<string, string> = {};
   for (const issue of error.issues) {
@@ -40,6 +51,45 @@ function fieldErrorsFrom(error: z.ZodError) {
   return fieldErrors;
 }
 
+/** Ordered, de-duplicated list of non-empty image URLs from the 5 form
+ * fields (main first, then additional 1-4). Returns null if a URL repeats. */
+function collectImageUrls(images: {
+  mainImageUrl?: string;
+  imageUrl2?: string;
+  imageUrl3?: string;
+  imageUrl4?: string;
+  imageUrl5?: string;
+}): string[] | null {
+  const urls = [images.mainImageUrl, images.imageUrl2, images.imageUrl3, images.imageUrl4, images.imageUrl5].filter(
+    (url): url is string => typeof url === "string" && url.trim() !== "",
+  );
+
+  if (new Set(urls).size !== urls.length) {
+    return null;
+  }
+
+  return urls;
+}
+
+async function replaceProductImages(productId: string, urls: string[], productName: string): Promise<void> {
+  await prisma.$transaction([
+    prisma.productImage.deleteMany({ where: { productId } }),
+    ...(urls.length > 0
+      ? [
+          prisma.productImage.createMany({
+            data: urls.map((url, index) => ({
+              productId,
+              url,
+              altText: productName,
+              isMain: index === 0,
+              sortOrder: index,
+            })),
+          }),
+        ]
+      : []),
+  ]);
+}
+
 export async function createProduct(
   _prevState: ProductFormState,
   formData: FormData,
@@ -47,8 +97,18 @@ export async function createProduct(
   await requireRole([ROLES.ADMIN]);
 
   const parsed = parseProductForm(formData);
-  if (!parsed.success) {
-    return { fieldErrors: fieldErrorsFrom(parsed.error) };
+  const imagesParsed = parseImagesForm(formData);
+
+  if (!parsed.success || !imagesParsed.success) {
+    const fieldErrors: Record<string, string> = {};
+    if (!parsed.success) Object.assign(fieldErrors, fieldErrorsFrom(parsed.error));
+    if (!imagesParsed.success) Object.assign(fieldErrors, fieldErrorsFrom(imagesParsed.error));
+    return { fieldErrors };
+  }
+
+  const imageUrls = collectImageUrls(imagesParsed.data);
+  if (imageUrls === null) {
+    return { error: DUPLICATE_IMAGE_MESSAGE };
   }
 
   const existingSku = await prisma.product.findUnique({ where: { sku: parsed.data.sku } });
@@ -58,8 +118,9 @@ export async function createProduct(
 
   const isFeatured = formData.get("isFeatured") === "on";
 
+  let productId: string;
   try {
-    await prisma.product.create({
+    const product = await prisma.product.create({
       data: {
         name: parsed.data.name,
         nameAr: parsed.data.nameAr,
@@ -74,11 +135,16 @@ export async function createProduct(
         isFeatured,
       },
     });
+    productId = product.id;
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
       return { error: DUPLICATE_SKU_MESSAGE };
     }
     throw err;
+  }
+
+  if (imageUrls.length > 0) {
+    await replaceProductImages(productId, imageUrls, parsed.data.name);
   }
 
   revalidatePath("/admin/products");
@@ -95,8 +161,18 @@ export async function updateProduct(
   await requireRole([ROLES.ADMIN]);
 
   const parsed = parseProductForm(formData);
-  if (!parsed.success) {
-    return { fieldErrors: fieldErrorsFrom(parsed.error) };
+  const imagesParsed = parseImagesForm(formData);
+
+  if (!parsed.success || !imagesParsed.success) {
+    const fieldErrors: Record<string, string> = {};
+    if (!parsed.success) Object.assign(fieldErrors, fieldErrorsFrom(parsed.error));
+    if (!imagesParsed.success) Object.assign(fieldErrors, fieldErrorsFrom(imagesParsed.error));
+    return { fieldErrors };
+  }
+
+  const imageUrls = collectImageUrls(imagesParsed.data);
+  if (imageUrls === null) {
+    return { error: DUPLICATE_IMAGE_MESSAGE };
   }
 
   const existingSku = await prisma.product.findFirst({
@@ -131,6 +207,8 @@ export async function updateProduct(
     }
     throw err;
   }
+
+  await replaceProductImages(id, imageUrls, parsed.data.name);
 
   revalidatePath("/admin/products");
   revalidatePath("/admin");

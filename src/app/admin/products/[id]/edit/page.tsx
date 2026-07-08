@@ -12,7 +12,10 @@ export default async function EditProductPage({ params }: EditProductPageProps) 
 
   const product = await prisma.product.findUnique({
     where: { id },
-    include: { inventoryItems: { select: { quantity: true } } },
+    include: {
+      inventoryItems: { select: { quantity: true } },
+      images: { orderBy: [{ isMain: "desc" }, { sortOrder: "asc" }] },
+    },
   });
   if (!product) notFound();
 
@@ -33,6 +36,7 @@ export default async function EditProductPage({ params }: EditProductPageProps) 
         suppliers={suppliers}
         product={product}
         currentStock={currentStock}
+        images={product.images}
       />
     </div>
   );

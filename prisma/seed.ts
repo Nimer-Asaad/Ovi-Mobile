@@ -5,11 +5,21 @@ import { slugify } from "../src/lib/utils";
 
 const prisma = new PrismaClient();
 
+/** Branded placehold.co URL matching the app's navy/gold palette — stable,
+ * dependency-free, no API key. */
+function placeholderImage(label: string): string {
+  return `https://placehold.co/600x600/1e293b/c8a97e?text=${encodeURIComponent(label)}`;
+}
+
 /**
  * Phase 3 seed: Phase 2's accounts, plus a sample catalog (categories,
  * brands, suppliers, products) and demo on-hand stock so the admin product
  * list / low-stock dashboard aren't all zeros. This is seed/demo stock only
  * — no StockMovement rows, no inventory workflow (that's Phase 6).
+ *
+ * Phase 4 seed: adds ProductImage rows (branded placeholders) per product.
+ * Image seeding is idempotent — each run deletes and recreates a product's
+ * images rather than appending, so re-running db:seed never duplicates them.
  *
  * Planned seed additions (by phase):
  * - Phase 6 (inventory): opening stock movements, additional locations
@@ -184,6 +194,7 @@ async function main() {
       costCents: 14000,
       isFeatured: true,
       stock: 25,
+      images: [placeholderImage("Anker Q20"), placeholderImage("Anker Q20 2")],
     },
     {
       sku: "BS-GAN65",
@@ -195,8 +206,9 @@ async function main() {
       retailPriceCents: 18900,
       wholesalePriceCents: 13500,
       costCents: 9500,
-      isFeatured: false,
+      isFeatured: true,
       stock: 40,
+      images: [placeholderImage("Baseus GaN 65W"), placeholderImage("Baseus GaN 65W 2")],
     },
     {
       sku: "UG-CBL-1M",
@@ -210,6 +222,7 @@ async function main() {
       costCents: 2200,
       isFeatured: false,
       stock: 60,
+      images: [placeholderImage("Ugreen Cable 1m")],
     },
     {
       sku: "SP-RA-IP15",
@@ -223,6 +236,7 @@ async function main() {
       costCents: 4000,
       isFeatured: true,
       stock: 3,
+      images: [placeholderImage("Spigen Case iP15"), placeholderImage("Spigen Case iP15 2")],
     },
     {
       sku: "RX-SW01",
@@ -234,8 +248,9 @@ async function main() {
       retailPriceCents: 34900,
       wholesalePriceCents: 26500,
       costCents: 19000,
-      isFeatured: false,
+      isFeatured: true,
       stock: 12,
+      images: [placeholderImage("Remax Watch RW01"), placeholderImage("Remax Watch RW01 2")],
     },
     {
       sku: "AK-PC10K",
@@ -249,6 +264,7 @@ async function main() {
       costCents: 8000,
       isFeatured: false,
       stock: 4,
+      images: [placeholderImage("Anker PowerCore 10K")],
     },
     {
       sku: "BS-EB-W1",
@@ -262,6 +278,7 @@ async function main() {
       costCents: 6000,
       isFeatured: false,
       stock: 18,
+      images: [placeholderImage("Baseus Earbuds W1"), placeholderImage("Baseus Earbuds W1 2")],
     },
     {
       sku: "UG-HDMI-2M",
@@ -275,6 +292,7 @@ async function main() {
       costCents: 2800,
       isFeatured: false,
       stock: 30,
+      images: [placeholderImage("Ugreen HDMI 2m")],
     },
     {
       sku: "SP-GLASS-IP15",
@@ -288,6 +306,7 @@ async function main() {
       costCents: 1200,
       isFeatured: false,
       stock: 50,
+      images: [],
     },
     {
       sku: "RX-CBL-LT",
@@ -301,6 +320,7 @@ async function main() {
       costCents: 1800,
       isFeatured: false,
       stock: 22,
+      images: [placeholderImage("Remax Cable LT")],
     },
   ];
 
@@ -327,6 +347,21 @@ async function main() {
       update: { quantity: def.stock },
       create: { productId: product.id, locationId: mainWarehouse.id, quantity: def.stock },
     });
+
+    // Idempotent: delete-then-recreate rather than append, so re-running
+    // db:seed never duplicates images.
+    await prisma.productImage.deleteMany({ where: { productId: product.id } });
+    if (def.images.length > 0) {
+      await prisma.productImage.createMany({
+        data: def.images.map((url, index) => ({
+          productId: product.id,
+          url,
+          altText: def.name,
+          isMain: index === 0,
+          sortOrder: index,
+        })),
+      });
+    }
   }
 
   console.log("Seeded admin user:", admin.email);
@@ -335,7 +370,11 @@ async function main() {
   console.log("Seeded pending merchant:", pendingMerchant.email);
   console.log("Seeded sales rep:", salesRep.email);
   console.log("Seeded customer:", customer.email);
-  console.log(`Seeded ${categoryDefs.length} categories, ${brandDefs.length} brands, ${supplierDefs.length} suppliers, ${productDefs.length} products`);
+  const featuredCount = productDefs.filter((p) => p.isFeatured).length;
+  const imageCount = productDefs.reduce((sum, p) => sum + p.images.length, 0);
+  console.log(
+    `Seeded ${categoryDefs.length} categories, ${brandDefs.length} brands, ${supplierDefs.length} suppliers, ${productDefs.length} products (${featuredCount} featured, ${imageCount} images)`,
+  );
 }
 
 main()

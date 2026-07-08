@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
-import type { Brand, Category, Product, Supplier } from "@prisma/client";
+import type { Brand, Category, Product, ProductImage, Supplier } from "@prisma/client";
 import { createProduct, updateProduct, type ProductFormState } from "./actions";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
@@ -14,6 +14,7 @@ interface ProductFormProps {
   suppliers: Supplier[];
   product?: Product;
   currentStock?: number;
+  images?: ProductImage[];
 }
 
 const initialState: ProductFormState = {};
@@ -22,9 +23,19 @@ function centsToInput(cents: number | null | undefined): string {
   return cents === null || cents === undefined ? "" : (cents / 100).toFixed(2);
 }
 
-export function ProductForm({ categories, brands, suppliers, product, currentStock }: ProductFormProps) {
+export function ProductForm({
+  categories,
+  brands,
+  suppliers,
+  product,
+  currentStock,
+  images = [],
+}: ProductFormProps) {
   const action = product ? updateProduct.bind(null, product.id) : createProduct;
   const [state, formAction, isPending] = useActionState(action, initialState);
+
+  const sortedImages = [...images].sort((a, b) => (a.isMain === b.isMain ? a.sortOrder - b.sortOrder : a.isMain ? -1 : 1));
+  const [mainImage, image2, image3, image4, image5] = sortedImages;
 
   return (
     <form action={formAction} className="flex max-w-2xl flex-col gap-4">
@@ -138,6 +149,54 @@ export function ProductForm({ categories, brands, suppliers, product, currentSto
           المخزون القادمة، غير قابل للتعديل هنا.
         </p>
       )}
+
+      <div className="flex flex-col gap-4 rounded-card border border-navy-soft p-4">
+        <p className="text-sm font-medium text-neutral-bg/80">صور المنتج (اختياري)</p>
+
+        <Input
+          name="mainImageUrl"
+          type="url"
+          label="رابط الصورة الرئيسية"
+          placeholder="https://..."
+          defaultValue={mainImage?.url ?? ""}
+          error={state.fieldErrors?.mainImageUrl}
+        />
+
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <Input
+            name="imageUrl2"
+            type="url"
+            label="صورة إضافية 1"
+            placeholder="https://..."
+            defaultValue={image2?.url ?? ""}
+            error={state.fieldErrors?.imageUrl2}
+          />
+          <Input
+            name="imageUrl3"
+            type="url"
+            label="صورة إضافية 2"
+            placeholder="https://..."
+            defaultValue={image3?.url ?? ""}
+            error={state.fieldErrors?.imageUrl3}
+          />
+          <Input
+            name="imageUrl4"
+            type="url"
+            label="صورة إضافية 3"
+            placeholder="https://..."
+            defaultValue={image4?.url ?? ""}
+            error={state.fieldErrors?.imageUrl4}
+          />
+          <Input
+            name="imageUrl5"
+            type="url"
+            label="صورة إضافية 4"
+            placeholder="https://..."
+            defaultValue={image5?.url ?? ""}
+            error={state.fieldErrors?.imageUrl5}
+          />
+        </div>
+      </div>
 
       <label className="flex items-center gap-2 text-sm text-neutral-bg/80">
         <input

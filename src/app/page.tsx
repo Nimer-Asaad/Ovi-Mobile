@@ -4,13 +4,23 @@ import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
 import { Button } from "@/components/ui/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
+import { ProductCard } from "@/components/catalog/ProductCard";
+import { PUBLIC_PRODUCT_CARD_SELECT } from "@/lib/catalog-queries";
 
 export default async function HomePage() {
-  const categories = await prisma.category.findMany({
-    where: { isActive: true },
-    orderBy: { createdAt: "asc" },
-    take: 4,
-  });
+  const [categories, featuredProducts] = await Promise.all([
+    prisma.category.findMany({
+      where: { isActive: true },
+      orderBy: { createdAt: "asc" },
+      take: 4,
+    }),
+    prisma.product.findMany({
+      where: { isActive: true, isFeatured: true },
+      select: PUBLIC_PRODUCT_CARD_SELECT,
+      orderBy: { createdAt: "desc" },
+      take: 8,
+    }),
+  ]);
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -38,6 +48,22 @@ export default async function HomePage() {
             </Button>
           </div>
         </section>
+
+        {featuredProducts.length > 0 && (
+          <section className="mx-auto max-w-6xl px-4 pb-20">
+            <div className="mb-6 flex items-center justify-between">
+              <h2 className="text-xl font-semibold text-neutral-bg">منتجات مميزة</h2>
+              <Link href="/products" className="text-sm text-gold-champagne hover:underline">
+                عرض كل المنتجات
+              </Link>
+            </div>
+            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
+              {featuredProducts.map((product) => (
+                <ProductCard key={product.id} product={product} />
+              ))}
+            </div>
+          </section>
+        )}
 
         {categories.length > 0 && (
           <section className="mx-auto max-w-6xl px-4 pb-20">

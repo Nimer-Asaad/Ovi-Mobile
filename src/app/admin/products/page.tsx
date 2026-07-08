@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/Badge";
 import { AdminTable, AdminTableHead, AdminTableBody, AdminEmptyRow } from "@/components/admin/AdminTable";
 import { AdminStatusBadge } from "@/components/admin/AdminStatusBadge";
 import { ActiveToggleForm } from "@/components/admin/ActiveToggleForm";
+import { ProductImagePlaceholder } from "@/components/catalog/ProductImagePlaceholder";
 import { formatCurrencyFromCents } from "@/lib/utils";
 import { toggleProductActive } from "./actions";
 
@@ -15,6 +16,11 @@ export default async function AdminProductsPage() {
       category: true,
       brand: true,
       inventoryItems: { select: { quantity: true } },
+      images: {
+        select: { url: true, altText: true },
+        orderBy: [{ isMain: "desc" }, { sortOrder: "asc" }],
+        take: 1,
+      },
     },
   });
 
@@ -32,6 +38,7 @@ export default async function AdminProductsPage() {
 
       <AdminTable>
         <AdminTableHead>
+          <th className="px-4 py-3 text-start"></th>
           <th className="px-4 py-3 text-start">SKU</th>
           <th className="px-4 py-3 text-start">الاسم</th>
           <th className="px-4 py-3 text-start">القسم</th>
@@ -45,8 +52,23 @@ export default async function AdminProductsPage() {
         <AdminTableBody>
           {products.map((product) => {
             const stock = product.inventoryItems.reduce((sum, item) => sum + item.quantity, 0);
+            const thumbnail = product.images[0];
             return (
               <tr key={product.id}>
+                <td className="px-4 py-3">
+                  <div className="h-12 w-12 overflow-hidden rounded-card">
+                    {thumbnail ? (
+                      // eslint-disable-next-line @next/next/no-img-element -- arbitrary admin-entered external URLs
+                      <img
+                        src={thumbnail.url}
+                        alt={thumbnail.altText ?? product.name}
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <ProductImagePlaceholder className="h-full w-full" />
+                    )}
+                  </div>
+                </td>
                 <td className="px-4 py-3 text-neutral-bg/70">{product.sku}</td>
                 <td className="px-4 py-3 text-neutral-bg">
                   {product.name}
@@ -87,7 +109,7 @@ export default async function AdminProductsPage() {
               </tr>
             );
           })}
-          {products.length === 0 && <AdminEmptyRow colSpan={9} message="لا توجد منتجات حتى الآن" />}
+          {products.length === 0 && <AdminEmptyRow colSpan={10} message="لا توجد منتجات حتى الآن" />}
         </AdminTableBody>
       </AdminTable>
     </div>
