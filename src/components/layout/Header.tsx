@@ -19,9 +19,12 @@ export function Header() {
         </nav>
 
         <div className="flex items-center gap-3">
-          <span className="rounded-card border border-gold-champagne/40 px-3 py-1.5 text-xs text-gold-light">
+          <Link
+            href="/login"
+            className="rounded-card border border-gold-champagne/40 px-3 py-1.5 text-xs text-gold-light transition-colors hover:bg-gold-champagne/10"
+          >
             تسجيل الدخول
-          </span>
+          </Link>
         </div>
       </div>
     </header>

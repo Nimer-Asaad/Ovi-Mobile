@@ -1,15 +1,17 @@
 import { AdminSidebar } from "@/components/layout/AdminSidebar";
 import { AdminTopbar } from "@/components/layout/AdminTopbar";
+import { requireRole } from "@/lib/auth/guards";
+import { ROLES } from "@/lib/constants";
 
-/**
- * Admin dashboard shell skeleton. No route protection yet — role-based
- * access control lands in Phase 2 (Auth & RBAC).
- */
-export default function AdminLayout({
+/** Admin dashboard shell. Only ADMIN sessions may render anything under
+ * /admin — enforced here so every admin route inherits the guard. */
+export default async function AdminLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  await requireRole([ROLES.ADMIN]);
+
   return (
     <div className="flex min-h-screen bg-navy-deep">
       <AdminSidebar />

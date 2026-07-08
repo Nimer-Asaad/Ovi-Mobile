@@ -51,6 +51,7 @@ model User {
 
   ordersPlaced      Order[]         @relation("OrderCustomer")
   stockMovements    StockMovement[] @relation("StockMovementCreatedBy")
+  sessions          Session[]
 
   @@map("users")
 }
@@ -91,6 +92,23 @@ model SalesRepresentative {
   stockReturns      StockReturn[]
 
   @@map("sales_representatives")
+}
+
+// ---------------------------------------------------------------------------
+// Auth
+// ---------------------------------------------------------------------------
+
+/// Opaque, DB-backed session. The cookie holds only this row's id — nothing
+/// meaningful outside the database — so logout/revocation is a plain delete
+/// and there is no signing secret to manage.
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@map("sessions")
 }
 
 // ---------------------------------------------------------------------------
