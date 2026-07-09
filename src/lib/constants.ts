@@ -68,6 +68,16 @@ export const STOCK_RETURN_STATUSES = {
 
 export const DEFAULT_CURRENCY = "ILS" as const;
 
+export const PAYMENT_METHODS = {
+  CASH_ON_DELIVERY: "CASH_ON_DELIVERY",
+} as const;
+
+export const PAYMENT_STATUSES = {
+  PENDING: "PENDING",
+  PAID: "PAID",
+  FAILED: "FAILED",
+} as const;
+
 /** Active products with total on-hand quantity below this are "low stock"
  * on the admin dashboard. */
 export const LOW_STOCK_THRESHOLD = 5;

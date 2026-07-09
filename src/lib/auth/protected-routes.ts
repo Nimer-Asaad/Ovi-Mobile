@@ -4,7 +4,15 @@
  * DB-backed role/status checks live in each area's layout/page via
  * `src/lib/auth/guards.ts`, never in middleware.
  */
-export const PROTECTED_PATH_PREFIXES = ["/admin", "/merchant", "/rep", "/dashboard"] as const;
+export const PROTECTED_PATH_PREFIXES = [
+  "/admin",
+  "/merchant",
+  "/rep",
+  "/dashboard",
+  "/cart",
+  "/checkout",
+  "/orders",
+] as const;
 
 export function isProtectedPath(pathname: string): boolean {
   return PROTECTED_PATH_PREFIXES.some(

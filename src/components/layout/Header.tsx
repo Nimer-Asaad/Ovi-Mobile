@@ -1,8 +1,15 @@
 import Link from "next/link";
+import { getSession } from "@/lib/auth/session";
+import { getCartEligibility, getCartItemCount } from "@/lib/cart";
 
-/** Public site header. Skeleton only — navigation links are placeholders
- * until the catalog (Phase 3) and auth (Phase 2) phases land. */
-export function Header() {
+/** Public site header. Fetches the session itself (cheap: one cookie read +
+ * an indexed lookup) so it can show cart access only to eligible viewers. */
+export async function Header() {
+  const user = await getSession();
+  const cartEligibility = getCartEligibility(user);
+  const cartCount =
+    cartEligibility === "eligible" && user ? await getCartItemCount(user.id) : 0;
+
   return (
     <header className="border-b border-navy-soft bg-navy-deep">
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-4 px-4">
@@ -21,12 +28,48 @@ export function Header() {
         </nav>
 
         <div className="flex items-center gap-3">
-          <Link
-            href="/login"
-            className="rounded-card border border-gold-champagne/40 px-3 py-1.5 text-xs text-gold-light transition-colors hover:bg-gold-champagne/10"
-          >
-            تسجيل الدخول
-          </Link>
+          {cartEligibility === "eligible" && (
+            <Link
+              href="/cart"
+              className="relative flex items-center gap-1.5 rounded-card px-2 py-1.5 text-sm text-neutral-bg/80 transition-colors hover:text-gold-champagne"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.75"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="h-5 w-5"
+              >
+                <circle cx="9" cy="21" r="1" />
+                <circle cx="20" cy="21" r="1" />
+                <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6" />
+              </svg>
+              <span className="hidden sm:inline">السلة</span>
+              {cartCount > 0 && (
+                <span className="absolute -end-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-gold-champagne px-1 text-[10px] font-semibold text-navy-deep">
+                  {cartCount}
+                </span>
+              )}
+            </Link>
+          )}
+
+          {user ? (
+            <Link
+              href="/dashboard"
+              className="rounded-card border border-gold-champagne/40 px-3 py-1.5 text-xs text-gold-light transition-colors hover:bg-gold-champagne/10"
+            >
+              حسابي
+            </Link>
+          ) : (
+            <Link
+              href="/login"
+              className="rounded-card border border-gold-champagne/40 px-3 py-1.5 text-xs text-gold-light transition-colors hover:bg-gold-champagne/10"
+            >
+              تسجيل الدخول
+            </Link>
+          )}
         </div>
       </div>
     </header>

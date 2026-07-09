@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { Badge } from "@/components/ui/Badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
-import { LOW_STOCK_THRESHOLD } from "@/lib/constants";
+import { LOW_STOCK_THRESHOLD, ORDER_STATUSES } from "@/lib/constants";
 
 type BadgeVariant = "gold" | "success" | "warning" | "neutral";
 
@@ -18,15 +18,23 @@ async function getLowStockCount(): Promise<number> {
 }
 
 export default async function AdminDashboardPage() {
-  const [totalProducts, activeProducts, categoriesCount, brandsCount, suppliersCount, lowStockCount] =
-    await Promise.all([
-      prisma.product.count(),
-      prisma.product.count({ where: { isActive: true } }),
-      prisma.category.count(),
-      prisma.brand.count(),
-      prisma.supplier.count(),
-      getLowStockCount(),
-    ]);
+  const [
+    totalProducts,
+    activeProducts,
+    categoriesCount,
+    brandsCount,
+    suppliersCount,
+    lowStockCount,
+    pendingOrdersCount,
+  ] = await Promise.all([
+    prisma.product.count(),
+    prisma.product.count({ where: { isActive: true } }),
+    prisma.category.count(),
+    prisma.brand.count(),
+    prisma.supplier.count(),
+    getLowStockCount(),
+    prisma.order.count({ where: { status: ORDER_STATUSES.PENDING } }),
+  ]);
 
   const statCards: { label: string; value: number; badge: { text: string; variant: BadgeVariant } }[] = [
     { label: "إجمالي المنتجات", value: totalProducts, badge: { text: "مباشر", variant: "gold" } },
@@ -38,6 +46,12 @@ export default async function AdminDashboardPage() {
       label: "مخزون منخفض",
       value: lowStockCount,
       badge: lowStockCount > 0 ? { text: "تنبيه", variant: "warning" } : { text: "جيد", variant: "success" },
+    },
+    {
+      label: "طلبات قيد الانتظار",
+      value: pendingOrdersCount,
+      badge:
+        pendingOrdersCount > 0 ? { text: "تنبيه", variant: "warning" } : { text: "لا يوجد", variant: "neutral" },
     },
   ];
 
@@ -67,8 +81,8 @@ export default async function AdminDashboardPage() {
           <CardTitle>خارطة الطريق</CardTitle>
         </CardHeader>
         <CardContent>
-          الأساس، المصادقة، وإدارة الكتالوج (الأقسام، العلامات التجارية، الموردون، المنتجات) مكتملة الآن.
-          السلة، الطلبات، وإدارة المخزون ستُضاف في المراحل التالية.
+          الأساس، المصادقة، إدارة الكتالوج، وسلة التسوق الأساسية (بدون دفع إلكتروني) مكتملة الآن.
+          إدارة الطلبات من لوحة التحكم، الدفع الإلكتروني، والمخزون المتقدم ستُضاف في المراحل التالية.
         </CardContent>
       </Card>
     </div>

@@ -6,7 +6,9 @@ import { ProductCard } from "@/components/catalog/ProductCard";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { Button } from "@/components/ui/Button";
-import { PUBLIC_PRODUCT_CARD_SELECT } from "@/lib/catalog-queries";
+import { getSession } from "@/lib/auth/session";
+import { getCartEligibility } from "@/lib/cart";
+import { getPriceModeForUser, PUBLIC_PRODUCT_CARD_SELECT, MERCHANT_PRODUCT_CARD_SELECT } from "@/lib/catalog-queries";
 
 interface ProductsPageProps {
   searchParams: Promise<{ category?: string; brand?: string; q?: string; sort?: string }>;
@@ -19,12 +21,12 @@ const SORT_OPTIONS = [
   { value: "featured", label: "المميزة أولاً" },
 ] as const;
 
-function getOrderBy(sort: string | undefined): Prisma.ProductOrderByWithRelationInput[] {
+function getOrderBy(sort: string | undefined, priceField: "retailPriceCents" | "wholesalePriceCents"): Prisma.ProductOrderByWithRelationInput[] {
   switch (sort) {
     case "price-asc":
-      return [{ retailPriceCents: "asc" }];
+      return [{ [priceField]: "asc" }];
     case "price-desc":
-      return [{ retailPriceCents: "desc" }];
+      return [{ [priceField]: "desc" }];
     case "featured":
       return [{ isFeatured: "desc" }, { createdAt: "desc" }];
     default:
@@ -36,25 +38,37 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
   const { category: categorySlug, brand: brandSlug, q: query, sort } = await searchParams;
   const trimmedQuery = query?.trim();
 
+  const user = await getSession();
+  const priceMode = getPriceModeForUser(user);
+  const cartEligibility = getCartEligibility(user);
+
+  const where = {
+    isActive: true,
+    ...(categorySlug ? { category: { slug: categorySlug } } : {}),
+    ...(brandSlug ? { brand: { slug: brandSlug } } : {}),
+    ...(trimmedQuery
+      ? {
+          OR: [
+            { name: { contains: trimmedQuery } },
+            { nameAr: { contains: trimmedQuery } },
+            { sku: { contains: trimmedQuery } },
+          ],
+        }
+      : {}),
+  };
+
   const [products, activeCategory, categories, brands] = await Promise.all([
-    prisma.product.findMany({
-      where: {
-        isActive: true,
-        ...(categorySlug ? { category: { slug: categorySlug } } : {}),
-        ...(brandSlug ? { brand: { slug: brandSlug } } : {}),
-        ...(trimmedQuery
-          ? {
-              OR: [
-                { name: { contains: trimmedQuery } },
-                { nameAr: { contains: trimmedQuery } },
-                { sku: { contains: trimmedQuery } },
-              ],
-            }
-          : {}),
-      },
-      select: PUBLIC_PRODUCT_CARD_SELECT,
-      orderBy: getOrderBy(sort),
-    }),
+    priceMode === "wholesale"
+      ? prisma.product.findMany({
+          where,
+          select: MERCHANT_PRODUCT_CARD_SELECT,
+          orderBy: getOrderBy(sort, "wholesalePriceCents"),
+        })
+      : prisma.product.findMany({
+          where,
+          select: PUBLIC_PRODUCT_CARD_SELECT,
+          orderBy: getOrderBy(sort, "retailPriceCents"),
+        }),
     categorySlug ? prisma.category.findUnique({ where: { slug: categorySlug } }) : null,
     prisma.category.findMany({ where: { isActive: true }, orderBy: { name: "asc" } }),
     prisma.brand.findMany({ where: { isActive: true }, orderBy: { name: "asc" } }),
@@ -118,7 +132,7 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
           ) : (
             <div className="mt-8 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {products.map((product) => (
-                <ProductCard key={product.id} product={product} />
+                <ProductCard key={product.id} product={product} cartEligibility={cartEligibility} />
               ))}
             </div>
           )}

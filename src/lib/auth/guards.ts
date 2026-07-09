@@ -32,3 +32,24 @@ export async function requireApprovedMerchant(): Promise<SessionUser> {
   }
   return user;
 }
+
+/** Require a user allowed to use the cart/checkout: RETAIL_CUSTOMER or an
+ * APPROVED WHOLESALE_MERCHANT. Admin and sales rep are bounced to
+ * /dashboard; pending/rejected merchants go to /merchant/pending, same as
+ * requireApprovedMerchant(). */
+export async function requireCartEligibleUser(): Promise<SessionUser> {
+  const user = await requireUser();
+
+  if (user.role === ROLES.RETAIL_CUSTOMER) {
+    return user;
+  }
+
+  if (user.role === ROLES.WHOLESALE_MERCHANT) {
+    if (user.merchantStatus !== MERCHANT_STATUSES.APPROVED) {
+      redirect("/merchant/pending");
+    }
+    return user;
+  }
+
+  redirect("/dashboard");
+}

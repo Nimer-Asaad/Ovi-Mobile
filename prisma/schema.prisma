@@ -52,6 +52,7 @@ model User {
   ordersPlaced      Order[]         @relation("OrderCustomer")
   stockMovements    StockMovement[] @relation("StockMovementCreatedBy")
   sessions          Session[]
+  cart              Cart?
 
   @@map("users")
 }
@@ -192,8 +193,41 @@ model Product {
   stockRequestItems StockRequestItem[]
   stockReturnItems  StockReturnItem[]
   images          ProductImage[]
+  cartItems       CartItem[]
 
   @@map("products")
+}
+
+// ---------------------------------------------------------------------------
+// Cart
+// ---------------------------------------------------------------------------
+
+/// One cart per user. No price is stored here — display/checkout price is
+/// always computed live from Product.retailPriceCents/wholesalePriceCents
+/// based on the viewer's role at read time.
+model Cart {
+  id        String     @id @default(cuid())
+  userId    String     @unique
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items     CartItem[]
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  @@map("carts")
+}
+
+model CartItem {
+  id        String   @id @default(cuid())
+  cartId    String
+  cart      Cart     @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product  @relation(fields: [productId], references: [id])
+  quantity  Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([cartId, productId])
+  @@map("cart_items")
 }
 
 /// One product can have multiple images; at most one is marked `isMain`.
@@ -306,14 +340,25 @@ model Order {
   discountCents   Int      @default(0)
   totalCents      Int
 
+  contactName     String?
+  contactPhone    String?
+  city            String?
   shippingAddress String?
   notes           String?
+
+  /// PaymentMethod values: "CASH_ON_DELIVERY"
+  /// See src/lib/constants.ts -> PAYMENT_METHODS
+  paymentMethod   String   @default("CASH_ON_DELIVERY")
+  /// PaymentStatus values: "PENDING" | "PAID" | "FAILED"
+  /// See src/lib/constants.ts -> PAYMENT_STATUSES
+  paymentStatus   String   @default("PENDING")
 
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
   items OrderItem[]
 
+  @@index([customerId])
   @@map("orders")
 }
 

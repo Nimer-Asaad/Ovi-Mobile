@@ -3,11 +3,21 @@ import { prisma } from "@/lib/prisma";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
 import { Badge } from "@/components/ui/Badge";
-import { Button } from "@/components/ui/Button";
 import { ProductGallery } from "@/components/catalog/ProductGallery";
 import { ProductCard } from "@/components/catalog/ProductCard";
+import { AddToCartButton } from "@/components/cart/AddToCartButton";
 import { formatCurrencyFromCents } from "@/lib/utils";
-import { PUBLIC_PRODUCT_CARD_SELECT, PUBLIC_PRODUCT_DETAIL_SELECT } from "@/lib/catalog-queries";
+import { getSession } from "@/lib/auth/session";
+import { getCartEligibility } from "@/lib/cart";
+import {
+  getPriceModeForUser,
+  isWholesalePriced,
+  readCatalogPriceCents,
+  PUBLIC_PRODUCT_CARD_SELECT,
+  PUBLIC_PRODUCT_DETAIL_SELECT,
+  MERCHANT_PRODUCT_CARD_SELECT,
+  MERCHANT_PRODUCT_DETAIL_SELECT,
+} from "@/lib/catalog-queries";
 
 interface ProductDetailPageProps {
   params: Promise<{ sku: string }>;
@@ -16,22 +26,41 @@ interface ProductDetailPageProps {
 export default async function ProductDetailPage({ params }: ProductDetailPageProps) {
   const { sku } = await params;
 
-  const product = await prisma.product.findFirst({
-    where: { sku: sku.toUpperCase(), isActive: true },
-    select: PUBLIC_PRODUCT_DETAIL_SELECT,
-  });
+  const user = await getSession();
+  const priceMode = getPriceModeForUser(user);
+  const cartEligibility = getCartEligibility(user);
+
+  const product =
+    priceMode === "wholesale"
+      ? await prisma.product.findFirst({
+          where: { sku: sku.toUpperCase(), isActive: true },
+          select: MERCHANT_PRODUCT_DETAIL_SELECT,
+        })
+      : await prisma.product.findFirst({
+          where: { sku: sku.toUpperCase(), isActive: true },
+          select: PUBLIC_PRODUCT_DETAIL_SELECT,
+        });
 
   if (!product) notFound();
 
   const totalStock = product.inventoryItems.reduce((sum, item) => sum + item.quantity, 0);
+  const priceCents = readCatalogPriceCents(product);
+  const isWholesale = isWholesalePriced(product);
 
   const relatedProducts = product.categoryId
-    ? await prisma.product.findMany({
-        where: { isActive: true, categoryId: product.categoryId, id: { not: product.id } },
-        select: PUBLIC_PRODUCT_CARD_SELECT,
-        orderBy: { createdAt: "desc" },
-        take: 4,
-      })
+    ? priceMode === "wholesale"
+      ? await prisma.product.findMany({
+          where: { isActive: true, categoryId: product.categoryId, id: { not: product.id } },
+          select: MERCHANT_PRODUCT_CARD_SELECT,
+          orderBy: { createdAt: "desc" },
+          take: 4,
+        })
+      : await prisma.product.findMany({
+          where: { isActive: true, categoryId: product.categoryId, id: { not: product.id } },
+          select: PUBLIC_PRODUCT_CARD_SELECT,
+          orderBy: { createdAt: "desc" },
+          take: 4,
+        })
     : [];
 
   return (
@@ -54,9 +83,12 @@ export default async function ProductDetailPage({ params }: ProductDetailPagePro
                 )}
               </div>
 
-              <p className="text-3xl font-semibold text-gold-champagne">
-                {formatCurrencyFromCents(product.retailPriceCents)}
-              </p>
+              <div className="flex items-center gap-3">
+                <p className="text-3xl font-semibold text-gold-champagne">
+                  {formatCurrencyFromCents(priceCents)}
+                </p>
+                {isWholesale && <Badge variant="gold">سعر الجملة</Badge>}
+              </div>
 
               <Badge variant={totalStock > 0 ? "success" : "danger"} className="self-start">
                 {totalStock > 0 ? "متوفر" : "غير متوفر حالياً"}
@@ -68,9 +100,19 @@ export default async function ProductDetailPage({ params }: ProductDetailPagePro
                 </p>
               )}
 
-              <Button type="button" disabled className="mt-4 w-full sm:w-auto">
-                إضافة للسلة قريباً
-              </Button>
+              <div className="mt-4">
+                {cartEligibility === "guest" && (
+                  <a
+                    href="/login"
+                    className="inline-block rounded-card border border-gold-champagne/40 px-4 py-2 text-sm text-gold-light transition-colors hover:bg-gold-champagne/10"
+                  >
+                    سجّل الدخول للشراء
+                  </a>
+                )}
+                {cartEligibility === "eligible" && totalStock > 0 && (
+                  <AddToCartButton productId={product.id} maxQuantity={totalStock} showQuantityInput />
+                )}
+              </div>
             </div>
           </div>
 
@@ -79,7 +121,7 @@ export default async function ProductDetailPage({ params }: ProductDetailPagePro
               <h2 className="mb-6 text-xl font-semibold text-neutral-bg">منتجات ذات صلة</h2>
               <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
                 {relatedProducts.map((related) => (
-                  <ProductCard key={related.id} product={related} />
+                  <ProductCard key={related.id} product={related} cartEligibility={cartEligibility} />
                 ))}
               </div>
             </div>

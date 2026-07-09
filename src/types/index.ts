@@ -3,6 +3,8 @@ import type {
   MERCHANT_STATUSES,
   ORDER_SOURCES,
   ORDER_STATUSES,
+  PAYMENT_METHODS,
+  PAYMENT_STATUSES,
   ROLES,
   STOCK_LOCATION_TYPES,
   STOCK_MOVEMENT_TYPES,
@@ -21,6 +23,8 @@ export type OrderStatus = (typeof ORDER_STATUSES)[keyof typeof ORDER_STATUSES];
 export type OrderSource = (typeof ORDER_SOURCES)[keyof typeof ORDER_SOURCES];
 export type StockRequestStatus = (typeof STOCK_REQUEST_STATUSES)[keyof typeof STOCK_REQUEST_STATUSES];
 export type StockReturnStatus = (typeof STOCK_RETURN_STATUSES)[keyof typeof STOCK_RETURN_STATUSES];
+export type PaymentMethod = (typeof PAYMENT_METHODS)[keyof typeof PAYMENT_METHODS];
+export type PaymentStatus = (typeof PAYMENT_STATUSES)[keyof typeof PAYMENT_STATUSES];
 
 export type AdminNavItem = (typeof ADMIN_NAV_ITEMS)[number];
 

@@ -1,25 +1,38 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
+import { getSession } from "@/lib/auth/session";
+import { getCartEligibility } from "@/lib/cart";
+import { getPriceModeForUser, PUBLIC_PRODUCT_CARD_SELECT, MERCHANT_PRODUCT_CARD_SELECT } from "@/lib/catalog-queries";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
 import { Button } from "@/components/ui/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { ProductCard } from "@/components/catalog/ProductCard";
-import { PUBLIC_PRODUCT_CARD_SELECT } from "@/lib/catalog-queries";
 
 export default async function HomePage() {
+  const user = await getSession();
+  const priceMode = getPriceModeForUser(user);
+  const cartEligibility = getCartEligibility(user);
+
   const [categories, featuredProducts] = await Promise.all([
     prisma.category.findMany({
       where: { isActive: true },
       orderBy: { createdAt: "asc" },
       take: 4,
     }),
-    prisma.product.findMany({
-      where: { isActive: true, isFeatured: true },
-      select: PUBLIC_PRODUCT_CARD_SELECT,
-      orderBy: { createdAt: "desc" },
-      take: 8,
-    }),
+    priceMode === "wholesale"
+      ? prisma.product.findMany({
+          where: { isActive: true, isFeatured: true },
+          select: MERCHANT_PRODUCT_CARD_SELECT,
+          orderBy: { createdAt: "desc" },
+          take: 8,
+        })
+      : prisma.product.findMany({
+          where: { isActive: true, isFeatured: true },
+          select: PUBLIC_PRODUCT_CARD_SELECT,
+          orderBy: { createdAt: "desc" },
+          take: 8,
+        }),
   ]);
 
   return (
@@ -59,7 +72,7 @@ export default async function HomePage() {
             </div>
             <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
               {featuredProducts.map((product) => (
-                <ProductCard key={product.id} product={product} />
+                <ProductCard key={product.id} product={product} cartEligibility={cartEligibility} />
               ))}
             </div>
           </section>
