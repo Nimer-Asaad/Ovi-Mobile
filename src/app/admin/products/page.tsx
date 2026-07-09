@@ -15,7 +15,8 @@ export default async function AdminProductsPage() {
     include: {
       category: true,
       brand: true,
-      inventoryItems: { select: { quantity: true } },
+      // Main Warehouse stock only — rep-assigned stock is tracked separately under /admin/reps.
+      inventoryItems: { where: { location: { isDefault: true } }, select: { quantity: true } },
       images: {
         select: { url: true, altText: true },
         orderBy: [{ isMain: "desc" }, { sortOrder: "asc" }],

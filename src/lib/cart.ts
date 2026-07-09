@@ -25,7 +25,9 @@ export const STOCK_CHECK_PRODUCT_SELECT = {
   id: true,
   name: true,
   isActive: true,
-  inventoryItems: { select: { quantity: true } },
+  /* Only Main Warehouse stock counts toward cart/checkout availability —
+   * stock assigned to a sales rep isn't purchasable through the cart. */
+  inventoryItems: { where: { location: { isDefault: true } }, select: { quantity: true } },
 } satisfies Prisma.ProductSelect;
 
 export type StockCheckProduct = Prisma.ProductGetPayload<{ select: typeof STOCK_CHECK_PRODUCT_SELECT }>;
@@ -46,7 +48,9 @@ const CART_PRODUCT_RETAIL_SELECT = {
     orderBy: [{ isMain: "desc" }, { sortOrder: "asc" }],
     take: 1,
   },
-  inventoryItems: { select: { quantity: true } },
+  /* Only Main Warehouse stock counts toward cart/checkout availability —
+   * stock assigned to a sales rep isn't purchasable through the cart. */
+  inventoryItems: { where: { location: { isDefault: true } }, select: { quantity: true } },
 } satisfies Prisma.ProductSelect;
 
 const CART_PRODUCT_WHOLESALE_SELECT = {
@@ -61,7 +65,9 @@ const CART_PRODUCT_WHOLESALE_SELECT = {
     orderBy: [{ isMain: "desc" }, { sortOrder: "asc" }],
     take: 1,
   },
-  inventoryItems: { select: { quantity: true } },
+  /* Only Main Warehouse stock counts toward cart/checkout availability —
+   * stock assigned to a sales rep isn't purchasable through the cart. */
+  inventoryItems: { where: { location: { isDefault: true } }, select: { quantity: true } },
 } satisfies Prisma.ProductSelect;
 
 export type CartProductRetail = Prisma.ProductGetPayload<{ select: typeof CART_PRODUCT_RETAIL_SELECT }>;

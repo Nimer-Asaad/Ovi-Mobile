@@ -13,7 +13,8 @@ export default async function EditProductPage({ params }: EditProductPageProps) 
   const product = await prisma.product.findUnique({
     where: { id },
     include: {
-      inventoryItems: { select: { quantity: true } },
+      // Main Warehouse stock only — rep-assigned stock is tracked separately under /admin/reps.
+      inventoryItems: { where: { location: { isDefault: true } }, select: { quantity: true } },
       images: { orderBy: [{ isMain: "desc" }, { sortOrder: "asc" }] },
     },
   });

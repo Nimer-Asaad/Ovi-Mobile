@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { formatCurrencyFromCents } from "@/lib/utils";
 import { LOW_STOCK_THRESHOLD, ORDER_STATUSES } from "@/lib/constants";
 import { getInventoryDashboardStats } from "@/lib/inventory";
+import { getRepFleetStats } from "@/lib/reps";
 
 type BadgeVariant = "gold" | "success" | "warning" | "neutral";
 
@@ -16,7 +17,7 @@ interface StatCard {
 async function getLowStockCount(): Promise<number> {
   const activeProducts = await prisma.product.findMany({
     where: { isActive: true },
-    select: { inventoryItems: { select: { quantity: true } } },
+    select: { inventoryItems: { where: { location: { isDefault: true } }, select: { quantity: true } } },
   });
 
   return activeProducts.filter(
@@ -44,6 +45,7 @@ export default async function AdminDashboardPage() {
     inactiveOrders,
     deliveredSales,
     inventoryStats,
+    repFleetStats,
   ] = await Promise.all([
     prisma.product.count(),
     prisma.product.count({ where: { isActive: true } }),
@@ -59,6 +61,7 @@ export default async function AdminDashboardPage() {
     prisma.order.count({ where: { status: { in: [ORDER_STATUSES.CANCELLED, ORDER_STATUSES.RETURNED] } } }),
     prisma.order.aggregate({ where: { status: ORDER_STATUSES.DELIVERED }, _sum: { totalCents: true } }),
     getInventoryDashboardStats(),
+    getRepFleetStats(),
   ]);
 
   const catalogStats: StatCard[] = [
@@ -98,6 +101,20 @@ export default async function AdminDashboardPage() {
         ? new Date(inventoryStats.latestMovementAt).toLocaleDateString("ar")
         : "لا يوجد",
       badge: { text: "مباشر", variant: "neutral" },
+    },
+  ];
+
+  const repStats: StatCard[] = [
+    { label: "إجمالي المندوبين", value: String(repFleetStats.totalReps), badge: { text: "مباشر", variant: "gold" } },
+    {
+      label: "مندوبون لديهم مخزون",
+      value: String(repFleetStats.repsWithStock),
+      badge: { text: "مباشر", variant: "neutral" },
+    },
+    {
+      label: "إجمالي الوحدات المخصصة للمندوبين",
+      value: String(repFleetStats.totalUnitsAssigned),
+      badge: { text: "مباشر", variant: "gold" },
     },
   ];
 
@@ -166,6 +183,24 @@ export default async function AdminDashboardPage() {
         <p className="mt-1 text-sm text-neutral-bg/60">إحصائيات مباشرة من طلبات العملاء والتجار.</p>
         <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {orderStats.map((stat) => (
+            <Card key={stat.label}>
+              <CardHeader>
+                <CardTitle>{stat.label}</CardTitle>
+                <Badge variant={stat.badge.variant}>{stat.badge.text}</Badge>
+              </CardHeader>
+              <CardContent>
+                <span className="text-2xl font-semibold text-neutral-bg">{stat.value}</span>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <h2 className="text-xl font-semibold text-neutral-bg">نظرة عامة على المندوبين</h2>
+        <p className="mt-1 text-sm text-neutral-bg/60">إحصائيات مباشرة من مخزون المندوبين.</p>
+        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {repStats.map((stat) => (
             <Card key={stat.label}>
               <CardHeader>
                 <CardTitle>{stat.label}</CardTitle>

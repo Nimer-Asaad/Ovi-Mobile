@@ -108,7 +108,7 @@ export const ADMIN_NAV_ITEMS = [
   { label: "Inventory", labelAr: "المخزون", href: "/admin/inventory" },
   { label: "Orders", labelAr: "الطلبات", href: "/admin/orders" },
   { label: "Merchants", labelAr: "التجار", href: "/admin/merchants" },
-  { label: "Sales Reps", labelAr: "المندوبون", href: "/admin/sales-reps" },
+  { label: "Sales Reps", labelAr: "المندوبون", href: "/admin/reps" },
   { label: "Finance", labelAr: "المالية", href: "/admin/finance" },
   { label: "Users", labelAr: "المستخدمون", href: "/admin/users" },
 ] as const;

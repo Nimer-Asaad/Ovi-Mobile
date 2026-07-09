@@ -35,7 +35,7 @@ export async function getInventoryDashboardStats(): Promise<InventoryDashboardSt
   const [activeProducts, latestMovement] = await Promise.all([
     prisma.product.findMany({
       where: { isActive: true },
-      select: { inventoryItems: { select: { quantity: true } } },
+      select: { inventoryItems: { where: { location: { isDefault: true } }, select: { quantity: true } } },
     }),
     prisma.stockMovement.findFirst({ orderBy: { createdAt: "desc" }, select: { createdAt: true } }),
   ]);

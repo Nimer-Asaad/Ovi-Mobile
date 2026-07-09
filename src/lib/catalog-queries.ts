@@ -66,7 +66,9 @@ export const PUBLIC_PRODUCT_DETAIL_SELECT = {
     select: { url: true, altText: true, isMain: true, sortOrder: true },
     orderBy: [{ isMain: "desc" }, { sortOrder: "asc" }],
   },
-  inventoryItems: { select: { quantity: true } },
+  /* Only Main Warehouse stock is shown/purchasable here — rep-assigned
+   * stock is tracked separately and isn't part of public availability. */
+  inventoryItems: { where: { location: { isDefault: true } }, select: { quantity: true } },
 } satisfies Prisma.ProductSelect;
 
 export type PublicProductDetail = Prisma.ProductGetPayload<{ select: typeof PUBLIC_PRODUCT_DETAIL_SELECT }>;
@@ -87,7 +89,9 @@ export const MERCHANT_PRODUCT_DETAIL_SELECT = {
     select: { url: true, altText: true, isMain: true, sortOrder: true },
     orderBy: [{ isMain: "desc" }, { sortOrder: "asc" }],
   },
-  inventoryItems: { select: { quantity: true } },
+  /* Only Main Warehouse stock is shown/purchasable here — rep-assigned
+   * stock is tracked separately and isn't part of public availability. */
+  inventoryItems: { where: { location: { isDefault: true } }, select: { quantity: true } },
 } satisfies Prisma.ProductSelect;
 
 export type MerchantProductDetail = Prisma.ProductGetPayload<{ select: typeof MERCHANT_PRODUCT_DETAIL_SELECT }>;
