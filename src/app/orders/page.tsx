@@ -6,16 +6,8 @@ import { Footer } from "@/components/layout/Footer";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { formatCurrencyFromCents } from "@/lib/utils";
-
-const ORDER_STATUS_LABELS: Record<string, string> = {
-  PENDING: "قيد الانتظار",
-  CONFIRMED: "مؤكد",
-  PROCESSING: "قيد التجهيز",
-  SHIPPED: "تم الشحن",
-  DELIVERED: "تم التوصيل",
-  CANCELLED: "ملغي",
-  RETURNED: "مرتجع",
-};
+import { getOrderStatusLabel, getOrderStatusBadgeVariant } from "@/lib/order-labels";
+import { ORDER_SOURCES } from "@/lib/constants";
 
 export default async function OrdersPage() {
   const user = await requireUser();
@@ -60,7 +52,7 @@ export default async function OrdersPage() {
                     <CardTitle>{order.orderNumber}</CardTitle>
                     <p className="mt-1 text-xs text-neutral-bg/50">
                       {new Date(order.createdAt).toLocaleDateString("ar")} — {order._count.items} منتج
-                      {order.source === "WHOLESALE" && (
+                      {order.source === ORDER_SOURCES.WHOLESALE && (
                         <>
                           {" "}
                           <Badge variant="gold" className="ms-1">
@@ -70,8 +62,8 @@ export default async function OrdersPage() {
                       )}
                     </p>
                   </div>
-                  <Badge variant={order.status === "PENDING" ? "warning" : "neutral"}>
-                    {ORDER_STATUS_LABELS[order.status] ?? order.status}
+                  <Badge variant={getOrderStatusBadgeVariant(order.status)}>
+                    {getOrderStatusLabel(order.status)}
                   </Badge>
                 </CardHeader>
                 <CardContent>

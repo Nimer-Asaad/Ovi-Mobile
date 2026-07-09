@@ -1,27 +1,20 @@
 import { notFound } from "next/navigation";
-import { requireUser } from "@/lib/auth/guards";
 import { prisma } from "@/lib/prisma";
-import { Header } from "@/components/layout/Header";
-import { Footer } from "@/components/layout/Footer";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { ProductImagePlaceholder } from "@/components/catalog/ProductImagePlaceholder";
 import { formatCurrencyFromCents } from "@/lib/utils";
-import {
-  getOrderStatusLabel,
-  getOrderStatusBadgeVariant,
-  getPaymentMethodLabel,
-  getPaymentStatusLabel,
-} from "@/lib/order-labels";
 import { ORDER_SOURCES } from "@/lib/constants";
+import { getOrderStatusLabel, getOrderStatusBadgeVariant, getOrderSourceLabel } from "@/lib/order-labels";
+import { OrderStatusForm } from "../OrderStatusForm";
+import { PaymentStatusForm } from "../PaymentStatusForm";
 
-interface OrderDetailPageProps {
+interface AdminOrderDetailPageProps {
   params: Promise<{ orderNumber: string }>;
 }
 
-export default async function OrderDetailPage({ params }: OrderDetailPageProps) {
+export default async function AdminOrderDetailPage({ params }: AdminOrderDetailPageProps) {
   const { orderNumber } = await params;
-  const user = await requireUser();
 
   const order = await prisma.order.findUnique({
     where: { orderNumber },
@@ -29,7 +22,6 @@ export default async function OrderDetailPage({ params }: OrderDetailPageProps) 
       orderNumber: true,
       status: true,
       source: true,
-      customerId: true,
       subtotalCents: true,
       discountCents: true,
       totalCents: true,
@@ -41,6 +33,9 @@ export default async function OrderDetailPage({ params }: OrderDetailPageProps) 
       paymentMethod: true,
       paymentStatus: true,
       createdAt: true,
+      updatedAt: true,
+      customer: { select: { name: true, email: true } },
+      merchant: { select: { businessName: true, taxId: true, status: true } },
       items: {
         select: {
           id: true,
@@ -64,28 +59,27 @@ export default async function OrderDetailPage({ params }: OrderDetailPageProps) 
     },
   });
 
-  if (!order || order.customerId !== user.id) {
+  if (!order) {
     notFound();
   }
 
   const isWholesaleOrder = order.source === ORDER_SOURCES.WHOLESALE;
 
   return (
-    <div className="flex min-h-screen flex-col">
-      <Header />
-      <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 px-4 py-10">
+    <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold text-neutral-bg">طلب {order.orderNumber}</h1>
+          <h2 className="text-xl font-semibold text-neutral-bg">طلب {order.orderNumber}</h2>
           <p className="mt-1 text-sm text-neutral-bg/60">
-            {new Date(order.createdAt).toLocaleDateString("ar")}
+            أُنشئ في {new Date(order.createdAt).toLocaleDateString("ar")}
+            {order.updatedAt.getTime() !== order.createdAt.getTime() && (
+              <> — آخر تحديث {new Date(order.updatedAt).toLocaleDateString("ar")}</>
+            )}
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {isWholesaleOrder && <Badge variant="gold">جملة</Badge>}
-          <Badge variant={getOrderStatusBadgeVariant(order.status)}>
-            {getOrderStatusLabel(order.status)}
-          </Badge>
+          <Badge variant={isWholesaleOrder ? "gold" : "neutral"}>{getOrderSourceLabel(order.source)}</Badge>
+          <Badge variant={getOrderStatusBadgeVariant(order.status)}>{getOrderStatusLabel(order.status)}</Badge>
         </div>
       </div>
 
@@ -148,47 +142,83 @@ export default async function OrderDetailPage({ params }: OrderDetailPageProps) 
         </CardContent>
       </Card>
 
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle>معلومات العميل</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <dl className="grid grid-cols-1 gap-2 text-sm">
+              <div>
+                <dt className="text-neutral-bg/50">اسم الحساب</dt>
+                <dd className="text-neutral-bg">{order.customer?.name ?? "—"}</dd>
+              </div>
+              <div>
+                <dt className="text-neutral-bg/50">البريد الإلكتروني</dt>
+                <dd className="text-neutral-bg">{order.customer?.email ?? "—"}</dd>
+              </div>
+              {isWholesaleOrder && order.merchant && (
+                <>
+                  <div>
+                    <dt className="text-neutral-bg/50">اسم النشاط التجاري</dt>
+                    <dd className="text-neutral-bg">{order.merchant.businessName}</dd>
+                  </div>
+                  {order.merchant.taxId && (
+                    <div>
+                      <dt className="text-neutral-bg/50">الرقم الضريبي</dt>
+                      <dd className="text-neutral-bg">{order.merchant.taxId}</dd>
+                    </div>
+                  )}
+                </>
+              )}
+            </dl>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>بيانات التوصيل</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <dl className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
+              <div>
+                <dt className="text-neutral-bg/50">الاسم</dt>
+                <dd className="text-neutral-bg">{order.contactName ?? "—"}</dd>
+              </div>
+              <div>
+                <dt className="text-neutral-bg/50">الهاتف</dt>
+                <dd className="text-neutral-bg">{order.contactPhone ?? "—"}</dd>
+              </div>
+              <div>
+                <dt className="text-neutral-bg/50">المدينة / المنطقة</dt>
+                <dd className="text-neutral-bg">{order.city ?? "—"}</dd>
+              </div>
+              <div>
+                <dt className="text-neutral-bg/50">العنوان</dt>
+                <dd className="text-neutral-bg">{order.shippingAddress ?? "—"}</dd>
+              </div>
+              {order.notes && (
+                <div className="sm:col-span-2">
+                  <dt className="text-neutral-bg/50">ملاحظات</dt>
+                  <dd className="text-neutral-bg">{order.notes}</dd>
+                </div>
+              )}
+            </dl>
+          </CardContent>
+        </Card>
+      </div>
+
       <Card>
         <CardHeader>
-          <CardTitle>بيانات التوصيل والدفع</CardTitle>
+          <CardTitle>إدارة الحالة</CardTitle>
         </CardHeader>
         <CardContent>
-          <dl className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
-            <div>
-              <dt className="text-neutral-bg/50">الاسم</dt>
-              <dd className="text-neutral-bg">{order.contactName ?? "—"}</dd>
-            </div>
-            <div>
-              <dt className="text-neutral-bg/50">الهاتف</dt>
-              <dd className="text-neutral-bg">{order.contactPhone ?? "—"}</dd>
-            </div>
-            <div>
-              <dt className="text-neutral-bg/50">المدينة / المنطقة</dt>
-              <dd className="text-neutral-bg">{order.city ?? "—"}</dd>
-            </div>
-            <div>
-              <dt className="text-neutral-bg/50">العنوان</dt>
-              <dd className="text-neutral-bg">{order.shippingAddress ?? "—"}</dd>
-            </div>
-            {order.notes && (
-              <div className="sm:col-span-2">
-                <dt className="text-neutral-bg/50">ملاحظات</dt>
-                <dd className="text-neutral-bg">{order.notes}</dd>
-              </div>
-            )}
-            <div>
-              <dt className="text-neutral-bg/50">طريقة الدفع</dt>
-              <dd className="text-neutral-bg">{getPaymentMethodLabel(order.paymentMethod)}</dd>
-            </div>
-            <div>
-              <dt className="text-neutral-bg/50">حالة الدفع</dt>
-              <dd className="text-neutral-bg">{getPaymentStatusLabel(order.paymentStatus)}</dd>
-            </div>
-          </dl>
+          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+            <OrderStatusForm orderNumber={order.orderNumber} currentStatus={order.status} />
+            <PaymentStatusForm orderNumber={order.orderNumber} currentStatus={order.paymentStatus} />
+          </div>
         </CardContent>
       </Card>
-      </main>
-      <Footer />
     </div>
   );
 }

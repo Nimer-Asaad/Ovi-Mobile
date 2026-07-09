@@ -39,8 +39,8 @@ export const STOCK_MOVEMENT_TYPES = {
 export const ORDER_STATUSES = {
   PENDING: "PENDING",
   CONFIRMED: "CONFIRMED",
-  PROCESSING: "PROCESSING",
-  SHIPPED: "SHIPPED",
+  PREPARING: "PREPARING",
+  OUT_FOR_DELIVERY: "OUT_FOR_DELIVERY",
   DELIVERED: "DELIVERED",
   CANCELLED: "CANCELLED",
   RETURNED: "RETURNED",
@@ -76,6 +76,7 @@ export const PAYMENT_STATUSES = {
   PENDING: "PENDING",
   PAID: "PAID",
   FAILED: "FAILED",
+  REFUNDED: "REFUNDED",
 } as const;
 
 /** Active products with total on-hand quantity below this are "low stock"
