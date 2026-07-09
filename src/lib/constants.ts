@@ -34,6 +34,21 @@ export const STOCK_MOVEMENT_TYPES = {
   ADJUSTMENT: "ADJUSTMENT",
   REP_ASSIGNMENT: "REP_ASSIGNMENT",
   REP_RETURN: "REP_RETURN",
+  STOCK_IN: "STOCK_IN",
+  STOCK_OUT: "STOCK_OUT",
+  ORDER_RESERVED: "ORDER_RESERVED",
+  ORDER_RELEASED: "ORDER_RELEASED",
+  ORDER_FULFILLED: "ORDER_FULFILLED",
+  RETURNED: "RETURNED",
+} as const;
+
+/** Subset of STOCK_MOVEMENT_TYPES usable from the Phase 7 manual adjustment
+ * form. Other movement types exist as constants for future phases (order
+ * stock fulfillment, sales rep stock, etc.) but are not created anywhere yet. */
+export const MANUAL_STOCK_MOVEMENT_TYPES = {
+  STOCK_IN: "STOCK_IN",
+  STOCK_OUT: "STOCK_OUT",
+  ADJUSTMENT: "ADJUSTMENT",
 } as const;
 
 export const ORDER_STATUSES = {

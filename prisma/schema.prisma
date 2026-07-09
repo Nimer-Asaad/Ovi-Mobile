@@ -303,6 +303,8 @@ model StockMovement {
   toLocationId   String?
   toLocation     StockLocation? @relation("MovementToLocation", fields: [toLocationId], references: [id])
   quantity       Int
+  previousQuantity Int?
+  newQuantity      Int?
   note           String?
   createdById    String?
   createdBy      User?     @relation("StockMovementCreatedBy", fields: [createdById], references: [id])

@@ -3,6 +3,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { formatCurrencyFromCents } from "@/lib/utils";
 import { LOW_STOCK_THRESHOLD, ORDER_STATUSES } from "@/lib/constants";
+import { getInventoryDashboardStats } from "@/lib/inventory";
 
 type BadgeVariant = "gold" | "success" | "warning" | "neutral";
 
@@ -42,6 +43,7 @@ export default async function AdminDashboardPage() {
     deliveredOrders,
     inactiveOrders,
     deliveredSales,
+    inventoryStats,
   ] = await Promise.all([
     prisma.product.count(),
     prisma.product.count({ where: { isActive: true } }),
@@ -56,6 +58,7 @@ export default async function AdminDashboardPage() {
     prisma.order.count({ where: { status: ORDER_STATUSES.DELIVERED } }),
     prisma.order.count({ where: { status: { in: [ORDER_STATUSES.CANCELLED, ORDER_STATUSES.RETURNED] } } }),
     prisma.order.aggregate({ where: { status: ORDER_STATUSES.DELIVERED }, _sum: { totalCents: true } }),
+    getInventoryDashboardStats(),
   ]);
 
   const catalogStats: StatCard[] = [
@@ -68,6 +71,33 @@ export default async function AdminDashboardPage() {
       label: "مخزون منخفض",
       value: String(lowStockCount),
       badge: lowStockCount > 0 ? { text: "تنبيه", variant: "warning" } : { text: "جيد", variant: "success" },
+    },
+  ];
+
+  const inventoryOverviewStats: StatCard[] = [
+    { label: "إجمالي وحدات المخزون", value: String(inventoryStats.totalStockUnits), badge: { text: "مباشر", variant: "gold" } },
+    {
+      label: "منتجات بمخزون منخفض",
+      value: String(inventoryStats.lowStockProducts),
+      badge:
+        inventoryStats.lowStockProducts > 0
+          ? { text: "تنبيه", variant: "warning" }
+          : { text: "جيد", variant: "success" },
+    },
+    {
+      label: "منتجات نفدت من المخزون",
+      value: String(inventoryStats.outOfStockProducts),
+      badge:
+        inventoryStats.outOfStockProducts > 0
+          ? { text: "تنبيه", variant: "warning" }
+          : { text: "جيد", variant: "success" },
+    },
+    {
+      label: "آخر حركة مخزون",
+      value: inventoryStats.latestMovementAt
+        ? new Date(inventoryStats.latestMovementAt).toLocaleDateString("ar")
+        : "لا يوجد",
+      badge: { text: "مباشر", variant: "neutral" },
     },
   ];
 
@@ -100,6 +130,24 @@ export default async function AdminDashboardPage() {
         <p className="mt-1 text-sm text-neutral-bg/60">إحصائيات مباشرة من كتالوج المنتجات.</p>
         <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {catalogStats.map((stat) => (
+            <Card key={stat.label}>
+              <CardHeader>
+                <CardTitle>{stat.label}</CardTitle>
+                <Badge variant={stat.badge.variant}>{stat.badge.text}</Badge>
+              </CardHeader>
+              <CardContent>
+                <span className="text-2xl font-semibold text-neutral-bg">{stat.value}</span>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <h2 className="text-xl font-semibold text-neutral-bg">نظرة عامة على المخزون</h2>
+        <p className="mt-1 text-sm text-neutral-bg/60">إحصائيات مباشرة من مخزون المستودع الرئيسي.</p>
+        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {inventoryOverviewStats.map((stat) => (
             <Card key={stat.label}>
               <CardHeader>
                 <CardTitle>{stat.label}</CardTitle>
