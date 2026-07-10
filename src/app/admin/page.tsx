@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
-import { Badge } from "@/components/ui/Badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
+import { StatCard } from "@/components/ui/StatCard";
 import { formatCurrencyFromCents } from "@/lib/utils";
 import { LOW_STOCK_THRESHOLD, ORDER_STATUSES, ORDER_SOURCES, MERCHANT_STATUSES } from "@/lib/constants";
 import { getInventoryDashboardStats } from "@/lib/inventory";
@@ -8,7 +8,7 @@ import { getRepFleetStats } from "@/lib/reps";
 
 type BadgeVariant = "gold" | "success" | "warning" | "neutral";
 
-interface StatCard {
+interface DashboardStat {
   label: string;
   value: string;
   badge: { text: string; variant: BadgeVariant };
@@ -87,7 +87,7 @@ export default async function AdminDashboardPage() {
     prisma.order.aggregate({ where: { source: ORDER_SOURCES.WHOLESALE }, _sum: { totalCents: true } }),
   ]);
 
-  const catalogStats: StatCard[] = [
+  const catalogStats: DashboardStat[] = [
     { label: "إجمالي المنتجات", value: String(totalProducts), badge: { text: "مباشر", variant: "gold" } },
     { label: "المنتجات المفعّلة", value: String(activeProducts), badge: { text: "مباشر", variant: "success" } },
     { label: "الأقسام", value: String(categoriesCount), badge: { text: "مباشر", variant: "neutral" } },
@@ -100,7 +100,7 @@ export default async function AdminDashboardPage() {
     },
   ];
 
-  const inventoryOverviewStats: StatCard[] = [
+  const inventoryOverviewStats: DashboardStat[] = [
     { label: "إجمالي وحدات المخزون", value: String(inventoryStats.totalStockUnits), badge: { text: "مباشر", variant: "gold" } },
     {
       label: "منتجات بمخزون منخفض",
@@ -127,7 +127,7 @@ export default async function AdminDashboardPage() {
     },
   ];
 
-  const merchantStats: StatCard[] = [
+  const merchantStats: DashboardStat[] = [
     { label: "إجمالي التجار", value: String(totalMerchants), badge: { text: "مباشر", variant: "gold" } },
     {
       label: "قيد المراجعة",
@@ -148,7 +148,7 @@ export default async function AdminDashboardPage() {
     },
   ];
 
-  const repStats: StatCard[] = [
+  const repStats: DashboardStat[] = [
     { label: "إجمالي المندوبين", value: String(repFleetStats.totalReps), badge: { text: "مباشر", variant: "gold" } },
     {
       label: "مندوبون لديهم مخزون",
@@ -182,7 +182,7 @@ export default async function AdminDashboardPage() {
     },
   ];
 
-  const orderStats: StatCard[] = [
+  const orderStats: DashboardStat[] = [
     { label: "إجمالي الطلبات", value: String(totalOrders), badge: { text: "مباشر", variant: "gold" } },
     { label: "طلبات اليوم", value: String(todayOrders), badge: { text: "مباشر", variant: "neutral" } },
     {
@@ -211,15 +211,7 @@ export default async function AdminDashboardPage() {
         <p className="mt-1 text-sm text-neutral-bg/60">إحصائيات مباشرة من كتالوج المنتجات.</p>
         <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {catalogStats.map((stat) => (
-            <Card key={stat.label}>
-              <CardHeader>
-                <CardTitle>{stat.label}</CardTitle>
-                <Badge variant={stat.badge.variant}>{stat.badge.text}</Badge>
-              </CardHeader>
-              <CardContent>
-                <span className="text-2xl font-semibold text-neutral-bg">{stat.value}</span>
-              </CardContent>
-            </Card>
+            <StatCard key={stat.label} label={stat.label} value={stat.value} badge={stat.badge} />
           ))}
         </div>
       </div>
@@ -229,15 +221,7 @@ export default async function AdminDashboardPage() {
         <p className="mt-1 text-sm text-neutral-bg/60">إحصائيات مباشرة من مخزون المستودع الرئيسي.</p>
         <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {inventoryOverviewStats.map((stat) => (
-            <Card key={stat.label}>
-              <CardHeader>
-                <CardTitle>{stat.label}</CardTitle>
-                <Badge variant={stat.badge.variant}>{stat.badge.text}</Badge>
-              </CardHeader>
-              <CardContent>
-                <span className="text-2xl font-semibold text-neutral-bg">{stat.value}</span>
-              </CardContent>
-            </Card>
+            <StatCard key={stat.label} label={stat.label} value={stat.value} badge={stat.badge} />
           ))}
         </div>
       </div>
@@ -247,15 +231,7 @@ export default async function AdminDashboardPage() {
         <p className="mt-1 text-sm text-neutral-bg/60">إحصائيات مباشرة من طلبات العملاء والتجار.</p>
         <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {orderStats.map((stat) => (
-            <Card key={stat.label}>
-              <CardHeader>
-                <CardTitle>{stat.label}</CardTitle>
-                <Badge variant={stat.badge.variant}>{stat.badge.text}</Badge>
-              </CardHeader>
-              <CardContent>
-                <span className="text-2xl font-semibold text-neutral-bg">{stat.value}</span>
-              </CardContent>
-            </Card>
+            <StatCard key={stat.label} label={stat.label} value={stat.value} badge={stat.badge} />
           ))}
         </div>
       </div>
@@ -265,15 +241,7 @@ export default async function AdminDashboardPage() {
         <p className="mt-1 text-sm text-neutral-bg/60">إحصائيات مباشرة من تجار الجملة وطلباتهم.</p>
         <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {merchantStats.map((stat) => (
-            <Card key={stat.label}>
-              <CardHeader>
-                <CardTitle>{stat.label}</CardTitle>
-                <Badge variant={stat.badge.variant}>{stat.badge.text}</Badge>
-              </CardHeader>
-              <CardContent>
-                <span className="text-2xl font-semibold text-neutral-bg">{stat.value}</span>
-              </CardContent>
-            </Card>
+            <StatCard key={stat.label} label={stat.label} value={stat.value} badge={stat.badge} />
           ))}
         </div>
       </div>
@@ -283,15 +251,7 @@ export default async function AdminDashboardPage() {
         <p className="mt-1 text-sm text-neutral-bg/60">إحصائيات مباشرة من مخزون المندوبين.</p>
         <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {repStats.map((stat) => (
-            <Card key={stat.label}>
-              <CardHeader>
-                <CardTitle>{stat.label}</CardTitle>
-                <Badge variant={stat.badge.variant}>{stat.badge.text}</Badge>
-              </CardHeader>
-              <CardContent>
-                <span className="text-2xl font-semibold text-neutral-bg">{stat.value}</span>
-              </CardContent>
-            </Card>
+            <StatCard key={stat.label} label={stat.label} value={stat.value} badge={stat.badge} />
           ))}
         </div>
       </div>

@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
@@ -102,12 +103,12 @@ export default async function ProductDetailPage({ params }: ProductDetailPagePro
 
               <div className="mt-4">
                 {cartEligibility === "guest" && (
-                  <a
+                  <Link
                     href="/login"
                     className="inline-block rounded-card border border-gold-champagne/40 px-4 py-2 text-sm text-gold-light transition-colors hover:bg-gold-champagne/10"
                   >
                     سجّل الدخول للشراء
-                  </a>
+                  </Link>
                 )}
                 {cartEligibility === "eligible" && totalStock > 0 && (
                   <AddToCartButton productId={product.id} maxQuantity={totalStock} showQuantityInput />

@@ -8,6 +8,7 @@ import { Footer } from "@/components/layout/Footer";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { EmptyState } from "@/components/ui/EmptyState";
 import { ProductImagePlaceholder } from "@/components/catalog/ProductImagePlaceholder";
 import { CartQuantityForm } from "./CartQuantityForm";
 import { removeCartItem, clearCart } from "./actions";
@@ -21,17 +22,18 @@ export default async function CartPage() {
     return (
       <div className="flex min-h-screen flex-col">
         <Header />
-        <main className="flex-1">
-          <div className="mx-auto flex max-w-lg flex-col items-center gap-6 px-4 py-24 text-center">
-            <ProductImagePlaceholder className="h-32 w-32 rounded-card" />
-            <div>
-              <h1 className="text-xl font-semibold text-neutral-bg">سلتك فارغة</h1>
-              <p className="mt-2 text-sm text-neutral-bg/60">لم تقم بإضافة أي منتجات إلى السلة بعد.</p>
-            </div>
-            <Link href="/products">
-              <Button>تصفح المنتجات</Button>
-            </Link>
-          </div>
+        <main className="mx-auto max-w-lg px-4 py-24">
+          <EmptyState
+            as="h1"
+            icon={<ProductImagePlaceholder className="h-32 w-32 rounded-card" />}
+            title="سلتك فارغة"
+            message="لم تقم بإضافة أي منتجات إلى السلة بعد."
+            action={
+              <Link href="/products">
+                <Button>تصفح المنتجات</Button>
+              </Link>
+            }
+          />
         </main>
         <Footer />
       </div>

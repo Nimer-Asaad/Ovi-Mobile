@@ -3,6 +3,8 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { StatCard } from "@/components/ui/StatCard";
 import { AdminTable, AdminTableHead, AdminTableBody, AdminEmptyRow } from "@/components/admin/AdminTable";
 import { AdminStatusBadge } from "@/components/admin/AdminStatusBadge";
 import { formatCurrencyFromCents } from "@/lib/utils";
@@ -50,17 +52,15 @@ export default async function AdminMerchantDetailPage({ params }: AdminMerchantD
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-xl font-semibold text-neutral-bg">{merchant.businessName}</h2>
-          <p className="mt-1 text-sm text-neutral-bg/60">
-            سجّل في {new Date(merchant.createdAt).toLocaleDateString("ar")}
-          </p>
-        </div>
-        <Badge variant={getMerchantStatusBadgeVariant(merchant.status)}>
-          {getMerchantStatusLabel(merchant.status)}
-        </Badge>
-      </div>
+      <PageHeader
+        title={merchant.businessName}
+        subtitle={`سجّل في ${new Date(merchant.createdAt).toLocaleDateString("ar")}`}
+        actions={
+          <Badge variant={getMerchantStatusBadgeVariant(merchant.status)}>
+            {getMerchantStatusLabel(merchant.status)}
+          </Badge>
+        }
+      />
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Card>
@@ -119,34 +119,9 @@ export default async function AdminMerchantDetailPage({ params }: AdminMerchantD
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <Card>
-          <CardHeader>
-            <CardTitle>إجمالي الطلبات</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <span className="text-2xl font-semibold text-neutral-bg">{totalOrders}</span>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>إجمالي قيمة الطلبات</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <span className="text-2xl font-semibold text-neutral-bg">
-              {formatCurrencyFromCents(totalValueCents)}
-            </span>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>آخر طلب</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <span className="text-2xl font-semibold text-neutral-bg">
-              {lastOrderDate ? new Date(lastOrderDate).toLocaleDateString("ar") : "لا يوجد"}
-            </span>
-          </CardContent>
-        </Card>
+        <StatCard label="إجمالي الطلبات" value={String(totalOrders)} />
+        <StatCard label="إجمالي قيمة الطلبات" value={formatCurrencyFromCents(totalValueCents)} />
+        <StatCard label="آخر طلب" value={lastOrderDate ? new Date(lastOrderDate).toLocaleDateString("ar") : "لا يوجد"} />
       </div>
 
       <Card>

@@ -4,6 +4,7 @@ import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { AdminTable, AdminTableHead, AdminTableBody, AdminEmptyRow } from "@/components/admin/AdminTable";
 import { formatCurrencyFromCents } from "@/lib/utils";
 import { ORDER_STATUSES, ORDER_SOURCES, PAYMENT_STATUSES } from "@/lib/constants";
@@ -66,10 +67,7 @@ export default async function AdminOrdersPage({ searchParams }: AdminOrdersPageP
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h2 className="text-xl font-semibold text-neutral-bg">الطلبات</h2>
-        <p className="mt-1 text-sm text-neutral-bg/60">إدارة طلبات العملاء والتجار</p>
-      </div>
+      <PageHeader title="الطلبات" subtitle="إدارة طلبات العملاء والتجار" />
 
       <form
         method="GET"

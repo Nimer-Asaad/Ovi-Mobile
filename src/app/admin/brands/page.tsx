@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { Button } from "@/components/ui/Button";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { AdminTable, AdminTableHead, AdminTableBody, AdminEmptyRow } from "@/components/admin/AdminTable";
 import { AdminStatusBadge } from "@/components/admin/AdminStatusBadge";
 import { ActiveToggleForm } from "@/components/admin/ActiveToggleForm";
@@ -14,15 +15,15 @@ export default async function AdminBrandsPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-xl font-semibold text-neutral-bg">العلامات التجارية</h2>
-          <p className="mt-1 text-sm text-neutral-bg/60">إدارة العلامات التجارية</p>
-        </div>
-        <Link href="/admin/brands/new">
-          <Button>إضافة علامة تجارية</Button>
-        </Link>
-      </div>
+      <PageHeader
+        title="العلامات التجارية"
+        subtitle="إدارة العلامات التجارية"
+        actions={
+          <Link href="/admin/brands/new">
+            <Button>إضافة علامة تجارية</Button>
+          </Link>
+        }
+      />
 
       <AdminTable>
         <AdminTableHead>

@@ -56,9 +56,11 @@ export default async function HomePage() {
                 تصفح المنتجات
               </Button>
             </Link>
-            <Button variant="outline" size="lg">
-              انضم كتاجر جملة
-            </Button>
+            <Link href="/register/merchant">
+              <Button variant="outline" size="lg">
+                انضم كتاجر جملة
+              </Button>
+            </Link>
           </div>
         </section>
 

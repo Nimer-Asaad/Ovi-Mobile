@@ -1,4 +1,5 @@
 import type { Prisma } from "@prisma/client";
+import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
@@ -6,6 +7,7 @@ import { ProductCard } from "@/components/catalog/ProductCard";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { Button } from "@/components/ui/Button";
+import { EmptyState } from "@/components/ui/EmptyState";
 import { getSession } from "@/lib/auth/session";
 import { getCartEligibility } from "@/lib/cart";
 import { getPriceModeForUser, PUBLIC_PRODUCT_CARD_SELECT, MERCHANT_PRODUCT_CARD_SELECT } from "@/lib/catalog-queries";
@@ -128,7 +130,23 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
           </form>
 
           {products.length === 0 ? (
-            <p className="mt-10 text-center text-neutral-bg/60">لا توجد منتجات متاحة حالياً.</p>
+            <div className="mt-8">
+              <EmptyState
+                title="لا توجد منتجات مطابقة"
+                message={
+                  trimmedQuery || categorySlug || brandSlug
+                    ? "لم نجد منتجات تطابق معايير البحث الحالية. جرّب تعديل الفلاتر."
+                    : "لا توجد منتجات متاحة حالياً."
+                }
+                action={
+                  (trimmedQuery || categorySlug || brandSlug) && (
+                    <Link href="/products">
+                      <Button variant="outline">إزالة كل الفلاتر</Button>
+                    </Link>
+                  )
+                }
+              />
+            </div>
           ) : (
             <div className="mt-8 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {products.map((product) => (

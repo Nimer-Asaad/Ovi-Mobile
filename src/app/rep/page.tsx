@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { StatCard } from "@/components/ui/StatCard";
 import { LogoutButton } from "@/components/auth/LogoutButton";
 import { getRepStockStats } from "@/lib/reps";
 import { getMovementTypeLabel, getMovementTypeBadgeVariant } from "@/lib/inventory-labels";
@@ -73,72 +74,23 @@ export default async function RepDashboardPage() {
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <Card>
-          <CardHeader>
-            <CardTitle>إجمالي الوحدات المخصصة</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <span className="text-2xl font-semibold text-neutral-bg">{stats.totalUnits}</span>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>عدد المنتجات المختلفة</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <span className="text-2xl font-semibold text-neutral-bg">{stats.distinctProducts}</span>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>مخزون منخفض</CardTitle>
-            <Badge variant={stats.lowStockCount > 0 ? "warning" : "success"}>
-              {stats.lowStockCount > 0 ? "تنبيه" : "جيد"}
-            </Badge>
-          </CardHeader>
-          <CardContent>
-            <span className="text-2xl font-semibold text-neutral-bg">{stats.lowStockCount}</span>
-          </CardContent>
-        </Card>
+        <StatCard label="إجمالي الوحدات المخصصة" value={String(stats.totalUnits)} />
+        <StatCard label="عدد المنتجات المختلفة" value={String(stats.distinctProducts)} />
+        <StatCard
+          label="مخزون منخفض"
+          value={String(stats.lowStockCount)}
+          badge={{
+            text: stats.lowStockCount > 0 ? "تنبيه" : "جيد",
+            variant: stats.lowStockCount > 0 ? "warning" : "success",
+          }}
+        />
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Card>
-          <CardHeader>
-            <CardTitle>مبيعات اليوم</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <span className="text-2xl font-semibold text-neutral-bg">{todaySalesCount}</span>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>إجمالي مبيعات اليوم</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <span className="text-2xl font-semibold text-neutral-bg">
-              {formatCurrencyFromCents(todaySalesAgg._sum.totalCents ?? 0)}
-            </span>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>إجمالي عدد المبيعات</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <span className="text-2xl font-semibold text-neutral-bg">{totalSalesCount}</span>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>إجمالي قيمة المبيعات</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <span className="text-2xl font-semibold text-neutral-bg">
-              {formatCurrencyFromCents(totalSalesAgg._sum.totalCents ?? 0)}
-            </span>
-          </CardContent>
-        </Card>
+        <StatCard label="مبيعات اليوم" value={String(todaySalesCount)} />
+        <StatCard label="إجمالي مبيعات اليوم" value={formatCurrencyFromCents(todaySalesAgg._sum.totalCents ?? 0)} />
+        <StatCard label="إجمالي عدد المبيعات" value={String(totalSalesCount)} />
+        <StatCard label="إجمالي قيمة المبيعات" value={formatCurrencyFromCents(totalSalesAgg._sum.totalCents ?? 0)} />
       </div>
 
       <Card>

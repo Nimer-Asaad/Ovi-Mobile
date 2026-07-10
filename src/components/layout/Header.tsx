@@ -23,8 +23,9 @@ export async function Header() {
           <Link href="/products" className="transition-colors hover:text-gold-champagne">
             المنتجات
           </Link>
-          <span className="cursor-default">الأقسام</span>
-          <span className="cursor-default">تواصل معنا</span>
+          <Link href="/products" className="transition-colors hover:text-gold-champagne">
+            الأقسام
+          </Link>
         </nav>
 
         <div className="flex items-center gap-3">

@@ -5,6 +5,8 @@ import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
+import { Button } from "@/components/ui/Button";
+import { EmptyState } from "@/components/ui/EmptyState";
 import { formatCurrencyFromCents } from "@/lib/utils";
 import { getOrderStatusLabel, getOrderStatusBadgeVariant } from "@/lib/order-labels";
 import { ORDER_SOURCES } from "@/lib/constants";
@@ -32,16 +34,15 @@ export default async function OrdersPage() {
       <h1 className="text-xl font-semibold text-neutral-bg">طلباتي</h1>
 
       {orders.length === 0 ? (
-        <Card>
-          <CardContent>
-            <p className="text-center text-neutral-bg/60">لا توجد طلبات بعد.</p>
-            <div className="mt-4 flex justify-center">
-              <Link href="/products" className="text-sm text-gold-champagne hover:underline">
-                تصفح المنتجات
-              </Link>
-            </div>
-          </CardContent>
-        </Card>
+        <EmptyState
+          title="لا توجد طلبات بعد"
+          message="لم تقم بأي طلب حتى الآن. تصفح كتالوج المنتجات وابدأ التسوق."
+          action={
+            <Link href="/products">
+              <Button variant="outline">تصفح المنتجات</Button>
+            </Link>
+          }
+        />
       ) : (
         <div className="flex flex-col gap-4">
           {orders.map((order) => (

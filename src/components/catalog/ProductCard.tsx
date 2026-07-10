@@ -24,7 +24,7 @@ export function ProductCard({ product, cartEligibility = "ineligible" }: Product
   const isWholesale = isWholesalePriced(product);
 
   return (
-    <Card className="flex h-full flex-col overflow-hidden p-0 transition-colors hover:border-gold-champagne/50">
+    <Card className="flex h-full flex-col overflow-hidden p-0 transition-all hover:-translate-y-0.5 hover:border-gold-champagne/50 hover:shadow-lg">
       <Link href={`/products/${encodeURIComponent(product.sku)}`} className="flex flex-1 flex-col">
         <div className="aspect-square w-full bg-navy-soft">
           {thumbnail ? (

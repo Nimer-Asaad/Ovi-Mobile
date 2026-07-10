@@ -4,6 +4,7 @@ import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { AdminTable, AdminTableHead, AdminTableBody, AdminEmptyRow } from "@/components/admin/AdminTable";
 import { AdminStatusBadge } from "@/components/admin/AdminStatusBadge";
 import { ProductImagePlaceholder } from "@/components/catalog/ProductImagePlaceholder";
@@ -88,20 +89,20 @@ export default async function AdminInventoryPage({ searchParams }: AdminInventor
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-xl font-semibold text-neutral-bg">المخزون</h2>
-          <p className="mt-1 text-sm text-neutral-bg/60">مستوى المخزون الحالي في {warehouse.name}</p>
-        </div>
-        <div className="flex items-center gap-3">
-          <Link href="/admin/inventory/movements">
-            <Button variant="outline">سجل الحركات</Button>
-          </Link>
-          <Link href="/admin/inventory/adjust">
-            <Button>تعديل مخزون</Button>
-          </Link>
-        </div>
-      </div>
+      <PageHeader
+        title="المخزون"
+        subtitle={`مستوى المخزون الحالي في ${warehouse.name}`}
+        actions={
+          <>
+            <Link href="/admin/inventory/movements">
+              <Button variant="outline">سجل الحركات</Button>
+            </Link>
+            <Link href="/admin/inventory/adjust">
+              <Button>تعديل مخزون</Button>
+            </Link>
+          </>
+        }
+      />
 
       <form
         method="GET"

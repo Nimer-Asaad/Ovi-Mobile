@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { AdminStatusBadge } from "@/components/admin/AdminStatusBadge";
 import { AdminTable, AdminTableHead, AdminTableBody, AdminEmptyRow } from "@/components/admin/AdminTable";
 import { ProductImagePlaceholder } from "@/components/catalog/ProductImagePlaceholder";
@@ -78,21 +79,21 @@ export default async function AdminRepDetailPage({ params }: AdminRepDetailPageP
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-xl font-semibold text-neutral-bg">{rep.user.name}</h2>
-          <p className="mt-1 text-sm text-neutral-bg/60">{rep.employeeCode}</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <AdminStatusBadge isActive={rep.isActive && rep.user.isActive} />
-          <Link href={`/admin/reps/${rep.id}/assign-stock`}>
-            <Button>تخصيص مخزون</Button>
-          </Link>
-          <Link href={`/admin/reps/${rep.id}/return-stock`}>
-            <Button variant="outline">إرجاع مخزون</Button>
-          </Link>
-        </div>
-      </div>
+      <PageHeader
+        title={rep.user.name}
+        subtitle={rep.employeeCode}
+        actions={
+          <>
+            <AdminStatusBadge isActive={rep.isActive && rep.user.isActive} />
+            <Link href={`/admin/reps/${rep.id}/assign-stock`}>
+              <Button>تخصيص مخزون</Button>
+            </Link>
+            <Link href={`/admin/reps/${rep.id}/return-stock`}>
+              <Button variant="outline">إرجاع مخزون</Button>
+            </Link>
+          </>
+        }
+      />
 
       <Card>
         <CardHeader>

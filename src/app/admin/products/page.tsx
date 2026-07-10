@@ -2,6 +2,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { AdminTable, AdminTableHead, AdminTableBody, AdminEmptyRow } from "@/components/admin/AdminTable";
 import { AdminStatusBadge } from "@/components/admin/AdminStatusBadge";
 import { ActiveToggleForm } from "@/components/admin/ActiveToggleForm";
@@ -27,15 +28,15 @@ export default async function AdminProductsPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-xl font-semibold text-neutral-bg">المنتجات</h2>
-          <p className="mt-1 text-sm text-neutral-bg/60">إدارة كتالوج المنتجات</p>
-        </div>
-        <Link href="/admin/products/new">
-          <Button>إضافة منتج</Button>
-        </Link>
-      </div>
+      <PageHeader
+        title="المنتجات"
+        subtitle="إدارة كتالوج المنتجات"
+        actions={
+          <Link href="/admin/products/new">
+            <Button>إضافة منتج</Button>
+          </Link>
+        }
+      />
 
       <AdminTable>
         <AdminTableHead>

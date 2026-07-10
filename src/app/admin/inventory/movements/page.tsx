@@ -4,6 +4,7 @@ import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { AdminTable, AdminTableHead, AdminTableBody, AdminEmptyRow } from "@/components/admin/AdminTable";
 import { MANUAL_STOCK_MOVEMENT_TYPES } from "@/lib/constants";
 import { getMovementTypeLabel, getMovementTypeBadgeVariant } from "@/lib/inventory-labels";
@@ -63,14 +64,14 @@ export default async function AdminInventoryMovementsPage({ searchParams }: Admi
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h2 className="text-xl font-semibold text-neutral-bg">سجل حركات المخزون</h2>
-        <p className="mt-1 text-sm text-neutral-bg/60">
-          {filteredProductLabel
+      <PageHeader
+        title="سجل حركات المخزون"
+        subtitle={
+          filteredProductLabel
             ? `سجل الحركات الخاص بـ ${filteredProductLabel.name} (${filteredProductLabel.sku})`
-            : "سجل تدقيق كامل لكل حركات المخزون — للقراءة فقط"}
-        </p>
-      </div>
+            : "سجل تدقيق كامل لكل حركات المخزون — للقراءة فقط"
+        }
+      />
 
       <form
         method="GET"

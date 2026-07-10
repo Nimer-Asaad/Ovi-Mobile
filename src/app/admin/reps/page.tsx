@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { Badge } from "@/components/ui/Badge";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { AdminTable, AdminTableHead, AdminTableBody, AdminEmptyRow } from "@/components/admin/AdminTable";
 import { AdminStatusBadge } from "@/components/admin/AdminStatusBadge";
 import { formatCurrencyFromCents } from "@/lib/utils";
@@ -31,10 +32,7 @@ export default async function AdminRepsPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h2 className="text-xl font-semibold text-neutral-bg">المندوبون</h2>
-        <p className="mt-1 text-sm text-neutral-bg/60">مخزون المندوبين المخصص من المستودع الرئيسي</p>
-      </div>
+      <PageHeader title="المندوبون" subtitle="مخزون المندوبين المخصص من المستودع الرئيسي" />
 
       <AdminTable>
         <AdminTableHead>

@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { StatCard } from "@/components/ui/StatCard";
 import { LogoutButton } from "@/components/auth/LogoutButton";
 import { formatCurrencyFromCents } from "@/lib/utils";
 import { getOrderStatusLabel, getOrderStatusBadgeVariant } from "@/lib/order-labels";
@@ -49,24 +50,8 @@ export default async function MerchantDashboardPage() {
       </Card>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>إجمالي الطلبات</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <span className="text-2xl font-semibold text-neutral-bg">{totalOrders}</span>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>إجمالي قيمة الطلبات</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <span className="text-2xl font-semibold text-neutral-bg">
-              {formatCurrencyFromCents(totalValueCents)}
-            </span>
-          </CardContent>
-        </Card>
+        <StatCard label="إجمالي الطلبات" value={String(totalOrders)} />
+        <StatCard label="إجمالي قيمة الطلبات" value={formatCurrencyFromCents(totalValueCents)} />
       </div>
 
       <Card>
