@@ -2,7 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { Badge } from "@/components/ui/Badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { formatCurrencyFromCents } from "@/lib/utils";
-import { LOW_STOCK_THRESHOLD, ORDER_STATUSES, ORDER_SOURCES } from "@/lib/constants";
+import { LOW_STOCK_THRESHOLD, ORDER_STATUSES, ORDER_SOURCES, MERCHANT_STATUSES } from "@/lib/constants";
 import { getInventoryDashboardStats } from "@/lib/inventory";
 import { getRepFleetStats } from "@/lib/reps";
 
@@ -50,6 +50,12 @@ export default async function AdminDashboardPage() {
     todayRepSalesAgg,
     totalRepSalesCount,
     totalRepSalesAgg,
+    totalMerchants,
+    pendingMerchants,
+    approvedMerchants,
+    rejectedMerchants,
+    wholesaleOrdersCount,
+    wholesaleOrdersAgg,
   ] = await Promise.all([
     prisma.product.count(),
     prisma.product.count({ where: { isActive: true } }),
@@ -73,6 +79,12 @@ export default async function AdminDashboardPage() {
     }),
     prisma.order.count({ where: { source: ORDER_SOURCES.REP_SALE } }),
     prisma.order.aggregate({ where: { source: ORDER_SOURCES.REP_SALE }, _sum: { totalCents: true } }),
+    prisma.merchant.count(),
+    prisma.merchant.count({ where: { status: MERCHANT_STATUSES.PENDING } }),
+    prisma.merchant.count({ where: { status: MERCHANT_STATUSES.APPROVED } }),
+    prisma.merchant.count({ where: { status: MERCHANT_STATUSES.REJECTED } }),
+    prisma.order.count({ where: { source: ORDER_SOURCES.WHOLESALE } }),
+    prisma.order.aggregate({ where: { source: ORDER_SOURCES.WHOLESALE }, _sum: { totalCents: true } }),
   ]);
 
   const catalogStats: StatCard[] = [
@@ -112,6 +124,27 @@ export default async function AdminDashboardPage() {
         ? new Date(inventoryStats.latestMovementAt).toLocaleDateString("ar")
         : "لا يوجد",
       badge: { text: "مباشر", variant: "neutral" },
+    },
+  ];
+
+  const merchantStats: StatCard[] = [
+    { label: "إجمالي التجار", value: String(totalMerchants), badge: { text: "مباشر", variant: "gold" } },
+    {
+      label: "قيد المراجعة",
+      value: String(pendingMerchants),
+      badge: pendingMerchants > 0 ? { text: "تنبيه", variant: "warning" } : { text: "لا يوجد", variant: "neutral" },
+    },
+    { label: "معتمدون", value: String(approvedMerchants), badge: { text: "مباشر", variant: "success" } },
+    {
+      label: "مرفوضون",
+      value: String(rejectedMerchants),
+      badge: rejectedMerchants > 0 ? { text: "تنبيه", variant: "warning" } : { text: "لا يوجد", variant: "neutral" },
+    },
+    { label: "طلبات الجملة", value: String(wholesaleOrdersCount), badge: { text: "مباشر", variant: "neutral" } },
+    {
+      label: "إجمالي قيمة طلبات الجملة",
+      value: formatCurrencyFromCents(wholesaleOrdersAgg._sum.totalCents ?? 0),
+      badge: { text: "مباشر", variant: "success" },
     },
   ];
 
@@ -214,6 +247,24 @@ export default async function AdminDashboardPage() {
         <p className="mt-1 text-sm text-neutral-bg/60">إحصائيات مباشرة من طلبات العملاء والتجار.</p>
         <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {orderStats.map((stat) => (
+            <Card key={stat.label}>
+              <CardHeader>
+                <CardTitle>{stat.label}</CardTitle>
+                <Badge variant={stat.badge.variant}>{stat.badge.text}</Badge>
+              </CardHeader>
+              <CardContent>
+                <span className="text-2xl font-semibold text-neutral-bg">{stat.value}</span>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <h2 className="text-xl font-semibold text-neutral-bg">نظرة عامة على التجار</h2>
+        <p className="mt-1 text-sm text-neutral-bg/60">إحصائيات مباشرة من تجار الجملة وطلباتهم.</p>
+        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {merchantStats.map((stat) => (
             <Card key={stat.label}>
               <CardHeader>
                 <CardTitle>{stat.label}</CardTitle>
