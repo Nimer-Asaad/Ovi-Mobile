@@ -31,6 +31,7 @@ const PAYMENT_STATUS_LABELS: Record<string, string> = {
 
 const PAYMENT_METHOD_LABELS: Record<string, string> = {
   [PAYMENT_METHODS.CASH_ON_DELIVERY]: "الدفع عند الاستلام",
+  [PAYMENT_METHODS.CASH]: "نقداً",
 };
 
 const ORDER_SOURCE_LABELS: Record<string, string> = {

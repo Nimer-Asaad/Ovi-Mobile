@@ -8,34 +8,59 @@ import { Button } from "@/components/ui/Button";
 import { LogoutButton } from "@/components/auth/LogoutButton";
 import { getRepStockStats } from "@/lib/reps";
 import { getMovementTypeLabel, getMovementTypeBadgeVariant } from "@/lib/inventory-labels";
+import { formatCurrencyFromCents } from "@/lib/utils";
+import { ORDER_SOURCES } from "@/lib/constants";
 
 export default async function RepDashboardPage() {
   const user = await requireRole([ROLES.SALES_REPRESENTATIVE]);
 
   const rep = await prisma.salesRepresentative.findUnique({
     where: { userId: user.id },
-    select: { carStockLocation: { select: { id: true } } },
+    select: { id: true, carStockLocation: { select: { id: true } } },
   });
 
   const locationId = rep?.carStockLocation?.id ?? null;
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
 
-  const [stats, recentMovements] = await Promise.all([
-    getRepStockStats(locationId),
-    locationId
-      ? prisma.stockMovement.findMany({
-          where: { OR: [{ fromLocationId: locationId }, { toLocationId: locationId }] },
-          orderBy: { createdAt: "desc" },
-          take: 5,
-          select: {
-            id: true,
-            type: true,
-            quantity: true,
-            createdAt: true,
-            product: { select: { sku: true, name: true, nameAr: true } },
-          },
-        })
-      : Promise.resolve([]),
-  ]);
+  const [stats, recentMovements, todaySalesCount, todaySalesAgg, totalSalesCount, totalSalesAgg] =
+    await Promise.all([
+      getRepStockStats(locationId),
+      locationId
+        ? prisma.stockMovement.findMany({
+            where: { OR: [{ fromLocationId: locationId }, { toLocationId: locationId }] },
+            orderBy: { createdAt: "desc" },
+            take: 5,
+            select: {
+              id: true,
+              type: true,
+              quantity: true,
+              createdAt: true,
+              product: { select: { sku: true, name: true, nameAr: true } },
+            },
+          })
+        : Promise.resolve([]),
+      rep
+        ? prisma.order.count({
+            where: { createdByRepId: rep.id, source: ORDER_SOURCES.REP_SALE, createdAt: { gte: startOfToday } },
+          })
+        : Promise.resolve(0),
+      rep
+        ? prisma.order.aggregate({
+            where: { createdByRepId: rep.id, source: ORDER_SOURCES.REP_SALE, createdAt: { gte: startOfToday } },
+            _sum: { totalCents: true },
+          })
+        : Promise.resolve({ _sum: { totalCents: 0 } }),
+      rep
+        ? prisma.order.count({ where: { createdByRepId: rep.id, source: ORDER_SOURCES.REP_SALE } })
+        : Promise.resolve(0),
+      rep
+        ? prisma.order.aggregate({
+            where: { createdByRepId: rep.id, source: ORDER_SOURCES.REP_SALE },
+            _sum: { totalCents: true },
+          })
+        : Promise.resolve({ _sum: { totalCents: 0 } }),
+    ]);
 
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-6 px-4 py-10">
@@ -77,6 +102,45 @@ export default async function RepDashboardPage() {
         </Card>
       </div>
 
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <Card>
+          <CardHeader>
+            <CardTitle>مبيعات اليوم</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <span className="text-2xl font-semibold text-neutral-bg">{todaySalesCount}</span>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>إجمالي مبيعات اليوم</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <span className="text-2xl font-semibold text-neutral-bg">
+              {formatCurrencyFromCents(todaySalesAgg._sum.totalCents ?? 0)}
+            </span>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>إجمالي عدد المبيعات</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <span className="text-2xl font-semibold text-neutral-bg">{totalSalesCount}</span>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>إجمالي قيمة المبيعات</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <span className="text-2xl font-semibold text-neutral-bg">
+              {formatCurrencyFromCents(totalSalesAgg._sum.totalCents ?? 0)}
+            </span>
+          </CardContent>
+        </Card>
+      </div>
+
       <Card>
         <CardHeader>
           <CardTitle>آخر الحركات</CardTitle>
@@ -108,8 +172,14 @@ export default async function RepDashboardPage() {
       </Card>
 
       <div className="flex flex-wrap gap-3">
+        <Link href="/rep/sales/new">
+          <Button>بيع جديد</Button>
+        </Link>
+        <Link href="/rep/sales">
+          <Button variant="outline">مبيعاتي</Button>
+        </Link>
         <Link href="/rep/stock">
-          <Button>عرض مخزوني</Button>
+          <Button variant="outline">عرض مخزوني</Button>
         </Link>
         <Link href="/rep/movements">
           <Button variant="outline">سجل الحركات الكامل</Button>

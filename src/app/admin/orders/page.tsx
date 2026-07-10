@@ -60,6 +60,7 @@ export default async function AdminOrdersPage({ searchParams }: AdminOrdersPageP
       city: true,
       createdAt: true,
       merchant: { select: { businessName: true } },
+      createdByRep: { select: { user: { select: { name: true } } } },
     },
   });
 
@@ -100,6 +101,7 @@ export default async function AdminOrdersPage({ searchParams }: AdminOrdersPageP
           <option value="">الكل</option>
           <option value={ORDER_SOURCES.RETAIL}>عملاء التجزئة</option>
           <option value={ORDER_SOURCES.WHOLESALE}>تجار الجملة</option>
+          <option value={ORDER_SOURCES.REP_SALE}>مبيعات مندوب</option>
         </Select>
 
         <div className="flex items-end lg:col-span-5">
@@ -112,6 +114,7 @@ export default async function AdminOrdersPage({ searchParams }: AdminOrdersPageP
           <th className="px-4 py-3 text-start">رقم الطلب</th>
           <th className="px-4 py-3 text-start">الاسم</th>
           <th className="px-4 py-3 text-start">النوع</th>
+          <th className="px-4 py-3 text-start">المندوب</th>
           <th className="px-4 py-3 text-start">الهاتف</th>
           <th className="px-4 py-3 text-start">المدينة</th>
           <th className="px-4 py-3 text-start">الإجمالي</th>
@@ -129,10 +132,19 @@ export default async function AdminOrdersPage({ searchParams }: AdminOrdersPageP
                 {order.contactName ?? order.merchant?.businessName ?? "—"}
               </td>
               <td className="px-4 py-3">
-                <Badge variant={order.source === ORDER_SOURCES.WHOLESALE ? "gold" : "neutral"}>
+                <Badge
+                  variant={
+                    order.source === ORDER_SOURCES.WHOLESALE
+                      ? "gold"
+                      : order.source === ORDER_SOURCES.REP_SALE
+                        ? "success"
+                        : "neutral"
+                  }
+                >
                   {getOrderSourceLabel(order.source)}
                 </Badge>
               </td>
+              <td className="px-4 py-3 text-neutral-bg/70">{order.createdByRep?.user.name ?? "—"}</td>
               <td className="px-4 py-3 text-neutral-bg/70">{order.contactPhone ?? "—"}</td>
               <td className="px-4 py-3 text-neutral-bg/70">{order.city ?? "—"}</td>
               <td className="px-4 py-3 text-neutral-bg/70">{formatCurrencyFromCents(order.totalCents)}</td>
@@ -160,7 +172,7 @@ export default async function AdminOrdersPage({ searchParams }: AdminOrdersPageP
               </td>
             </tr>
           ))}
-          {orders.length === 0 && <AdminEmptyRow colSpan={11} message="لا توجد طلبات مطابقة" />}
+          {orders.length === 0 && <AdminEmptyRow colSpan={12} message="لا توجد طلبات مطابقة" />}
         </AdminTableBody>
       </AdminTable>
     </div>

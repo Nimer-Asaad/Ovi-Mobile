@@ -36,6 +36,7 @@ export default async function AdminOrderDetailPage({ params }: AdminOrderDetailP
       updatedAt: true,
       customer: { select: { name: true, email: true } },
       merchant: { select: { businessName: true, taxId: true, status: true } },
+      createdByRep: { select: { employeeCode: true, user: { select: { name: true, phone: true } } } },
       items: {
         select: {
           id: true,
@@ -64,6 +65,7 @@ export default async function AdminOrderDetailPage({ params }: AdminOrderDetailP
   }
 
   const isWholesaleOrder = order.source === ORDER_SOURCES.WHOLESALE;
+  const isRepSale = order.source === ORDER_SOURCES.REP_SALE;
 
   return (
     <div className="flex flex-col gap-6">
@@ -207,6 +209,32 @@ export default async function AdminOrderDetailPage({ params }: AdminOrderDetailP
           </CardContent>
         </Card>
       </div>
+
+      {isRepSale && order.createdByRep && (
+        <Card>
+          <CardHeader>
+            <CardTitle>معلومات المندوب</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <dl className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
+              <div>
+                <dt className="text-neutral-bg/50">اسم المندوب</dt>
+                <dd className="text-neutral-bg">{order.createdByRep.user.name}</dd>
+              </div>
+              <div>
+                <dt className="text-neutral-bg/50">الرقم الوظيفي</dt>
+                <dd className="text-neutral-bg">{order.createdByRep.employeeCode}</dd>
+              </div>
+              {order.createdByRep.user.phone && (
+                <div>
+                  <dt className="text-neutral-bg/50">هاتف المندوب</dt>
+                  <dd className="text-neutral-bg">{order.createdByRep.user.phone}</dd>
+                </div>
+              )}
+            </dl>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>

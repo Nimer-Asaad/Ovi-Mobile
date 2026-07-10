@@ -85,6 +85,9 @@ export const DEFAULT_CURRENCY = "ILS" as const;
 
 export const PAYMENT_METHODS = {
   CASH_ON_DELIVERY: "CASH_ON_DELIVERY",
+  /** Immediate in-person cash sale (e.g. rep direct sale) — distinct from
+   * CASH_ON_DELIVERY, which implies payment happens later at delivery. */
+  CASH: "CASH",
 } as const;
 
 export const PAYMENT_STATUSES = {

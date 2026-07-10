@@ -2,7 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { Badge } from "@/components/ui/Badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { formatCurrencyFromCents } from "@/lib/utils";
-import { LOW_STOCK_THRESHOLD, ORDER_STATUSES } from "@/lib/constants";
+import { LOW_STOCK_THRESHOLD, ORDER_STATUSES, ORDER_SOURCES } from "@/lib/constants";
 import { getInventoryDashboardStats } from "@/lib/inventory";
 import { getRepFleetStats } from "@/lib/reps";
 
@@ -46,6 +46,10 @@ export default async function AdminDashboardPage() {
     deliveredSales,
     inventoryStats,
     repFleetStats,
+    todayRepSalesCount,
+    todayRepSalesAgg,
+    totalRepSalesCount,
+    totalRepSalesAgg,
   ] = await Promise.all([
     prisma.product.count(),
     prisma.product.count({ where: { isActive: true } }),
@@ -62,6 +66,13 @@ export default async function AdminDashboardPage() {
     prisma.order.aggregate({ where: { status: ORDER_STATUSES.DELIVERED }, _sum: { totalCents: true } }),
     getInventoryDashboardStats(),
     getRepFleetStats(),
+    prisma.order.count({ where: { source: ORDER_SOURCES.REP_SALE, createdAt: { gte: startOfToday } } }),
+    prisma.order.aggregate({
+      where: { source: ORDER_SOURCES.REP_SALE, createdAt: { gte: startOfToday } },
+      _sum: { totalCents: true },
+    }),
+    prisma.order.count({ where: { source: ORDER_SOURCES.REP_SALE } }),
+    prisma.order.aggregate({ where: { source: ORDER_SOURCES.REP_SALE }, _sum: { totalCents: true } }),
   ]);
 
   const catalogStats: StatCard[] = [
@@ -115,6 +126,26 @@ export default async function AdminDashboardPage() {
       label: "إجمالي الوحدات المخصصة للمندوبين",
       value: String(repFleetStats.totalUnitsAssigned),
       badge: { text: "مباشر", variant: "gold" },
+    },
+    {
+      label: "مبيعات المندوبين اليوم",
+      value: String(todayRepSalesCount),
+      badge: { text: "مباشر", variant: "neutral" },
+    },
+    {
+      label: "إجمالي مبيعات المندوبين اليوم",
+      value: formatCurrencyFromCents(todayRepSalesAgg._sum.totalCents ?? 0),
+      badge: { text: "مباشر", variant: "success" },
+    },
+    {
+      label: "إجمالي عدد مبيعات المندوبين",
+      value: String(totalRepSalesCount),
+      badge: { text: "مباشر", variant: "neutral" },
+    },
+    {
+      label: "إجمالي قيمة مبيعات المندوبين",
+      value: formatCurrencyFromCents(totalRepSalesAgg._sum.totalCents ?? 0),
+      badge: { text: "مباشر", variant: "success" },
     },
   ];
 
