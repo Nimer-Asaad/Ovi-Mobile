@@ -83,10 +83,14 @@ Not yet done — checklist for when it happens:
 | --- | --- | --- |
 | `DATABASE_URL` | Yes | Local: `file:./dev.db`. Production: a PostgreSQL connection string from your provider, set directly in Vercel's dashboard — never committed. |
 | `NODE_ENV` | No — automatic | Set by the Next.js/Vercel runtime itself (`production` on Vercel builds/deploys). Do not set it manually. Controls: `secure` flag on session cookies (`src/lib/auth/session.ts`), and Prisma query log verbosity (`src/lib/prisma.ts`). |
+| `GOOGLE_CLIENT_ID` | No — optional | Enables the "تسجيل الدخول بواسطة Google" button on `/login`. If unset, that flow safely redirects to a login error instead of working — the rest of the app is unaffected. |
+| `GOOGLE_CLIENT_SECRET` | No — optional | Paired with `GOOGLE_CLIENT_ID`. Never expose client-side. |
+| `GOOGLE_REDIRECT_URI` | No — optional | Must exactly match an "Authorized redirect URI" configured on the Google Cloud Console OAuth client, and must use the production domain in production (e.g. `https://ovimobile.example/auth/google/callback`), not `localhost`. |
 
 No other environment variables are read anywhere in the codebase today
-(confirmed by inspection — only `DATABASE_URL` and `NODE_ENV` are
-referenced). Do not add speculative variables ahead of an actual feature
+(confirmed by inspection — only `DATABASE_URL`, `NODE_ENV`, and the three
+optional `GOOGLE_*` variables above are referenced). Do not add speculative
+variables ahead of an actual feature
 that needs them.
 
 ## Database migration checklist (for the future PostgreSQL cutover)

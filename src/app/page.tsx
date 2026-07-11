@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/auth/session";
+import { getShopCtaHref } from "@/lib/auth/redirects";
 import { getCartEligibility } from "@/lib/cart";
 import { getPriceModeForUser, PUBLIC_PRODUCT_CARD_SELECT, MERCHANT_PRODUCT_CARD_SELECT } from "@/lib/catalog-queries";
 import { Header } from "@/components/layout/Header";
@@ -13,6 +14,7 @@ export default async function HomePage() {
   const user = await getSession();
   const priceMode = getPriceModeForUser(user);
   const cartEligibility = getCartEligibility(user);
+  const shopCtaHref = getShopCtaHref(user);
 
   const [categories, featuredProducts] = await Promise.all([
     prisma.category.findMany({
@@ -52,7 +54,7 @@ export default async function HomePage() {
               منصة عوفي موبايل لإدارة المبيعات والمخزون والتجار والمندوبين — قريباً.
             </p>
             <div className="mt-8 flex items-center justify-center gap-3">
-              <Link href="/products">
+              <Link href={shopCtaHref}>
                 <Button variant="primary" size="lg">
                   تصفح المنتجات
                 </Button>

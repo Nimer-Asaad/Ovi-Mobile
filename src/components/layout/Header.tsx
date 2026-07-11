@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { getSession } from "@/lib/auth/session";
 import { getCartEligibility, getCartItemCount } from "@/lib/cart";
+import { LogoutButton } from "@/components/auth/LogoutButton";
+import { ROLES } from "@/lib/constants";
 
 /** Public site header. Fetches the session itself (cheap: one cookie read +
  * an indexed lookup) so it can show cart access only to eligible viewers. */
@@ -9,6 +11,7 @@ export async function Header() {
   const cartEligibility = getCartEligibility(user);
   const cartCount =
     cartEligibility === "eligible" && user ? await getCartItemCount(user.id) : 0;
+  const isCustomer = user?.role === ROLES.RETAIL_CUSTOMER;
 
   return (
     <header className="sticky top-0 z-10 border-b border-navy-soft bg-navy-surface/95 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-navy-surface/80">
@@ -56,6 +59,15 @@ export async function Header() {
             </Link>
           )}
 
+          {isCustomer && (
+            <Link
+              href="/orders"
+              className="hidden rounded-card px-2.5 py-1.5 text-sm text-neutral-bg/70 transition-colors hover:bg-navy-soft/60 hover:text-gold-dark sm:inline-block"
+            >
+              طلباتي
+            </Link>
+          )}
+
           {user ? (
             <Link
               href="/dashboard"
@@ -64,13 +76,23 @@ export async function Header() {
               حسابي
             </Link>
           ) : (
-            <Link
-              href="/login"
-              className="rounded-card border border-gold-champagne/40 px-3 py-1.5 text-xs font-medium text-gold-dark transition-colors hover:bg-gold-champagne/10"
-            >
-              تسجيل الدخول
-            </Link>
+            <>
+              <Link
+                href="/login"
+                className="rounded-card border border-gold-champagne/40 px-3 py-1.5 text-xs font-medium text-gold-dark transition-colors hover:bg-gold-champagne/10"
+              >
+                تسجيل الدخول
+              </Link>
+              <Link
+                href="/register"
+                className="hidden rounded-card px-3 py-1.5 text-xs font-medium text-neutral-bg/70 transition-colors hover:text-gold-dark sm:inline-block"
+              >
+                إنشاء حساب
+              </Link>
+            </>
           )}
+
+          {isCustomer && <LogoutButton />}
         </div>
       </div>
     </header>

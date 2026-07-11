@@ -11,11 +11,12 @@ Repository: https://github.com/Nimer-Asaad/Ovi-Mobile
 
 ## Status
 
-Phase 12 — deployment preparation. Phases 1–11 (auth, catalog, product
-images, cart/checkout, admin order management, inventory management, sales
-rep stock and direct selling, merchant management, UI/UX polish) are
-complete. No payment gateway, invoices, finance/reporting, or delivery
-integration yet — the app is not live in production.
+Phase 14 — customer experience and Google login. Phases 1–13 (auth, catalog,
+product images, cart/checkout, admin order management, inventory
+management, sales rep stock and direct selling, merchant management, UI/UX
+polish, deployment prep, light theme redesign) are complete. No payment
+gateway, invoices, finance/reporting, or delivery integration yet — the app
+is not live in production.
 
 ## Tech Stack
 
@@ -94,6 +95,16 @@ The app runs at `http://localhost:3000`.
 - `src/middleware.ts` only checks whether a session cookie is present on
   protected paths; the actual role/approval check happens server-side in
   each area's layout/page via `src/lib/auth/guards.ts`.
+- **Google login** (`/auth/google` → `/auth/google/callback`) is an optional
+  second way into the same session system — no NextAuth, no second session
+  store. It requires `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and
+  `GOOGLE_REDIRECT_URI` (see `.env.example`); the redirect URI must be
+  registered in the Google Cloud Console OAuth client's "Authorized redirect
+  URIs". If unset, the "تسجيل الدخول بواسطة Google" button on `/login` still
+  renders but safely redirects back with an error instead of crashing.
+  Existing accounts log in unchanged (role never modified); a Google email
+  with no matching account always creates a plain `RETAIL_CUSTOMER` — never
+  an admin, merchant, or rep.
 
 ## Development Accounts
 
