@@ -1,4 +1,5 @@
 import { Prisma } from "@prisma/client";
+import { prisma } from "@/lib/prisma";
 import { MERCHANT_STATUSES, ROLES } from "@/lib/constants";
 import type { SessionUser } from "@/lib/auth/session";
 
@@ -122,4 +123,36 @@ export function readCatalogPriceCents(
   product: { wholesalePriceCents: number } | { retailPriceCents: number },
 ): number {
   return isWholesalePriced(product) ? product.wholesalePriceCents : product.retailPriceCents;
+}
+
+export interface StorefrontCategory {
+  name: string;
+  nameAr: string | null;
+  slug: string;
+}
+
+/** Active categories for storefront navigation (header row, homepage quick
+ * links) — name/slug only, never the admin-side parent/product relations. */
+export async function getActiveCategories(): Promise<StorefrontCategory[]> {
+  return prisma.category.findMany({
+    where: { isActive: true },
+    select: { name: true, nameAr: true, slug: true },
+    orderBy: { name: "asc" },
+  });
+}
+
+export interface StorefrontBrand {
+  id: string;
+  name: string;
+  slug: string;
+  logoUrl: string | null;
+}
+
+/** Active brands for the homepage brand showcase. */
+export async function getActiveBrands(): Promise<StorefrontBrand[]> {
+  return prisma.brand.findMany({
+    where: { isActive: true },
+    select: { id: true, name: true, slug: true, logoUrl: true },
+    orderBy: { name: "asc" },
+  });
 }

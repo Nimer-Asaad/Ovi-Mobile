@@ -24,15 +24,15 @@ export function ProductCard({ product, cartEligibility = "ineligible" }: Product
   const isWholesale = isWholesalePriced(product);
 
   return (
-    <Card className="flex h-full flex-col overflow-hidden p-0 transition-all hover:-translate-y-0.5 hover:border-gold-champagne/50 hover:shadow-lg">
+    <Card className="group flex h-full flex-col overflow-hidden p-0 transition-all hover:-translate-y-0.5 hover:border-gold-champagne/50 hover:shadow-lg">
       <Link href={`/products/${encodeURIComponent(product.sku)}`} className="flex flex-1 flex-col">
-        <div className="aspect-square w-full bg-navy-soft">
+        <div className="aspect-square w-full overflow-hidden bg-navy-soft">
           {thumbnail ? (
             // eslint-disable-next-line @next/next/no-img-element -- arbitrary admin-entered external URLs
             <img
               src={thumbnail.url}
               alt={thumbnail.altText ?? product.name}
-              className="h-full w-full object-cover"
+              className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
               loading="lazy"
             />
           ) : (
@@ -40,16 +40,16 @@ export function ProductCard({ product, cartEligibility = "ineligible" }: Product
           )}
         </div>
 
-        <div className="flex flex-1 flex-col gap-2 p-6 pb-3">
+        <div className="flex flex-1 flex-col gap-1.5 p-4 pb-3 sm:p-5 sm:pb-3">
           {product.isFeatured && <Badge variant="gold">مميز</Badge>}
-          <CardTitle>{product.nameAr ?? product.name}</CardTitle>
+          <CardTitle className="line-clamp-1">{product.nameAr ?? product.name}</CardTitle>
           {product.brand && <p className="text-xs text-neutral-bg/50">{product.brand.name}</p>}
           <p className="line-clamp-2 flex-1 text-sm text-neutral-bg/70">
             {product.descriptionAr ?? product.description ?? ""}
           </p>
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between pt-1">
             <div className="flex items-center gap-2">
-              <span className="text-lg font-semibold text-gold-champagne">
+              <span className="text-xl font-bold text-gold-champagne">
                 {formatCurrencyFromCents(priceCents)}
               </span>
               {isWholesale && <Badge variant="gold">سعر الجملة</Badge>}
@@ -62,7 +62,7 @@ export function ProductCard({ product, cartEligibility = "ineligible" }: Product
       </Link>
 
       {cartEligibility !== "ineligible" && (
-        <div className="px-6 pb-6">
+        <div className="px-4 pb-4 sm:px-5 sm:pb-5">
           {cartEligibility === "guest" ? (
             <Link
               href="/login"

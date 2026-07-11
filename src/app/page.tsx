@@ -1,14 +1,23 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/auth/session";
-import { getShopCtaHref } from "@/lib/auth/redirects";
+import { getShopCtaHref, getPostLoginRedirect } from "@/lib/auth/redirects";
 import { getCartEligibility } from "@/lib/cart";
-import { getPriceModeForUser, PUBLIC_PRODUCT_CARD_SELECT, MERCHANT_PRODUCT_CARD_SELECT } from "@/lib/catalog-queries";
+import {
+  getPriceModeForUser,
+  getActiveCategories,
+  getActiveBrands,
+  PUBLIC_PRODUCT_CARD_SELECT,
+  MERCHANT_PRODUCT_CARD_SELECT,
+} from "@/lib/catalog-queries";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
-import { Button } from "@/components/ui/Button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { ProductCard } from "@/components/catalog/ProductCard";
+import { HeroBanner } from "@/components/storefront/HeroBanner";
+import { CategoryStrip } from "@/components/storefront/CategoryStrip";
+import { BrandShowcase } from "@/components/storefront/BrandShowcase";
+import { TrustStrip } from "@/components/storefront/TrustStrip";
+import { StorefrontSection } from "@/components/storefront/StorefrontSection";
 
 export default async function HomePage() {
   const user = await getSession();
@@ -16,12 +25,9 @@ export default async function HomePage() {
   const cartEligibility = getCartEligibility(user);
   const shopCtaHref = getShopCtaHref(user);
 
-  const [categories, featuredProducts] = await Promise.all([
-    prisma.category.findMany({
-      where: { isActive: true },
-      orderBy: { createdAt: "asc" },
-      take: 4,
-    }),
+  const [categories, brands, featuredProducts] = await Promise.all([
+    getActiveCategories(),
+    getActiveBrands(),
     priceMode === "wholesale"
       ? prisma.product.findMany({
           where: { isActive: true, isFeatured: true },
@@ -42,67 +48,48 @@ export default async function HomePage() {
       <Header />
 
       <main className="flex-1">
-        <section className="border-b border-navy-soft bg-navy-surface">
-          <div className="mx-auto max-w-6xl animate-fade-in px-4 py-24 text-center">
-            <p className="mb-3 text-sm font-semibold tracking-wide text-gold-champagne">
-              Ovi Mobile
-            </p>
-            <h1 className="mx-auto max-w-2xl text-3xl font-bold text-neutral-bg md:text-5xl">
-              إكسسوارات موبايل بجودة عالية، بالتجزئة والجملة
-            </h1>
-            <p className="mx-auto mt-4 max-w-xl text-neutral-bg/60">
-              منصة عوفي موبايل لإدارة المبيعات والمخزون والتجار والمندوبين — قريباً.
-            </p>
-            <div className="mt-8 flex items-center justify-center gap-3">
-              <Link href={shopCtaHref}>
-                <Button variant="primary" size="lg">
-                  تصفح المنتجات
-                </Button>
-              </Link>
-              <Link href="/register/merchant">
-                <Button variant="outline" size="lg">
-                  انضم كتاجر جملة
-                </Button>
-              </Link>
-            </div>
-          </div>
-        </section>
+        <HeroBanner
+          primaryHref={shopCtaHref}
+          primaryLabel="تصفح المنتجات"
+          secondaryHref={user ? getPostLoginRedirect(user) : "/login"}
+          secondaryLabel={user ? "حسابي" : "تسجيل الدخول"}
+          tertiaryHref={!user ? "/register/merchant" : undefined}
+          tertiaryLabel={!user ? "انضم كتاجر جملة" : undefined}
+        />
+
+        <StorefrontSection title="تسوّق حسب القسم" subtitle="اختر القسم المناسب لاحتياجاتك">
+          <CategoryStrip categories={categories} variant="cards" />
+        </StorefrontSection>
 
         {featuredProducts.length > 0 && (
-          <section className="mx-auto max-w-6xl px-4 py-20">
-            <div className="mb-8 flex items-center justify-between">
-              <h2 className="text-2xl font-semibold text-neutral-bg">منتجات مميزة</h2>
+          <StorefrontSection
+            title="منتجات مميزة"
+            subtitle="أفضل المنتجات اختياراً لهذا الأسبوع"
+            action={
               <Link href="/products" className="text-sm font-medium text-gold-dark hover:underline">
-                عرض كل المنتجات
+                عرض جميع المنتجات
               </Link>
-            </div>
+            }
+          >
             <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
               {featuredProducts.map((product) => (
                 <ProductCard key={product.id} product={product} cartEligibility={cartEligibility} />
               ))}
             </div>
-          </section>
+          </StorefrontSection>
         )}
 
-        {categories.length > 0 && (
-          <section className="border-t border-navy-soft bg-navy-surface">
-            <div className="mx-auto max-w-6xl px-4 py-20">
-              <h2 className="mb-8 text-2xl font-semibold text-neutral-bg">الأقسام المميزة</h2>
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                {categories.map((category) => (
-                  <Link key={category.id} href={`/products?category=${category.slug}`}>
-                    <Card className="h-full transition-all hover:-translate-y-0.5 hover:border-gold-champagne/50 hover:shadow-lg">
-                      <CardHeader>
-                        <CardTitle>{category.nameAr ?? category.name}</CardTitle>
-                      </CardHeader>
-                      <CardContent>تصفح منتجات هذا القسم</CardContent>
-                    </Card>
-                  </Link>
-                ))}
-              </div>
-            </div>
-          </section>
-        )}
+        <StorefrontSection
+          title="البراندات"
+          subtitle="نتعامل مع علامات تجارية موثوقة"
+          className="border-t border-navy-soft bg-navy-surface"
+        >
+          <BrandShowcase brands={brands} />
+        </StorefrontSection>
+
+        <StorefrontSection>
+          <TrustStrip />
+        </StorefrontSection>
       </main>
 
       <Footer />
