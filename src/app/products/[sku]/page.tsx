@@ -1,13 +1,12 @@
 import { notFound } from "next/navigation";
-import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
-import { Badge } from "@/components/ui/Badge";
 import { ProductGallery } from "@/components/catalog/ProductGallery";
 import { ProductCard } from "@/components/catalog/ProductCard";
-import { AddToCartButton } from "@/components/cart/AddToCartButton";
-import { formatCurrencyFromCents } from "@/lib/utils";
+import { ProductBreadcrumbs } from "@/components/catalog/ProductBreadcrumbs";
+import { ProductPurchasePanel } from "@/components/catalog/ProductPurchasePanel";
+import { ProductInfoTabs } from "@/components/catalog/ProductInfoTabs";
 import { getSession } from "@/lib/auth/session";
 import { getCartEligibility } from "@/lib/cart";
 import {
@@ -47,6 +46,9 @@ export default async function ProductDetailPage({ params }: ProductDetailPagePro
   const totalStock = product.inventoryItems.reduce((sum, item) => sum + item.quantity, 0);
   const priceCents = readCatalogPriceCents(product);
   const isWholesale = isWholesalePriced(product);
+  const title = product.nameAr ?? product.name;
+  const categoryName = product.category?.nameAr ?? product.category?.name ?? null;
+  const brandName = product.brand?.name ?? null;
 
   const relatedProducts = product.categoryId
     ? priceMode === "wholesale"
@@ -69,56 +71,38 @@ export default async function ProductDetailPage({ params }: ProductDetailPagePro
       <Header />
 
       <main className="flex-1">
-        <section className="mx-auto max-w-6xl px-4 py-12">
-          <div className="grid grid-cols-1 gap-10 lg:grid-cols-2">
-            <ProductGallery images={product.images} name={product.nameAr ?? product.name} />
+        <section className="mx-auto max-w-6xl px-4 py-8">
+          <ProductBreadcrumbs category={product.category} productTitle={title} />
 
-            <div className="flex flex-col gap-4">
-              {product.isFeatured && <Badge variant="gold">مميز</Badge>}
-              <h1 className="text-2xl font-bold text-neutral-bg">{product.nameAr ?? product.name}</h1>
+          <div className="mt-6 grid grid-cols-1 gap-8 lg:grid-cols-2">
+            <ProductGallery images={product.images} name={title} />
 
-              <div className="flex flex-wrap items-center gap-2 text-sm text-neutral-bg/60">
-                {product.brand && <span>{product.brand.name}</span>}
-                {product.category && (
-                  <Badge variant="neutral">{product.category.nameAr ?? product.category.name}</Badge>
-                )}
-              </div>
+            <ProductPurchasePanel
+              productId={product.id}
+              title={title}
+              sku={product.sku}
+              categoryName={categoryName}
+              brandName={brandName}
+              priceCents={priceCents}
+              isWholesale={isWholesale}
+              isFeatured={product.isFeatured}
+              totalStock={totalStock}
+              cartEligibility={cartEligibility}
+            />
+          </div>
 
-              <div className="flex items-center gap-3">
-                <p className="text-3xl font-semibold text-gold-champagne">
-                  {formatCurrencyFromCents(priceCents)}
-                </p>
-                {isWholesale && <Badge variant="gold">سعر الجملة</Badge>}
-              </div>
-
-              <Badge variant={totalStock > 0 ? "success" : "danger"} className="self-start">
-                {totalStock > 0 ? "متوفر" : "غير متوفر حالياً"}
-              </Badge>
-
-              {(product.descriptionAr ?? product.description) && (
-                <p className="leading-relaxed text-neutral-bg/80">
-                  {product.descriptionAr ?? product.description}
-                </p>
-              )}
-
-              <div className="mt-4">
-                {cartEligibility === "guest" && (
-                  <Link
-                    href="/login"
-                    className="inline-block rounded-card border border-gold-champagne/40 px-4 py-2 text-sm text-gold-dark transition-colors hover:bg-gold-champagne/10"
-                  >
-                    سجّل الدخول للشراء
-                  </Link>
-                )}
-                {cartEligibility === "eligible" && totalStock > 0 && (
-                  <AddToCartButton productId={product.id} maxQuantity={totalStock} showQuantityInput />
-                )}
-              </div>
-            </div>
+          <div className="mt-10">
+            <ProductInfoTabs
+              description={product.descriptionAr ?? product.description}
+              sku={product.sku}
+              categoryName={categoryName}
+              brandName={brandName}
+              inStock={totalStock > 0}
+            />
           </div>
 
           {relatedProducts.length > 0 && (
-            <div className="mt-16">
+            <div className="mt-16 animate-fade-in">
               <h2 className="mb-6 text-xl font-semibold text-neutral-bg">منتجات ذات صلة</h2>
               <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
                 {relatedProducts.map((related) => (
