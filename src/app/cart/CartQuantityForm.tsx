@@ -3,6 +3,7 @@
 import { useActionState } from "react";
 import { updateCartItemQuantity, type CartActionState } from "./actions";
 import { Button } from "@/components/ui/Button";
+import { Spinner } from "@/components/ui/Spinner";
 
 const initialState: CartActionState = {};
 
@@ -28,6 +29,7 @@ export function CartQuantityForm({ cartItemId, quantity, maxQuantity }: CartQuan
           className="h-9 w-20 rounded-card border border-navy-soft bg-navy-deep px-2 text-sm text-neutral-bg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold-champagne"
         />
         <Button type="submit" variant="outline" size="sm" disabled={isPending}>
+          {isPending && <Spinner />}
           تحديث
         </Button>
       </div>

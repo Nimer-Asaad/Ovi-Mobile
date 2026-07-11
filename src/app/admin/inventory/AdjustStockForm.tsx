@@ -6,6 +6,7 @@ import { Select } from "@/components/ui/Select";
 import { Input } from "@/components/ui/Input";
 import { Textarea } from "@/components/ui/Textarea";
 import { Button } from "@/components/ui/Button";
+import { Spinner } from "@/components/ui/Spinner";
 import { MANUAL_STOCK_MOVEMENT_TYPES } from "@/lib/constants";
 
 interface ProductOption {
@@ -64,6 +65,7 @@ export function AdjustStockForm({ products, selectedProductId }: AdjustStockForm
       )}
 
       <Button type="submit" disabled={isPending}>
+        {isPending && <Spinner />}
         {isPending ? "جارٍ الحفظ..." : "حفظ الحركة"}
       </Button>
     </form>

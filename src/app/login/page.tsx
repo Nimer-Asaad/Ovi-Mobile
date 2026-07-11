@@ -7,6 +7,7 @@ import { GoogleErrorBanner } from "./GoogleErrorBanner";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
+import { Spinner } from "@/components/ui/Spinner";
 
 const initialState: LoginState = {};
 
@@ -68,6 +69,7 @@ export default function LoginPage() {
             )}
 
             <Button type="submit" className="w-full" disabled={isPending}>
+              {isPending && <Spinner />}
               {isPending ? "جارٍ الدخول..." : "دخول"}
             </Button>
           </form>

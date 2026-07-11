@@ -6,6 +6,7 @@ import { registerCustomer, type RegisterCustomerState } from "./actions";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
+import { Spinner } from "@/components/ui/Spinner";
 
 const initialState: RegisterCustomerState = {};
 
@@ -56,6 +57,7 @@ export default function RegisterPage() {
             )}
 
             <Button type="submit" className="w-full" disabled={isPending}>
+              {isPending && <Spinner />}
               {isPending ? "جارٍ الإنشاء..." : "إنشاء حساب"}
             </Button>
           </form>

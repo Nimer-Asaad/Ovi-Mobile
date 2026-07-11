@@ -144,6 +144,7 @@ export default async function AdminRepDetailPage({ params }: AdminRepDetailPageP
                             src={thumbnail.url}
                             alt={thumbnail.altText ?? item.product.name}
                             className="h-full w-full object-cover"
+                    loading="lazy"
                           />
                         ) : (
                           <ProductImagePlaceholder className="h-full w-full" />

@@ -43,7 +43,7 @@ export default async function HomePage() {
 
       <main className="flex-1">
         <section className="border-b border-navy-soft bg-navy-surface">
-          <div className="mx-auto max-w-6xl px-4 py-24 text-center">
+          <div className="mx-auto max-w-6xl animate-fade-in px-4 py-24 text-center">
             <p className="mb-3 text-sm font-semibold tracking-wide text-gold-champagne">
               Ovi Mobile
             </p>

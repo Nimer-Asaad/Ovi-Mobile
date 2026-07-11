@@ -6,6 +6,7 @@ import { Select } from "@/components/ui/Select";
 import { Input } from "@/components/ui/Input";
 import { Textarea } from "@/components/ui/Textarea";
 import { Button } from "@/components/ui/Button";
+import { Spinner } from "@/components/ui/Spinner";
 
 interface ProductOption {
   id: string;
@@ -50,6 +51,7 @@ export function AssignStockForm({ repId, products }: AssignStockFormProps) {
       )}
 
       <Button type="submit" disabled={isPending}>
+        {isPending && <Spinner />}
         {isPending ? "جارٍ الحفظ..." : "تخصيص المخزون"}
       </Button>
     </form>

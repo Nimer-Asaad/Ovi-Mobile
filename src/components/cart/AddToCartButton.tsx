@@ -3,6 +3,7 @@
 import { useActionState } from "react";
 import { addToCart, type CartActionState } from "@/app/cart/actions";
 import { Button } from "@/components/ui/Button";
+import { Spinner } from "@/components/ui/Spinner";
 
 const initialState: CartActionState = {};
 
@@ -37,6 +38,7 @@ export function AddToCartButton({ productId, maxQuantity, showQuantityInput = fa
         size="sm"
         className={showQuantityInput ? "w-full sm:w-auto" : "w-full"}
       >
+        {isPending && <Spinner />}
         {isPending ? "جارٍ الإضافة..." : "إضافة للسلة"}
       </Button>
 

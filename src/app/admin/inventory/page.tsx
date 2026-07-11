@@ -178,6 +178,7 @@ export default async function AdminInventoryPage({ searchParams }: AdminInventor
                         src={thumbnail.url}
                         alt={thumbnail.altText ?? row.name}
                         className="h-full w-full object-cover"
+                    loading="lazy"
                       />
                     ) : (
                       <ProductImagePlaceholder className="h-full w-full" />

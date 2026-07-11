@@ -4,6 +4,7 @@ import { useActionState } from "react";
 import { updateOrderStatus, type OrderActionState } from "./actions";
 import { Select } from "@/components/ui/Select";
 import { Button } from "@/components/ui/Button";
+import { Spinner } from "@/components/ui/Spinner";
 import { ORDER_STATUSES } from "@/lib/constants";
 import { getOrderStatusLabel } from "@/lib/order-labels";
 
@@ -29,6 +30,7 @@ export function OrderStatusForm({ orderNumber, currentStatus }: OrderStatusFormP
           ))}
         </Select>
         <Button type="submit" size="sm" disabled={isPending}>
+          {isPending && <Spinner />}
           {isPending ? "جارٍ التحديث..." : "تحديث الحالة"}
         </Button>
       </div>

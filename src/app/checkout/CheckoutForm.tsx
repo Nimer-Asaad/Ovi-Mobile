@@ -5,6 +5,7 @@ import { placeOrder, type CheckoutState } from "./actions";
 import { Input } from "@/components/ui/Input";
 import { Textarea } from "@/components/ui/Textarea";
 import { Button } from "@/components/ui/Button";
+import { Spinner } from "@/components/ui/Spinner";
 
 const initialState: CheckoutState = {};
 
@@ -49,6 +50,7 @@ export function CheckoutForm({ defaultName }: CheckoutFormProps) {
       )}
 
       <Button type="submit" disabled={isPending} className="self-start">
+        {isPending && <Spinner />}
         {isPending ? "جارٍ تنفيذ الطلب..." : "تأكيد الطلب"}
       </Button>
     </form>

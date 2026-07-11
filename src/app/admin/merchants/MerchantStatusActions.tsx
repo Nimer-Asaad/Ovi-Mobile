@@ -3,6 +3,7 @@
 import { useActionState } from "react";
 import { updateMerchantStatus, type MerchantStatusState } from "./actions";
 import { Button } from "@/components/ui/Button";
+import { Spinner } from "@/components/ui/Spinner";
 import { MERCHANT_STATUSES } from "@/lib/constants";
 
 const initialState: MerchantStatusState = {};
@@ -21,6 +22,7 @@ function StatusButton({ merchantId, targetStatus, label, variant }: StatusButton
   return (
     <form action={formAction} className="flex flex-col gap-1">
       <Button type="submit" variant={variant} disabled={isPending}>
+        {isPending && <Spinner />}
         {isPending ? "جارٍ التحديث..." : label}
       </Button>
       {state.error && (

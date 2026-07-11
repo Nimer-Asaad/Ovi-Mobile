@@ -1,4 +1,4 @@
-import { Button } from "@/components/ui/Button";
+import { SubmitButton } from "@/components/ui/SubmitButton";
 
 export function ActiveToggleForm({
   isActive,
@@ -9,9 +9,9 @@ export function ActiveToggleForm({
 }) {
   return (
     <form action={action}>
-      <Button type="submit" variant="outline" size="sm">
+      <SubmitButton variant="outline" size="sm">
         {isActive ? "إيقاف" : "تفعيل"}
-      </Button>
+      </SubmitButton>
     </form>
   );
 }

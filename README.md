@@ -11,10 +11,11 @@ Repository: https://github.com/Nimer-Asaad/Ovi-Mobile
 
 ## Status
 
-Phase 14 — customer experience and Google login. Phases 1–13 (auth, catalog,
-product images, cart/checkout, admin order management, inventory
-management, sales rep stock and direct selling, merchant management, UI/UX
-polish, deployment prep, light theme redesign) are complete. No payment
+Phase 15 — performance polish, loading feedback, motion, and navy
+navigation. Phases 1–14 (auth, catalog, product images, cart/checkout,
+admin order management, inventory management, sales rep stock and direct
+selling, merchant management, UI/UX polish, deployment prep, light theme
+redesign, customer dashboard, Google login) are complete. No payment
 gateway, invoices, finance/reporting, or delivery integration yet — the app
 is not live in production.
 
@@ -43,6 +44,16 @@ npm run dev
 ```
 
 The app runs at `http://localhost:3000`.
+
+`npm run dev` can feel slower than a real deployment — it compiles each
+route on demand and re-runs Fast Refresh on every save, which is normal
+dev-mode overhead, not a sign of a slow app. To check real, production-like
+speed instead:
+
+```bash
+npm run build
+npm start
+```
 
 ### Command reference
 

@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { destroySession } from "@/lib/auth/session";
-import { Button } from "@/components/ui/Button";
+import { SubmitButton } from "@/components/ui/SubmitButton";
 
 async function logout() {
   "use server";
@@ -8,12 +8,18 @@ async function logout() {
   redirect("/login");
 }
 
-export function LogoutButton() {
+export interface LogoutButtonProps {
+  /** Override styling — e.g. for placement on the dark navy Header/AdminTopbar
+   * instead of the default light-theme outline button look. */
+  className?: string;
+}
+
+export function LogoutButton({ className }: LogoutButtonProps) {
   return (
     <form action={logout}>
-      <Button type="submit" variant="outline" size="sm">
+      <SubmitButton variant="outline" size="sm" pendingText="جارٍ الخروج..." className={className}>
         تسجيل الخروج
-      </Button>
+      </SubmitButton>
     </form>
   );
 }

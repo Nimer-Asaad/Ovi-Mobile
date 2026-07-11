@@ -37,6 +37,15 @@ const config: Config = {
         neutral: {
           bg: "#0F172A", // primary text (dark)
         },
+        // Phase 15: dark navy "chrome" — used ONLY for the public Header,
+        // AdminSidebar, and AdminTopbar (including its mobile nav strip).
+        // Everything else (page backgrounds, cards, tables, forms) stays on
+        // the light navy.* tokens above — do not use chrome.* for content.
+        chrome: {
+          DEFAULT: "#081827", // dark navy chrome background
+          surface: "#0F2438", // lighter navy — hover/active rows on chrome
+          border: "#1B324A", // subtle border within dark chrome
+        },
       },
       fontFamily: {
         sans: [
@@ -55,6 +64,21 @@ const config: Config = {
       },
       boxShadow: {
         card: "0 1px 2px 0 rgba(15, 23, 42, 0.04), 0 4px 16px -4px rgba(15, 23, 42, 0.08)",
+      },
+      keyframes: {
+        "nav-progress": {
+          "0%": { transform: "translateX(-100%)" },
+          "50%": { transform: "translateX(10%)" },
+          "100%": { transform: "translateX(100%)" },
+        },
+        "fade-in": {
+          from: { opacity: "0", transform: "translateY(4px)" },
+          to: { opacity: "1", transform: "translateY(0)" },
+        },
+      },
+      animation: {
+        "nav-progress": "nav-progress 1s ease-in-out infinite",
+        "fade-in": "fade-in 0.4s ease-out both",
       },
     },
   },

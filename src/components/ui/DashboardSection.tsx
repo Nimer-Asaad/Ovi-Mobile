@@ -13,7 +13,7 @@ export interface DashboardSectionProps {
  * instead of blending into an equally-white container. Presentational only. */
 export function DashboardSection({ title, subtitle, children }: DashboardSectionProps) {
   return (
-    <section className="rounded-card border border-navy-soft bg-navy-deep p-6">
+    <section className="animate-fade-in rounded-card border border-navy-soft bg-navy-deep p-6">
       <div className="mb-5">
         <h2 className="text-lg font-semibold text-neutral-bg">{title}</h2>
         {subtitle && <p className="mt-1 text-sm text-neutral-bg/60">{subtitle}</p>}
