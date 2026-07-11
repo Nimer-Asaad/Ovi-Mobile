@@ -33,11 +33,11 @@ export function OrderStatusForm({ orderNumber, currentStatus }: OrderStatusFormP
         </Button>
       </div>
       {state.error && (
-        <p className="text-xs text-rose-400" role="alert">
+        <p className="text-xs text-rose-600" role="alert">
           {state.error}
         </p>
       )}
-      {state.success && <p className="text-xs text-emerald-400">تم تحديث حالة الطلب</p>}
+      {state.success && <p className="text-xs text-emerald-600">تم تحديث حالة الطلب</p>}
     </form>
   );
 }

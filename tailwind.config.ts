@@ -5,6 +5,14 @@ import type { Config } from "tailwindcss";
  * This is the single source of truth for color usage across the app.
  * Do not hardcode hex values in components — reference these tokens instead
  * (e.g. `bg-navy-deep`, `text-gold-champagne`).
+ *
+ * Phase 13: token *names* are kept stable (navy.*, gold.*, neutral.bg) so no
+ * component classNames needed to change, but the hex values now implement a
+ * light theme instead of the original dark one — navy.deep is the page
+ * background (light), navy.surface is the white card surface, gold.* is a
+ * teal/cyan accent, and neutral.bg is the primary (dark) text color. Every
+ * existing `text-neutral-bg/50..80` opacity variant still works and now
+ * produces correctly muted grays automatically.
  */
 const config: Config = {
   darkMode: "class",
@@ -17,17 +25,17 @@ const config: Config = {
     extend: {
       colors: {
         navy: {
-          deep: "#0F172A", // primary background
-          surface: "#111827", // cards / panels
-          soft: "#1E293B", // elevated surfaces, borders
+          deep: "#F5F7FA", // page background (light)
+          surface: "#FFFFFF", // cards / panels (white)
+          soft: "#E2E8F0", // borders, dividers, subtle hover tints
         },
         gold: {
-          champagne: "#C8A97E", // primary accent
-          light: "#D6B98C", // hover / highlight
-          dark: "#A8844F", // active / pressed
+          champagne: "#18B7D3", // primary accent (teal)
+          light: "#4CC9DE", // lighter accent
+          dark: "#0F96AE", // active / pressed accent
         },
         neutral: {
-          bg: "#F8FAFC", // light-mode background
+          bg: "#0F172A", // primary text (dark)
         },
       },
       fontFamily: {
@@ -46,7 +54,7 @@ const config: Config = {
         card: "0.75rem",
       },
       boxShadow: {
-        card: "0 4px 24px -4px rgba(15, 23, 42, 0.35)",
+        card: "0 1px 2px 0 rgba(15, 23, 42, 0.04), 0 4px 16px -4px rgba(15, 23, 42, 0.08)",
       },
     },
   },

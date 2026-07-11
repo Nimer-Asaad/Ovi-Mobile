@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Cairo, Inter } from "next/font/google";
 import "./globals.css";
 
@@ -17,6 +17,11 @@ const inter = Inter({
 export const metadata: Metadata = {
   title: "Ovi Mobile",
   description: "إكسسوارات موبايل مميزة — بيع بالتجزئة والجملة",
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
 };
 
 /**

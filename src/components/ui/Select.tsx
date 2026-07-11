@@ -29,7 +29,7 @@ export function Select({ label, error, className, id, name, children, ...props }
       >
         {children}
       </select>
-      {error && <span className="text-xs text-rose-400">{error}</span>}
+      {error && <span className="text-xs text-rose-600">{error}</span>}
     </div>
   );
 }

@@ -105,7 +105,7 @@ export default async function ProductDetailPage({ params }: ProductDetailPagePro
                 {cartEligibility === "guest" && (
                   <Link
                     href="/login"
-                    className="inline-block rounded-card border border-gold-champagne/40 px-4 py-2 text-sm text-gold-light transition-colors hover:bg-gold-champagne/10"
+                    className="inline-block rounded-card border border-gold-champagne/40 px-4 py-2 text-sm text-gold-dark transition-colors hover:bg-gold-champagne/10"
                   >
                     سجّل الدخول للشراء
                   </Link>

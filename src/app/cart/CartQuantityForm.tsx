@@ -32,7 +32,7 @@ export function CartQuantityForm({ cartItemId, quantity, maxQuantity }: CartQuan
         </Button>
       </div>
       {state.error && (
-        <p className="text-xs text-rose-400" role="alert">
+        <p className="text-xs text-rose-600" role="alert">
           {state.error}
         </p>
       )}

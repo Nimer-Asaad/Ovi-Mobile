@@ -40,35 +40,37 @@ export default async function HomePage() {
       <Header />
 
       <main className="flex-1">
-        <section className="mx-auto max-w-6xl px-4 py-20 text-center">
-          <p className="mb-3 text-sm font-medium tracking-wide text-gold-champagne">
-            Ovi Mobile
-          </p>
-          <h1 className="mx-auto max-w-2xl text-3xl font-bold text-neutral-bg md:text-5xl">
-            إكسسوارات موبايل بجودة عالية، بالتجزئة والجملة
-          </h1>
-          <p className="mx-auto mt-4 max-w-xl text-neutral-bg/70">
-            منصة عوفي موبايل لإدارة المبيعات والمخزون والتجار والمندوبين — قريباً.
-          </p>
-          <div className="mt-8 flex items-center justify-center gap-3">
-            <Link href="/products">
-              <Button variant="primary" size="lg">
-                تصفح المنتجات
-              </Button>
-            </Link>
-            <Link href="/register/merchant">
-              <Button variant="outline" size="lg">
-                انضم كتاجر جملة
-              </Button>
-            </Link>
+        <section className="border-b border-navy-soft bg-navy-surface">
+          <div className="mx-auto max-w-6xl px-4 py-24 text-center">
+            <p className="mb-3 text-sm font-semibold tracking-wide text-gold-champagne">
+              Ovi Mobile
+            </p>
+            <h1 className="mx-auto max-w-2xl text-3xl font-bold text-neutral-bg md:text-5xl">
+              إكسسوارات موبايل بجودة عالية، بالتجزئة والجملة
+            </h1>
+            <p className="mx-auto mt-4 max-w-xl text-neutral-bg/60">
+              منصة عوفي موبايل لإدارة المبيعات والمخزون والتجار والمندوبين — قريباً.
+            </p>
+            <div className="mt-8 flex items-center justify-center gap-3">
+              <Link href="/products">
+                <Button variant="primary" size="lg">
+                  تصفح المنتجات
+                </Button>
+              </Link>
+              <Link href="/register/merchant">
+                <Button variant="outline" size="lg">
+                  انضم كتاجر جملة
+                </Button>
+              </Link>
+            </div>
           </div>
         </section>
 
         {featuredProducts.length > 0 && (
-          <section className="mx-auto max-w-6xl px-4 pb-20">
-            <div className="mb-6 flex items-center justify-between">
-              <h2 className="text-xl font-semibold text-neutral-bg">منتجات مميزة</h2>
-              <Link href="/products" className="text-sm text-gold-champagne hover:underline">
+          <section className="mx-auto max-w-6xl px-4 py-20">
+            <div className="mb-8 flex items-center justify-between">
+              <h2 className="text-2xl font-semibold text-neutral-bg">منتجات مميزة</h2>
+              <Link href="/products" className="text-sm font-medium text-gold-dark hover:underline">
                 عرض كل المنتجات
               </Link>
             </div>
@@ -81,19 +83,21 @@ export default async function HomePage() {
         )}
 
         {categories.length > 0 && (
-          <section className="mx-auto max-w-6xl px-4 pb-20">
-            <h2 className="mb-6 text-xl font-semibold text-neutral-bg">الأقسام المميزة</h2>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              {categories.map((category) => (
-                <Link key={category.id} href={`/products?category=${category.slug}`}>
-                  <Card className="h-full transition-colors hover:border-gold-champagne/50">
-                    <CardHeader>
-                      <CardTitle>{category.nameAr ?? category.name}</CardTitle>
-                    </CardHeader>
-                    <CardContent>تصفح منتجات هذا القسم</CardContent>
-                  </Card>
-                </Link>
-              ))}
+          <section className="border-t border-navy-soft bg-navy-surface">
+            <div className="mx-auto max-w-6xl px-4 py-20">
+              <h2 className="mb-8 text-2xl font-semibold text-neutral-bg">الأقسام المميزة</h2>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                {categories.map((category) => (
+                  <Link key={category.id} href={`/products?category=${category.slug}`}>
+                    <Card className="h-full transition-all hover:-translate-y-0.5 hover:border-gold-champagne/50 hover:shadow-lg">
+                      <CardHeader>
+                        <CardTitle>{category.nameAr ?? category.name}</CardTitle>
+                      </CardHeader>
+                      <CardContent>تصفح منتجات هذا القسم</CardContent>
+                    </Card>
+                  </Link>
+                ))}
+              </div>
             </div>
           </section>
         )}

@@ -24,11 +24,11 @@ function StatusButton({ merchantId, targetStatus, label, variant }: StatusButton
         {isPending ? "جارٍ التحديث..." : label}
       </Button>
       {state.error && (
-        <p className="text-xs text-rose-400" role="alert">
+        <p className="text-xs text-rose-600" role="alert">
           {state.error}
         </p>
       )}
-      {state.success && <p className="text-xs text-emerald-400">{state.success}</p>}
+      {state.success && <p className="text-xs text-emerald-600">{state.success}</p>}
     </form>
   );
 }

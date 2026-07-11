@@ -5,10 +5,10 @@ import { slugify } from "../src/lib/utils";
 
 const prisma = new PrismaClient();
 
-/** Branded placehold.co URL matching the app's navy/gold palette — stable,
- * dependency-free, no API key. */
+/** Branded placehold.co URL matching the app's light teal/navy palette —
+ * stable, dependency-free, no API key. */
 function placeholderImage(label: string): string {
-  return `https://placehold.co/600x600/1e293b/c8a97e?text=${encodeURIComponent(label)}`;
+  return `https://placehold.co/600x600/eef8fb/0f172a?text=${encodeURIComponent(label)}`;
 }
 
 /**

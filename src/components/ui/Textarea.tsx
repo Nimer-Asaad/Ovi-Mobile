@@ -28,7 +28,7 @@ export function Textarea({ label, error, className, id, name, ...props }: Textar
         )}
         {...props}
       />
-      {error && <span className="text-xs text-rose-400">{error}</span>}
+      {error && <span className="text-xs text-rose-600">{error}</span>}
     </div>
   );
 }

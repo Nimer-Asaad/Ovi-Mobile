@@ -3,6 +3,8 @@
 @tailwind utilities;
 
 @layer base {
+  /* bg-navy-deep / text-neutral-bg resolve to the light theme's page
+   * background + dark primary text — see tailwind.config.ts. */
   body {
     @apply bg-navy-deep text-neutral-bg antialiased;
   }

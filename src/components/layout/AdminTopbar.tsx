@@ -12,7 +12,7 @@ export interface AdminTopbarProps {
  * stay reachable on small screens. Notifications land in a later phase. */
 export function AdminTopbar({ title }: AdminTopbarProps) {
   return (
-    <header className="border-b border-navy-soft bg-navy-deep">
+    <header className="border-b border-navy-soft bg-navy-surface shadow-sm">
       <div className="flex h-16 items-center justify-between px-6">
         <h1 className="text-lg font-semibold text-neutral-bg">{title}</h1>
 
@@ -30,7 +30,7 @@ export function AdminTopbar({ title }: AdminTopbarProps) {
           <Link
             key={item.href}
             href={item.href}
-            className="shrink-0 whitespace-nowrap rounded-full border border-navy-soft px-3 py-1.5 text-xs text-neutral-bg/80 transition-colors hover:border-gold-champagne/40 hover:text-gold-champagne"
+            className="shrink-0 whitespace-nowrap rounded-full border border-navy-soft px-3 py-1.5 text-xs font-medium text-neutral-bg/70 transition-colors hover:border-gold-champagne/40 hover:text-gold-dark"
           >
             {item.labelAr}
           </Link>

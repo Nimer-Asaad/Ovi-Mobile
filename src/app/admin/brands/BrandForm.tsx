@@ -34,7 +34,7 @@ export function BrandForm({ brand }: BrandFormProps) {
       />
 
       {state.error && (
-        <p className="text-sm text-rose-400" role="alert">
+        <p className="text-sm text-rose-600" role="alert">
           {state.error}
         </p>
       )}

@@ -41,11 +41,11 @@ export function AddToCartButton({ productId, maxQuantity, showQuantityInput = fa
       </Button>
 
       {state.error && (
-        <p className="text-xs text-rose-400" role="alert">
+        <p className="text-xs text-rose-600" role="alert">
           {state.error}
         </p>
       )}
-      {state.success && <p className="text-xs text-emerald-400">تمت الإضافة إلى السلة</p>}
+      {state.success && <p className="text-xs text-emerald-600">تمت الإضافة إلى السلة</p>}
     </form>
   );
 }

@@ -66,7 +66,7 @@ export function ProductCard({ product, cartEligibility = "ineligible" }: Product
           {cartEligibility === "guest" ? (
             <Link
               href="/login"
-              className="block rounded-card border border-gold-champagne/40 px-3 py-2 text-center text-sm text-gold-light transition-colors hover:bg-gold-champagne/10"
+              className="block rounded-card border border-gold-champagne/40 px-3 py-2 text-center text-sm text-gold-dark transition-colors hover:bg-gold-champagne/10"
             >
               سجّل الدخول للشراء
             </Link>

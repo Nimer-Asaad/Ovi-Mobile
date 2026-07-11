@@ -1,6 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { StatCard } from "@/components/ui/StatCard";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { DashboardSection } from "@/components/ui/DashboardSection";
 import { formatCurrencyFromCents } from "@/lib/utils";
 import { LOW_STOCK_THRESHOLD, ORDER_STATUSES, ORDER_SOURCES, MERCHANT_STATUSES } from "@/lib/constants";
 import { getInventoryDashboardStats } from "@/lib/inventory";
@@ -205,56 +207,52 @@ export default async function AdminDashboardPage() {
   ];
 
   return (
-    <div className="flex flex-col gap-8">
-      <div>
-        <h2 className="text-xl font-semibold text-neutral-bg">نظرة عامة على الكتالوج</h2>
-        <p className="mt-1 text-sm text-neutral-bg/60">إحصائيات مباشرة من كتالوج المنتجات.</p>
-        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+    <div className="flex flex-col gap-6">
+      <PageHeader
+        as="h1"
+        title="نظرة عامة"
+        subtitle="ملخص مباشر لأداء المتجر — الكتالوج، المخزون، الطلبات، التجار والمندوبون"
+      />
+
+      <DashboardSection title="نظرة عامة على الكتالوج" subtitle="إحصائيات مباشرة من كتالوج المنتجات">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {catalogStats.map((stat) => (
             <StatCard key={stat.label} label={stat.label} value={stat.value} badge={stat.badge} />
           ))}
         </div>
-      </div>
+      </DashboardSection>
 
-      <div>
-        <h2 className="text-xl font-semibold text-neutral-bg">نظرة عامة على المخزون</h2>
-        <p className="mt-1 text-sm text-neutral-bg/60">إحصائيات مباشرة من مخزون المستودع الرئيسي.</p>
-        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <DashboardSection title="نظرة عامة على المخزون" subtitle="إحصائيات مباشرة من مخزون المستودع الرئيسي">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {inventoryOverviewStats.map((stat) => (
             <StatCard key={stat.label} label={stat.label} value={stat.value} badge={stat.badge} />
           ))}
         </div>
-      </div>
+      </DashboardSection>
 
-      <div>
-        <h2 className="text-xl font-semibold text-neutral-bg">نظرة عامة على الطلبات</h2>
-        <p className="mt-1 text-sm text-neutral-bg/60">إحصائيات مباشرة من طلبات العملاء والتجار.</p>
-        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <DashboardSection title="نظرة عامة على الطلبات" subtitle="إحصائيات مباشرة من طلبات العملاء والتجار">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {orderStats.map((stat) => (
             <StatCard key={stat.label} label={stat.label} value={stat.value} badge={stat.badge} />
           ))}
         </div>
-      </div>
+      </DashboardSection>
 
-      <div>
-        <h2 className="text-xl font-semibold text-neutral-bg">نظرة عامة على التجار</h2>
-        <p className="mt-1 text-sm text-neutral-bg/60">إحصائيات مباشرة من تجار الجملة وطلباتهم.</p>
-        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <DashboardSection title="نظرة عامة على التجار" subtitle="إحصائيات مباشرة من تجار الجملة وطلباتهم">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {merchantStats.map((stat) => (
             <StatCard key={stat.label} label={stat.label} value={stat.value} badge={stat.badge} />
           ))}
         </div>
-      </div>
+      </DashboardSection>
 
-      <div>
-        <h2 className="text-xl font-semibold text-neutral-bg">نظرة عامة على المندوبين</h2>
-        <p className="mt-1 text-sm text-neutral-bg/60">إحصائيات مباشرة من مخزون المندوبين.</p>
-        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <DashboardSection title="نظرة عامة على المندوبين" subtitle="إحصائيات مباشرة من مخزون المندوبين ومبيعاتهم">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {repStats.map((stat) => (
             <StatCard key={stat.label} label={stat.label} value={stat.value} badge={stat.badge} />
           ))}
         </div>
-      </div>
+      </DashboardSection>
 
       <Card>
         <CardHeader>
