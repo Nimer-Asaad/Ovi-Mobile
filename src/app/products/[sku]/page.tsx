@@ -88,6 +88,7 @@ export default async function ProductDetailPage({ params }: ProductDetailPagePro
               isFeatured={product.isFeatured}
               totalStock={totalStock}
               cartEligibility={cartEligibility}
+              imageUrl={product.images[0]?.url ?? null}
             />
           </div>
 

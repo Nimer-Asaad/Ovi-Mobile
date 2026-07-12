@@ -71,7 +71,13 @@ export function ProductCard({ product, cartEligibility = "ineligible" }: Product
               سجّل الدخول للشراء
             </Link>
           ) : (
-            <AddToCartButton productId={product.id} />
+            <AddToCartButton
+              productId={product.id}
+              productName={product.nameAr ?? product.name}
+              productSku={product.sku}
+              productImageUrl={thumbnail?.url ?? null}
+              unitPriceCents={priceCents}
+            />
           )}
         </div>
       )}

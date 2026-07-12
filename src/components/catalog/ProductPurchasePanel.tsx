@@ -16,6 +16,7 @@ export interface ProductPurchasePanelProps {
   isFeatured: boolean;
   totalStock: number;
   cartEligibility: CartEligibility;
+  imageUrl?: string | null;
 }
 
 /** Purchase card — title/meta/price/stock/cart action. Purely presentational:
@@ -33,6 +34,7 @@ export function ProductPurchasePanel({
   isFeatured,
   totalStock,
   cartEligibility,
+  imageUrl,
 }: ProductPurchasePanelProps) {
   return (
     <Card className="flex animate-fade-in flex-col gap-4 transition-shadow hover:shadow-lg">
@@ -67,7 +69,15 @@ export function ProductPurchasePanel({
           </Link>
         )}
         {cartEligibility === "eligible" && totalStock > 0 && (
-          <AddToCartButton productId={productId} maxQuantity={totalStock} showQuantityInput />
+          <AddToCartButton
+            productId={productId}
+            maxQuantity={totalStock}
+            showQuantityInput
+            productName={title}
+            productSku={sku}
+            productImageUrl={imageUrl}
+            unitPriceCents={priceCents}
+          />
         )}
       </div>
     </Card>
