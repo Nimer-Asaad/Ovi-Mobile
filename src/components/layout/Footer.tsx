@@ -11,6 +11,12 @@ const QUICK_LINKS = [
 
 const SERVICE_LINKS = ["سياسة الخصوصية", "الاستبدال والإرجاع", "طرق الدفع"] as const;
 
+const CONTACT_ITEMS = [
+  { label: "الهاتف", value: "قريباً" },
+  { label: "البريد", value: "info@ovimobile.ps" },
+  { label: "الموقع", value: "فلسطين" },
+] as const;
+
 const SOCIAL_INITIALS = ["f", "in", "ig"] as const;
 
 /** Public site footer — full dark navy "chrome" to match the Header.
@@ -67,17 +73,15 @@ export function Footer() {
         </div>
 
         <div className="flex flex-col gap-3">
-          <h3 className="text-sm font-semibold text-white">حمّل التطبيق</h3>
-          <div className="flex flex-col gap-2">
-            {["App Store", "Google Play"].map((store) => (
-              <div
-                key={store}
-                className="flex items-center gap-2 rounded-card border border-white/15 px-3 py-2 text-xs text-white/40"
-              >
-                <span>{store} — قريباً</span>
-              </div>
+          <h3 className="text-sm font-semibold text-white">تواصل معنا</h3>
+          <ul className="flex flex-col gap-2 text-sm text-white/50">
+            {CONTACT_ITEMS.map((item) => (
+              <li key={item.label} className="flex items-center gap-1.5">
+                <span className="text-white/40">{item.label}:</span>
+                <span>{item.value}</span>
+              </li>
             ))}
-          </div>
+          </ul>
         </div>
       </div>
 
