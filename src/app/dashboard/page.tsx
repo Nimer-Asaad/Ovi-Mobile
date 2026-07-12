@@ -10,14 +10,9 @@ import { Button } from "@/components/ui/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { CustomerQuickActions } from "@/components/customer/CustomerQuickActions";
 import { formatCurrencyFromCents } from "@/lib/utils";
 import { getOrderStatusLabel, getOrderStatusBadgeVariant } from "@/lib/order-labels";
-
-const QUICK_LINKS = [
-  { href: "/products", title: "المنتجات", description: "تصفح كتالوج المنتجات" },
-  { href: "/cart", title: "السلة", description: "مراجعة سلة التسوق" },
-  { href: "/orders", title: "طلباتي", description: "عرض سجل طلباتك" },
-] as const;
 
 /** Universal post-login landing spot. Non-customer roles are bounced to
  * their real area; retail customers land on a shopping-focused hub. */
@@ -46,9 +41,10 @@ export default async function DashboardPage() {
       <Header />
 
       <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-8 px-4 py-10">
-        <section className="rounded-card border border-navy-soft bg-navy-surface p-8 text-center shadow-card">
-          <h1 className="text-2xl font-bold text-neutral-bg">مرحباً، {user.name}</h1>
-          <p className="mx-auto mt-2 max-w-md text-sm text-neutral-bg/60">
+        <section className="animate-fade-in overflow-hidden rounded-card bg-chrome px-6 py-12 text-center shadow-card md:py-16">
+          <p className="mb-2 text-sm font-semibold tracking-wide text-gold-champagne">Ovi Mobile</p>
+          <h1 className="text-2xl font-bold text-white md:text-3xl">مرحباً، {user.name}</h1>
+          <p className="mx-auto mt-2 max-w-md text-sm text-white/60">
             تصفح أحدث إكسسوارات الموبايل وأضفها إلى سلتك بسهولة.
           </p>
           <div className="mt-6">
@@ -60,26 +56,18 @@ export default async function DashboardPage() {
           </div>
         </section>
 
-        <section className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          {QUICK_LINKS.map((link) => (
-            <Link key={link.href} href={link.href}>
-              <Card className="h-full transition-all hover:-translate-y-0.5 hover:border-gold-champagne/50 hover:shadow-lg">
-                <CardHeader>
-                  <CardTitle>{link.title}</CardTitle>
-                </CardHeader>
-                <CardContent>{link.description}</CardContent>
-              </Card>
-            </Link>
-          ))}
+        <section className="animate-fade-in">
+          <h2 className="mb-4 text-lg font-semibold text-neutral-bg">إجراءات سريعة</h2>
+          <CustomerQuickActions />
         </section>
 
-        <section className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <section className="grid animate-fade-in grid-cols-1 gap-6 lg:grid-cols-2">
           <Card>
             <CardHeader>
               <CardTitle>معلومات الحساب</CardTitle>
             </CardHeader>
             <CardContent>
-              <dl className="grid grid-cols-1 gap-2 text-sm">
+              <dl className="grid grid-cols-1 gap-3 text-sm">
                 <div>
                   <dt className="text-neutral-bg/50">الاسم</dt>
                   <dd className="text-neutral-bg">{fullUser?.name ?? user.name}</dd>
@@ -126,7 +114,7 @@ export default async function DashboardPage() {
                     <Link
                       key={order.orderNumber}
                       href={`/orders/${order.orderNumber}`}
-                      className="flex items-center justify-between py-3 first:pt-0 last:pb-0"
+                      className="flex items-center justify-between gap-3 py-3 transition-colors first:pt-0 last:pb-0 hover:text-gold-dark"
                     >
                       <div>
                         <p className="text-sm text-neutral-bg">{order.orderNumber}</p>
