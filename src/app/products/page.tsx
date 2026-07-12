@@ -1,44 +1,51 @@
 import type { Prisma } from "@prisma/client";
-import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { ProductCard } from "@/components/catalog/ProductCard";
-import { Input } from "@/components/ui/Input";
-import { Select } from "@/components/ui/Select";
-import { Button } from "@/components/ui/Button";
+import { ProductSearchBar } from "@/components/catalog/ProductSearchBar";
+import { ProductFilters } from "@/components/catalog/ProductFilters";
+import { ProductSortSelect } from "@/components/catalog/ProductSortSelect";
+import { ActiveFilterChips } from "@/components/catalog/ActiveFilterChips";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { Button } from "@/components/ui/Button";
+import Link from "next/link";
 import { getSession } from "@/lib/auth/session";
 import { getCartEligibility } from "@/lib/cart";
-import { getPriceModeForUser, PUBLIC_PRODUCT_CARD_SELECT, MERCHANT_PRODUCT_CARD_SELECT } from "@/lib/catalog-queries";
+import {
+  getPriceModeForUser,
+  getActiveCategories,
+  getActiveBrands,
+  PUBLIC_PRODUCT_CARD_SELECT,
+  MERCHANT_PRODUCT_CARD_SELECT,
+} from "@/lib/catalog-queries";
+import { normalizeProductSort, PRODUCT_SORT_OPTIONS, type ProductSort } from "@/lib/product-filter-url";
 
 interface ProductsPageProps {
   searchParams: Promise<{ category?: string; brand?: string; q?: string; sort?: string }>;
 }
 
-const SORT_OPTIONS = [
-  { value: "newest", label: "الأحدث" },
-  { value: "price-asc", label: "السعر: من الأقل للأعلى" },
-  { value: "price-desc", label: "السعر: من الأعلى للأقل" },
-  { value: "featured", label: "المميزة أولاً" },
-] as const;
-
-function getOrderBy(sort: string | undefined, priceField: "retailPriceCents" | "wholesalePriceCents"): Prisma.ProductOrderByWithRelationInput[] {
+function getOrderBy(
+  sort: ProductSort,
+  priceField: "retailPriceCents" | "wholesalePriceCents",
+): Prisma.ProductOrderByWithRelationInput[] {
   switch (sort) {
-    case "price-asc":
+    case PRODUCT_SORT_OPTIONS.NAME:
+      return [{ nameAr: "asc" }, { name: "asc" }];
+    case PRODUCT_SORT_OPTIONS.PRICE_ASC:
       return [{ [priceField]: "asc" }];
-    case "price-desc":
+    case PRODUCT_SORT_OPTIONS.PRICE_DESC:
       return [{ [priceField]: "desc" }];
-    case "featured":
-      return [{ isFeatured: "desc" }, { createdAt: "desc" }];
     default:
       return [{ createdAt: "desc" }];
   }
 }
 
 export default async function ProductsPage({ searchParams }: ProductsPageProps) {
-  const { category: categorySlug, brand: brandSlug, q: query, sort } = await searchParams;
+  const { category: categorySlug, brand: brandSlug, q: query, sort: rawSort } = await searchParams;
   const trimmedQuery = query?.trim();
+  const sort = normalizeProductSort(rawSort);
 
   const user = await getSession();
   const priceMode = getPriceModeForUser(user);
@@ -59,7 +66,7 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
       : {}),
   };
 
-  const [products, activeCategory, categories, brands] = await Promise.all([
+  const [products, activeCategory, activeBrand, categories, brands] = await Promise.all([
     priceMode === "wholesale"
       ? prisma.product.findMany({
           where,
@@ -72,76 +79,69 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
           orderBy: getOrderBy(sort, "retailPriceCents"),
         }),
     categorySlug ? prisma.category.findUnique({ where: { slug: categorySlug } }) : null,
-    prisma.category.findMany({ where: { isActive: true }, orderBy: { name: "asc" } }),
-    prisma.brand.findMany({ where: { isActive: true }, orderBy: { name: "asc" } }),
+    brandSlug ? prisma.brand.findUnique({ where: { slug: brandSlug } }) : null,
+    getActiveCategories(),
+    getActiveBrands(),
   ]);
+
+  const hasActiveFilters = Boolean(trimmedQuery || categorySlug || brandSlug);
 
   return (
     <div className="flex min-h-screen flex-col">
       <Header />
 
       <main className="flex-1">
-        <section className="mx-auto max-w-6xl px-4 py-12">
-          <h1 className="text-2xl font-bold text-neutral-bg">
-            {activeCategory ? activeCategory.nameAr ?? activeCategory.name : "المنتجات"}
-          </h1>
-          <p className="mt-2 text-sm text-neutral-bg/60">
-            {products.length} {products.length === 1 ? "منتج" : "منتجات"}
-            {trimmedQuery && <> — نتائج البحث عن &quot;{trimmedQuery}&quot;</>}
-          </p>
+        <section className="mx-auto max-w-6xl px-4 py-10">
+          <PageHeader
+            as="h1"
+            title={activeCategory ? activeCategory.nameAr ?? activeCategory.name : "المنتجات"}
+            subtitle={
+              trimmedQuery
+                ? `${products.length} ${products.length === 1 ? "نتيجة" : "نتائج"} لبحثك عن "${trimmedQuery}"`
+                : `${products.length} ${products.length === 1 ? "منتج" : "منتجات"} متاحة`
+            }
+          />
 
-          <form
-            method="GET"
-            className="mt-6 grid grid-cols-1 gap-4 rounded-card border border-navy-soft bg-navy-surface p-4 sm:grid-cols-2 lg:grid-cols-5"
-          >
-            <div className="lg:col-span-2">
-              <Input name="q" label="ابحث عن منتج أو SKU" defaultValue={trimmedQuery ?? ""} />
+          <div className="mt-6">
+            <ProductSearchBar query={trimmedQuery} category={categorySlug} brand={brandSlug} sort={sort} />
+          </div>
+
+          <div className="mt-6 flex flex-col gap-6 rounded-card border border-navy-soft bg-navy-surface p-5">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <ProductFilters
+                categories={categories}
+                brands={brands}
+                query={trimmedQuery}
+                activeCategory={categorySlug}
+                activeBrand={brandSlug}
+                sort={sort}
+              />
+              <div className="sm:w-64 sm:shrink-0">
+                <ProductSortSelect sort={sort} query={trimmedQuery} category={categorySlug} brand={brandSlug} />
+              </div>
             </div>
 
-            <Select name="category" label="القسم" defaultValue={categorySlug ?? ""}>
-              <option value="">كل الأقسام</option>
-              {categories.map((category) => (
-                <option key={category.id} value={category.slug}>
-                  {category.nameAr ?? category.name}
-                </option>
-              ))}
-            </Select>
-
-            <Select name="brand" label="العلامة التجارية" defaultValue={brandSlug ?? ""}>
-              <option value="">كل العلامات</option>
-              {brands.map((brand) => (
-                <option key={brand.id} value={brand.slug}>
-                  {brand.name}
-                </option>
-              ))}
-            </Select>
-
-            <Select name="sort" label="الترتيب" defaultValue={sort ?? "newest"}>
-              {SORT_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </Select>
-
-            <div className="flex items-end lg:col-span-5">
-              <Button type="submit">تصفية</Button>
-            </div>
-          </form>
+            <ActiveFilterChips
+              query={trimmedQuery}
+              category={activeCategory ? { slug: activeCategory.slug, label: activeCategory.nameAr ?? activeCategory.name } : undefined}
+              brand={activeBrand ? { slug: activeBrand.slug, label: activeBrand.name } : undefined}
+              sort={sort}
+            />
+          </div>
 
           {products.length === 0 ? (
             <div className="mt-8">
               <EmptyState
                 title="لا توجد منتجات مطابقة"
                 message={
-                  trimmedQuery || categorySlug || brandSlug
+                  hasActiveFilters
                     ? "لم نجد منتجات تطابق معايير البحث الحالية. جرّب تعديل الفلاتر."
                     : "لا توجد منتجات متاحة حالياً."
                 }
                 action={
-                  (trimmedQuery || categorySlug || brandSlug) && (
+                  hasActiveFilters && (
                     <Link href="/products">
-                      <Button variant="outline">إزالة كل الفلاتر</Button>
+                      <Button variant="outline">مسح الفلاتر</Button>
                     </Link>
                   )
                 }
