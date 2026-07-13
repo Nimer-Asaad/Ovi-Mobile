@@ -67,7 +67,15 @@ export default async function AdminOrdersPage({ searchParams }: AdminOrdersPageP
 
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader title="الطلبات" subtitle="إدارة طلبات العملاء والتجار" />
+      <PageHeader
+        title="الطلبات"
+        subtitle="إدارة طلبات العملاء والتجار"
+        actions={
+          <Link href="/admin/orders/new">
+            <Button>طلب يدوي جديد</Button>
+          </Link>
+        }
+      />
 
       <form
         method="GET"
@@ -100,6 +108,7 @@ export default async function AdminOrdersPage({ searchParams }: AdminOrdersPageP
           <option value={ORDER_SOURCES.RETAIL}>عملاء التجزئة</option>
           <option value={ORDER_SOURCES.WHOLESALE}>تجار الجملة</option>
           <option value={ORDER_SOURCES.REP_SALE}>مبيعات مندوب</option>
+          <option value={ORDER_SOURCES.ADMIN_MANUAL}>طلبات يدوية</option>
         </Select>
 
         <div className="flex items-end lg:col-span-5">
@@ -136,7 +145,9 @@ export default async function AdminOrdersPage({ searchParams }: AdminOrdersPageP
                       ? "gold"
                       : order.source === ORDER_SOURCES.REP_SALE
                         ? "success"
-                        : "neutral"
+                        : order.source === ORDER_SOURCES.ADMIN_MANUAL
+                          ? "warning"
+                          : "neutral"
                   }
                 >
                   {getOrderSourceLabel(order.source)}

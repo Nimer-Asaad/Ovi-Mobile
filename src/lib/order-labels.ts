@@ -24,6 +24,7 @@ const ORDER_STATUS_LABELS: Record<string, string> = {
 
 const PAYMENT_STATUS_LABELS: Record<string, string> = {
   [PAYMENT_STATUSES.PENDING]: "قيد الانتظار",
+  [PAYMENT_STATUSES.PARTIAL]: "مدفوع جزئياً",
   [PAYMENT_STATUSES.PAID]: "مدفوع",
   [PAYMENT_STATUSES.FAILED]: "فشل الدفع",
   [PAYMENT_STATUSES.REFUNDED]: "مسترجع",
@@ -38,6 +39,7 @@ const ORDER_SOURCE_LABELS: Record<string, string> = {
   [ORDER_SOURCES.RETAIL]: "عميل تجزئة",
   [ORDER_SOURCES.WHOLESALE]: "تاجر جملة",
   [ORDER_SOURCES.REP_SALE]: "مبيعات مندوب",
+  [ORDER_SOURCES.ADMIN_MANUAL]: "طلب يدوي",
 };
 
 export function getOrderStatusLabel(status: string): string {
@@ -78,6 +80,10 @@ export function getPaymentStatusBadgeVariant(status: string): BadgeVariant {
   switch (status) {
     case PAYMENT_STATUSES.PAID:
       return "success";
+    case PAYMENT_STATUSES.PARTIAL:
+      // Teal/gold accent — visually distinct from PENDING's amber and
+      // PAID's green so a partially-paid order never reads as either.
+      return "gold";
     case PAYMENT_STATUSES.FAILED:
       return "danger";
     case PAYMENT_STATUSES.REFUNDED:

@@ -1,7 +1,9 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
+import { Button } from "@/components/ui/Button";
 import { ProductImagePlaceholder } from "@/components/catalog/ProductImagePlaceholder";
 import { formatCurrencyFromCents } from "@/lib/utils";
 import { ORDER_SOURCES } from "@/lib/constants";
@@ -32,6 +34,7 @@ export default async function AdminOrderDetailPage({ params }: AdminOrderDetailP
       notes: true,
       paymentMethod: true,
       paymentStatus: true,
+      paidAmountCents: true,
       createdAt: true,
       updatedAt: true,
       customer: { select: { name: true, email: true } },
@@ -82,6 +85,11 @@ export default async function AdminOrderDetailPage({ params }: AdminOrderDetailP
         <div className="flex items-center gap-2">
           <Badge variant={isWholesaleOrder ? "gold" : "neutral"}>{getOrderSourceLabel(order.source)}</Badge>
           <Badge variant={getOrderStatusBadgeVariant(order.status)}>{getOrderStatusLabel(order.status)}</Badge>
+          <Link href={`/admin/orders/${order.orderNumber}/invoice`}>
+            <Button variant="outline" size="sm">
+              طباعة الفاتورة
+            </Button>
+          </Link>
         </div>
       </div>
 
@@ -140,6 +148,22 @@ export default async function AdminOrderDetailPage({ params }: AdminOrderDetailP
             <div className="flex items-center justify-between text-base font-semibold">
               <span className="text-neutral-bg">الإجمالي</span>
               <span className="text-gold-champagne">{formatCurrencyFromCents(order.totalCents)}</span>
+            </div>
+            <div className="mt-2 flex items-center justify-between border-t border-navy-soft pt-2">
+              <span className="text-neutral-bg/70">المبلغ المستلم</span>
+              <span className="text-neutral-bg">{formatCurrencyFromCents(order.paidAmountCents)}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-neutral-bg/70">المتبقي</span>
+              <span
+                className={
+                  order.totalCents - order.paidAmountCents > 0
+                    ? "font-semibold text-rose-600"
+                    : "text-neutral-bg"
+                }
+              >
+                {formatCurrencyFromCents(Math.max(order.totalCents - order.paidAmountCents, 0))}
+              </span>
             </div>
           </div>
         </CardContent>

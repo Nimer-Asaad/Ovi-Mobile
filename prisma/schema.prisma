@@ -46,13 +46,13 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  merchantProfile         Merchant?
+  merchantProfile            Merchant?
   salesRepresentativeProfile SalesRepresentative?
 
-  ordersPlaced      Order[]         @relation("OrderCustomer")
-  stockMovements    StockMovement[] @relation("StockMovementCreatedBy")
-  sessions          Session[]
-  cart              Cart?
+  ordersPlaced   Order[]         @relation("OrderCustomer")
+  stockMovements StockMovement[] @relation("StockMovementCreatedBy")
+  sessions       Session[]
+  cart           Cart?
 
   @@map("users")
 }
@@ -60,17 +60,17 @@ model User {
 /// MerchantStatus values: "PENDING" | "APPROVED" | "REJECTED" | "SUSPENDED"
 /// Wholesale pricing is only visible once status = "APPROVED".
 model Merchant {
-  id             String    @id @default(cuid())
-  userId         String    @unique
-  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  businessName   String
-  taxId          String?
-  status         String    @default("PENDING")
-  approvedAt     DateTime?
-  assignedRepId  String?
-  assignedRep    SalesRepresentative? @relation("RepMerchants", fields: [assignedRepId], references: [id])
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  id            String               @id @default(cuid())
+  userId        String               @unique
+  user          User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  businessName  String
+  taxId         String?
+  status        String               @default("PENDING")
+  approvedAt    DateTime?
+  assignedRepId String?
+  assignedRep   SalesRepresentative? @relation("RepMerchants", fields: [assignedRepId], references: [id])
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
 
   orders Order[] @relation("OrderMerchant")
 
@@ -86,9 +86,9 @@ model SalesRepresentative {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  assignedMerchants Merchant[]      @relation("RepMerchants")
+  assignedMerchants Merchant[]     @relation("RepMerchants")
   carStockLocation  StockLocation?
-  ordersCreated     Order[]         @relation("OrderCreatedByRep")
+  ordersCreated     Order[]        @relation("OrderCreatedByRep")
   stockRequests     StockRequest[]
   stockReturns      StockReturn[]
 
@@ -162,38 +162,38 @@ model Supplier {
 }
 
 model Product {
-  id                 String   @id @default(cuid())
-  sku                String   @unique
-  name               String
-  nameAr             String?
-  description        String?
-  descriptionAr      String?
-  categoryId         String?
-  category           Category? @relation(fields: [categoryId], references: [id])
-  brandId            String?
-  brand              Brand?    @relation(fields: [brandId], references: [id])
-  supplierId         String?
-  supplier           Supplier? @relation(fields: [supplierId], references: [id])
+  id            String    @id @default(cuid())
+  sku           String    @unique
+  name          String
+  nameAr        String?
+  description   String?
+  descriptionAr String?
+  categoryId    String?
+  category      Category? @relation(fields: [categoryId], references: [id])
+  brandId       String?
+  brand         Brand?    @relation(fields: [brandId], references: [id])
+  supplierId    String?
+  supplier      Supplier? @relation(fields: [supplierId], references: [id])
 
   /// Smallest currency unit (e.g. agorot). Price shown to retail customers.
-  retailPriceCents   Int
+  retailPriceCents    Int
   /// Smallest currency unit. Only visible to approved wholesale merchants.
   wholesalePriceCents Int
   /// Smallest currency unit. Internal cost, admin-only.
-  costCents          Int?
+  costCents           Int?
 
-  isActive           Boolean  @default(true)
-  isFeatured         Boolean  @default(false)
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  isActive   Boolean  @default(true)
+  isFeatured Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
-  inventoryItems  InventoryItem[]
-  stockMovements  StockMovement[]
-  orderItems      OrderItem[]
+  inventoryItems    InventoryItem[]
+  stockMovements    StockMovement[]
+  orderItems        OrderItem[]
   stockRequestItems StockRequestItem[]
   stockReturnItems  StockReturnItem[]
-  images          ProductImage[]
-  cartItems       CartItem[]
+  images            ProductImage[]
+  cartItems         CartItem[]
 
   @@map("products")
 }
@@ -254,18 +254,18 @@ model ProductImage {
 /// StockLocationType values: "WAREHOUSE" | "REP_CAR"
 /// A REP_CAR location always belongs to exactly one SalesRepresentative.
 model StockLocation {
-  id            String   @id @default(cuid())
-  type          String
-  name          String
-  isDefault     Boolean  @default(false)
-  salesRepId    String?  @unique
-  salesRep      SalesRepresentative? @relation(fields: [salesRepId], references: [id])
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id         String               @id @default(cuid())
+  type       String
+  name       String
+  isDefault  Boolean              @default(false)
+  salesRepId String?              @unique
+  salesRep   SalesRepresentative? @relation(fields: [salesRepId], references: [id])
+  createdAt  DateTime             @default(now())
+  updatedAt  DateTime             @updatedAt
 
-  inventoryItems      InventoryItem[]
-  movementsFrom       StockMovement[] @relation("MovementFromLocation")
-  movementsTo         StockMovement[] @relation("MovementToLocation")
+  inventoryItems InventoryItem[]
+  movementsFrom  StockMovement[] @relation("MovementFromLocation")
+  movementsTo    StockMovement[] @relation("MovementToLocation")
 
   @@map("stock_locations")
 }
@@ -274,13 +274,13 @@ model StockLocation {
 /// source of truth is the StockMovement ledger; this table is a maintained
 /// aggregate for fast reads.
 model InventoryItem {
-  id         String   @id @default(cuid())
+  id         String        @id @default(cuid())
   productId  String
-  product    Product  @relation(fields: [productId], references: [id])
+  product    Product       @relation(fields: [productId], references: [id])
   locationId String
   location   StockLocation @relation(fields: [locationId], references: [id])
-  quantity   Int      @default(0)
-  updatedAt  DateTime @updatedAt
+  quantity   Int           @default(0)
+  updatedAt  DateTime      @updatedAt
 
   @@unique([productId, locationId])
   @@map("inventory_items")
@@ -294,21 +294,21 @@ model InventoryItem {
 /// returns, adjustments, rep stock assignment/return) is recorded here and
 /// is never edited or deleted, only appended to.
 model StockMovement {
-  id             String    @id @default(cuid())
-  type           String
-  productId      String
-  product        Product   @relation(fields: [productId], references: [id])
-  fromLocationId String?
-  fromLocation   StockLocation? @relation("MovementFromLocation", fields: [fromLocationId], references: [id])
-  toLocationId   String?
-  toLocation     StockLocation? @relation("MovementToLocation", fields: [toLocationId], references: [id])
-  quantity       Int
+  id               String         @id @default(cuid())
+  type             String
+  productId        String
+  product          Product        @relation(fields: [productId], references: [id])
+  fromLocationId   String?
+  fromLocation     StockLocation? @relation("MovementFromLocation", fields: [fromLocationId], references: [id])
+  toLocationId     String?
+  toLocation       StockLocation? @relation("MovementToLocation", fields: [toLocationId], references: [id])
+  quantity         Int
   previousQuantity Int?
   newQuantity      Int?
-  note           String?
-  createdById    String?
-  createdBy      User?     @relation("StockMovementCreatedBy", fields: [createdById], references: [id])
-  createdAt      DateTime  @default(now())
+  note             String?
+  createdById      String?
+  createdBy        User?          @relation("StockMovementCreatedBy", fields: [createdById], references: [id])
+  createdAt        DateTime       @default(now())
 
   @@map("stock_movements")
 }
@@ -321,26 +321,26 @@ model StockMovement {
 /// "PENDING" | "CONFIRMED" | "PROCESSING" | "SHIPPED" | "DELIVERED" |
 /// "CANCELLED" | "RETURNED"
 ///
-/// OrderSource values: "RETAIL" | "WHOLESALE" | "REP_SALE"
+/// OrderSource values: "RETAIL" | "WHOLESALE" | "REP_SALE" | "ADMIN_MANUAL"
 model Order {
-  id              String   @id @default(cuid())
-  orderNumber     String   @unique
-  source          String
-  status          String   @default("PENDING")
+  id          String @id @default(cuid())
+  orderNumber String @unique
+  source      String
+  status      String @default("PENDING")
 
-  customerId      String?
-  customer        User?    @relation("OrderCustomer", fields: [customerId], references: [id])
+  customerId String?
+  customer   User?   @relation("OrderCustomer", fields: [customerId], references: [id])
 
-  merchantId      String?
-  merchant        Merchant? @relation("OrderMerchant", fields: [merchantId], references: [id])
+  merchantId String?
+  merchant   Merchant? @relation("OrderMerchant", fields: [merchantId], references: [id])
 
-  createdByRepId  String?
-  createdByRep    SalesRepresentative? @relation("OrderCreatedByRep", fields: [createdByRepId], references: [id])
+  createdByRepId String?
+  createdByRep   SalesRepresentative? @relation("OrderCreatedByRep", fields: [createdByRepId], references: [id])
 
-  currency        String   @default("ILS")
-  subtotalCents   Int
-  discountCents   Int      @default(0)
-  totalCents      Int
+  currency      String @default("ILS")
+  subtotalCents Int
+  discountCents Int    @default(0)
+  totalCents    Int
 
   contactName     String?
   contactPhone    String?
@@ -348,15 +348,19 @@ model Order {
   shippingAddress String?
   notes           String?
 
-  /// PaymentMethod values: "CASH_ON_DELIVERY"
+  /// PaymentMethod values: "CASH_ON_DELIVERY" | "CASH"
   /// See src/lib/constants.ts -> PAYMENT_METHODS
-  paymentMethod   String   @default("CASH_ON_DELIVERY")
-  /// PaymentStatus values: "PENDING" | "PAID" | "FAILED"
+  paymentMethod   String @default("CASH_ON_DELIVERY")
+  /// PaymentStatus values: "PENDING" | "PARTIAL" | "PAID" | "FAILED" | "REFUNDED"
   /// See src/lib/constants.ts -> PAYMENT_STATUSES
-  paymentStatus   String   @default("PENDING")
+  paymentStatus   String @default("PENDING")
+  /// Smallest currency unit. Amount actually received from the customer so
+  /// far — balance due is always computed as totalCents - paidAmountCents,
+  /// never stored, so it can never drift out of sync.
+  paidAmountCents Int    @default(0)
 
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   items OrderItem[]
 
@@ -365,14 +369,14 @@ model Order {
 }
 
 model OrderItem {
-  id            String  @id @default(cuid())
-  orderId       String
-  order         Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  productId     String
-  product       Product @relation(fields: [productId], references: [id])
-  quantity      Int
+  id             String  @id @default(cuid())
+  orderId        String
+  order          Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId      String
+  product        Product @relation(fields: [productId], references: [id])
+  quantity       Int
   unitPriceCents Int
-  totalCents    Int
+  totalCents     Int
 
   @@map("order_items")
 }
@@ -383,13 +387,13 @@ model OrderItem {
 
 /// StockRequestStatus values: "PENDING" | "APPROVED" | "REJECTED" | "FULFILLED"
 model StockRequest {
-  id            String   @id @default(cuid())
-  salesRepId    String
-  salesRep      SalesRepresentative @relation(fields: [salesRepId], references: [id])
-  status        String   @default("PENDING")
-  note          String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id         String              @id @default(cuid())
+  salesRepId String
+  salesRep   SalesRepresentative @relation(fields: [salesRepId], references: [id])
+  status     String              @default("PENDING")
+  note       String?
+  createdAt  DateTime            @default(now())
+  updatedAt  DateTime            @updatedAt
 
   items StockRequestItem[]
 
@@ -397,11 +401,11 @@ model StockRequest {
 }
 
 model StockRequestItem {
-  id             String   @id @default(cuid())
+  id             String       @id @default(cuid())
   stockRequestId String
   stockRequest   StockRequest @relation(fields: [stockRequestId], references: [id], onDelete: Cascade)
   productId      String
-  product        Product  @relation(fields: [productId], references: [id])
+  product        Product      @relation(fields: [productId], references: [id])
   quantity       Int
 
   @@map("stock_request_items")
@@ -409,13 +413,13 @@ model StockRequestItem {
 
 /// StockReturnStatus values: "PENDING" | "APPROVED" | "REJECTED" | "COMPLETED"
 model StockReturn {
-  id           String   @id @default(cuid())
-  salesRepId   String
-  salesRep     SalesRepresentative @relation(fields: [salesRepId], references: [id])
-  status       String   @default("PENDING")
-  note         String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id         String              @id @default(cuid())
+  salesRepId String
+  salesRep   SalesRepresentative @relation(fields: [salesRepId], references: [id])
+  status     String              @default("PENDING")
+  note       String?
+  createdAt  DateTime            @default(now())
+  updatedAt  DateTime            @updatedAt
 
   items StockReturnItem[]
 
@@ -423,11 +427,11 @@ model StockReturn {
 }
 
 model StockReturnItem {
-  id            String   @id @default(cuid())
+  id            String      @id @default(cuid())
   stockReturnId String
   stockReturn   StockReturn @relation(fields: [stockReturnId], references: [id], onDelete: Cascade)
   productId     String
-  product       Product  @relation(fields: [productId], references: [id])
+  product       Product     @relation(fields: [productId], references: [id])
   quantity      Int
 
   @@map("stock_return_items")

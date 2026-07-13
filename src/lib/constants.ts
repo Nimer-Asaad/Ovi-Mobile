@@ -65,6 +65,9 @@ export const ORDER_SOURCES = {
   RETAIL: "RETAIL",
   WHOLESALE: "WHOLESALE",
   REP_SALE: "REP_SALE",
+  /** Manual order entered by an admin from the office/warehouse counter —
+   * see /admin/orders/new. */
+  ADMIN_MANUAL: "ADMIN_MANUAL",
 } as const;
 
 export const STOCK_REQUEST_STATUSES = {
@@ -92,6 +95,9 @@ export const PAYMENT_METHODS = {
 
 export const PAYMENT_STATUSES = {
   PENDING: "PENDING",
+  /** Some but not all of the total has been received — see
+   * Order.paidAmountCents. */
+  PARTIAL: "PARTIAL",
   PAID: "PAID",
   FAILED: "FAILED",
   REFUNDED: "REFUNDED",

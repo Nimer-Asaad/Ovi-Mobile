@@ -13,7 +13,7 @@ export function AdminSidebar() {
   const pathname = usePathname();
 
   return (
-    <aside className="hidden w-64 shrink-0 border-e border-chrome-border bg-chrome md:block">
+    <aside className="hidden w-64 shrink-0 border-e border-chrome-border bg-chrome md:block print:hidden">
       <div className="flex h-16 items-center px-6">
         <span className="text-sm font-semibold tracking-wide text-gold-champagne">
           Ovi Mobile — الإدارة

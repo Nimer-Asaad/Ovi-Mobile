@@ -118,6 +118,7 @@ export async function createRepSale(_prevState: RepSaleState, formData: FormData
             notes,
             paymentMethod: PAYMENT_METHODS.CASH,
             paymentStatus: PAYMENT_STATUSES.PAID,
+            paidAmountCents: totalCents,
             items: {
               create: [{ productId, quantity, unitPriceCents, totalCents }],
             },

@@ -13,11 +13,11 @@ export default async function AdminLayout({
   await requireRole([ROLES.ADMIN]);
 
   return (
-    <div className="flex min-h-screen bg-navy-deep">
+    <div className="flex min-h-screen bg-navy-deep print:bg-white">
       <AdminSidebar />
       <div className="flex min-w-0 flex-1 flex-col">
         <AdminTopbar title="لوحة تحكم المدير" />
-        <main className="flex-1 p-6">{children}</main>
+        <main className="flex-1 p-6 print:p-0">{children}</main>
       </div>
     </div>
   );

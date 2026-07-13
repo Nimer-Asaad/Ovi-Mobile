@@ -15,7 +15,7 @@ export interface AdminTopbarProps {
  * phase. */
 export function AdminTopbar({ title }: AdminTopbarProps) {
   return (
-    <header className="sticky top-0 z-30 border-b border-chrome-border bg-chrome shadow-sm">
+    <header className="sticky top-0 z-30 border-b border-chrome-border bg-chrome shadow-sm print:hidden">
       <div className="flex h-16 items-center justify-between px-6">
         <h1 className="text-lg font-semibold text-white">{title}</h1>
 
