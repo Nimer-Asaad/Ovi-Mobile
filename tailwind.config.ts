@@ -75,10 +75,20 @@ const config: Config = {
           from: { opacity: "0", transform: "translateY(4px)" },
           to: { opacity: "1", transform: "translateY(0)" },
         },
+        "van-float": {
+          "0%, 100%": { transform: "translateY(0)" },
+          "50%": { transform: "translateY(-5px)" },
+        },
+        "road-line": {
+          "0%": { backgroundPositionX: "0px" },
+          "100%": { backgroundPositionX: "-64px" },
+        },
       },
       animation: {
         "nav-progress": "nav-progress 1s ease-in-out infinite",
         "fade-in": "fade-in 0.4s ease-out both",
+        "van-float": "van-float 3.2s ease-in-out infinite",
+        "road-line": "road-line 1.1s linear infinite",
       },
     },
   },

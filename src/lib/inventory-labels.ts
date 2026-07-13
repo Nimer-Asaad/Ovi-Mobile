@@ -9,8 +9,8 @@ const MOVEMENT_TYPE_LABELS: Record<string, string> = {
   [STOCK_MOVEMENT_TYPES.TRANSFER]: "نقل",
   [STOCK_MOVEMENT_TYPES.SALE_OUT]: "بيع صادر",
   [STOCK_MOVEMENT_TYPES.RETURN_IN]: "إرجاع وارد",
-  [STOCK_MOVEMENT_TYPES.REP_ASSIGNMENT]: "تخصيص لمندوب",
-  [STOCK_MOVEMENT_TYPES.REP_RETURN]: "إرجاع من مندوب",
+  [STOCK_MOVEMENT_TYPES.REP_ASSIGNMENT]: "تحميل إلى السيارة",
+  [STOCK_MOVEMENT_TYPES.REP_RETURN]: "إرجاع إلى المستودع",
   [STOCK_MOVEMENT_TYPES.ORDER_RESERVED]: "محجوز لطلب",
   [STOCK_MOVEMENT_TYPES.ORDER_RELEASED]: "إفراج عن حجز",
   [STOCK_MOVEMENT_TYPES.ORDER_FULFILLED]: "تنفيذ طلب",
@@ -26,15 +26,15 @@ export function getMovementTypeBadgeVariant(type: string): BadgeVariant {
     case STOCK_MOVEMENT_TYPES.STOCK_IN:
     case STOCK_MOVEMENT_TYPES.PURCHASE_IN:
     case STOCK_MOVEMENT_TYPES.RETURN_IN:
+    case STOCK_MOVEMENT_TYPES.REP_ASSIGNMENT:
       return "success";
     case STOCK_MOVEMENT_TYPES.STOCK_OUT:
     case STOCK_MOVEMENT_TYPES.SALE_OUT:
       return "danger";
     case STOCK_MOVEMENT_TYPES.ADJUSTMENT:
+    case STOCK_MOVEMENT_TYPES.REP_RETURN:
       return "warning";
     case STOCK_MOVEMENT_TYPES.TRANSFER:
-    case STOCK_MOVEMENT_TYPES.REP_ASSIGNMENT:
-    case STOCK_MOVEMENT_TYPES.REP_RETURN:
       return "gold";
     default:
       return "neutral";

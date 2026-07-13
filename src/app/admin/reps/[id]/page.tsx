@@ -2,13 +2,19 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
-import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { StatCard } from "@/components/ui/StatCard";
 import { AdminStatusBadge } from "@/components/admin/AdminStatusBadge";
-import { AdminTable, AdminTableHead, AdminTableBody, AdminEmptyRow } from "@/components/admin/AdminTable";
-import { ProductImagePlaceholder } from "@/components/catalog/ProductImagePlaceholder";
-import { getMovementTypeLabel, getMovementTypeBadgeVariant } from "@/lib/inventory-labels";
+import { getRepStockStats, getRepStockValueCents } from "@/lib/reps";
+import { RepCarHero } from "@/components/reps/RepCarHero";
+import { RepCarStockSummary } from "@/components/reps/RepCarStockSummary";
+import { RepCarProductGrid } from "@/components/reps/RepCarProductGrid";
+import { RepTransferHistory } from "@/components/reps/RepTransferHistory";
+import { RepStockRequestStatusBadge } from "@/components/reps/RepStockRequestStatusBadge";
+import { getActiveRequestCountForRep, getLatestRequestsForRep } from "@/lib/rep-stock-requests";
+import { ORDER_SOURCES } from "@/lib/constants";
+import { formatCurrencyFromCents } from "@/lib/utils";
 
 interface AdminRepDetailPageProps {
   params: Promise<{ id: string }>;
@@ -33,8 +39,21 @@ export default async function AdminRepDetailPage({ params }: AdminRepDetailPageP
   }
 
   const locationId = rep.carStockLocation?.id ?? null;
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
 
-  const [stockItems, movements] = await Promise.all([
+  const [
+    stats,
+    valueCents,
+    stockItems,
+    movements,
+    activeRequestCount,
+    latestRequests,
+    todaySales,
+    todaySalesAgg,
+  ] = await Promise.all([
+    getRepStockStats(locationId),
+    getRepStockValueCents(locationId),
     locationId
       ? prisma.inventoryItem.findMany({
           where: { locationId, quantity: { gt: 0 } },
@@ -43,6 +62,7 @@ export default async function AdminRepDetailPage({ params }: AdminRepDetailPageP
             quantity: true,
             product: {
               select: {
+                id: true,
                 sku: true,
                 name: true,
                 nameAr: true,
@@ -67,15 +87,36 @@ export default async function AdminRepDetailPage({ params }: AdminRepDetailPageP
             id: true,
             type: true,
             quantity: true,
-            previousQuantity: true,
-            newQuantity: true,
             note: true,
             createdAt: true,
             product: { select: { sku: true, name: true, nameAr: true } },
           },
         })
       : Promise.resolve([]),
+    getActiveRequestCountForRep(rep.id),
+    getLatestRequestsForRep(rep.id, 5),
+    prisma.order.findMany({
+      where: { createdByRepId: rep.id, source: ORDER_SOURCES.REP_SALE, createdAt: { gte: startOfToday } },
+      orderBy: { createdAt: "desc" },
+      select: { orderNumber: true, totalCents: true, contactName: true, createdAt: true },
+    }),
+    prisma.order.aggregate({
+      where: { createdByRepId: rep.id, source: ORDER_SOURCES.REP_SALE, createdAt: { gte: startOfToday } },
+      _sum: { totalCents: true },
+    }),
   ]);
+
+  const gridItems = stockItems.map((item) => ({
+    productId: item.product.id,
+    sku: item.product.sku,
+    name: item.product.name,
+    nameAr: item.product.nameAr,
+    quantity: item.quantity,
+    categoryLabel: item.product.category?.nameAr ?? item.product.category?.name ?? null,
+    brandLabel: item.product.brand?.name ?? null,
+    thumbnailUrl: item.product.images[0]?.url ?? null,
+    thumbnailAlt: item.product.images[0]?.altText ?? null,
+  }));
 
   return (
     <div className="flex flex-col gap-6">
@@ -85,15 +126,32 @@ export default async function AdminRepDetailPage({ params }: AdminRepDetailPageP
         actions={
           <>
             <AdminStatusBadge isActive={rep.isActive && rep.user.isActive} />
+            <Link href={`/admin/rep-requests?salesRepId=${rep.id}`}>
+              <Button variant="outline">طلبات المندوب</Button>
+            </Link>
             <Link href={`/admin/reps/${rep.id}/assign-stock`}>
-              <Button>تخصيص مخزون</Button>
+              <Button>تعبئة مباشرة</Button>
             </Link>
             <Link href={`/admin/reps/${rep.id}/return-stock`}>
-              <Button variant="outline">إرجاع مخزون</Button>
+              <Button variant="outline">إرجاع من السيارة</Button>
             </Link>
           </>
         }
       />
+
+      <RepCarHero subtitle={`مخزون ${rep.user.name} المتنقل — كل ما تم تحميله من المستودع الرئيسي إلى سيارته`} />
+
+      <RepCarStockSummary
+        totalUnits={stats.totalUnits}
+        distinctProducts={stats.distinctProducts}
+        lowStockCount={stats.lowStockCount}
+        valueCents={valueCents}
+      />
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <StatCard label="طلبات مخزون نشطة" value={String(activeRequestCount)} />
+        <StatCard label="عدد مبيعات اليوم" value={String(todaySales.length)} />
+      </div>
 
       <Card>
         <CardHeader>
@@ -117,97 +175,73 @@ export default async function AdminRepDetailPage({ params }: AdminRepDetailPageP
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>المخزون الحالي</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <AdminTable>
-            <AdminTableHead>
-              <th className="px-4 py-3 text-start"></th>
-              <th className="px-4 py-3 text-start">الاسم</th>
-              <th className="px-4 py-3 text-start">SKU</th>
-              <th className="px-4 py-3 text-start">القسم</th>
-              <th className="px-4 py-3 text-start">العلامة</th>
-              <th className="px-4 py-3 text-start">الكمية</th>
-            </AdminTableHead>
-            <AdminTableBody>
-              {stockItems.map((item) => {
-                const thumbnail = item.product.images[0];
-                return (
-                  <tr key={item.product.sku}>
-                    <td className="px-4 py-3">
-                      <div className="h-10 w-10 overflow-hidden rounded-card">
-                        {thumbnail ? (
-                          // eslint-disable-next-line @next/next/no-img-element -- arbitrary admin-entered external URLs
-                          <img
-                            src={thumbnail.url}
-                            alt={thumbnail.altText ?? item.product.name}
-                            className="h-full w-full object-cover"
-                    loading="lazy"
-                          />
-                        ) : (
-                          <ProductImagePlaceholder className="h-full w-full" />
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-neutral-bg">{item.product.nameAr ?? item.product.name}</td>
-                    <td className="px-4 py-3 text-neutral-bg/70">{item.product.sku}</td>
-                    <td className="px-4 py-3 text-neutral-bg/70">
-                      {item.product.category?.nameAr ?? item.product.category?.name ?? "—"}
-                    </td>
-                    <td className="px-4 py-3 text-neutral-bg/70">{item.product.brand?.name ?? "—"}</td>
-                    <td className="px-4 py-3 text-neutral-bg">{item.quantity}</td>
-                  </tr>
-                );
-              })}
-              {stockItems.length === 0 && <AdminEmptyRow colSpan={6} message="لا يوجد مخزون مخصص لهذا المندوب" />}
-            </AdminTableBody>
-          </AdminTable>
-        </CardContent>
-      </Card>
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle>طلبات مخزون السيارة</CardTitle>
+            <Link href={`/admin/rep-requests?salesRepId=${rep.id}`} className="text-sm text-gold-champagne hover:underline">
+              عرض الكل
+            </Link>
+          </CardHeader>
+          <CardContent>
+            {latestRequests.length === 0 ? (
+              <p className="py-6 text-center text-sm text-neutral-bg/50">لا توجد طلبات بعد</p>
+            ) : (
+              <div className="flex flex-col divide-y divide-navy-soft">
+                {latestRequests.map((request) => (
+                  <Link
+                    key={request.id}
+                    href={`/admin/rep-requests/${request.id}`}
+                    className="flex items-center justify-between py-2 first:pt-0 last:pb-0 hover:opacity-80"
+                  >
+                    <div>
+                      <p className="text-sm text-neutral-bg">{request.requestNumber ?? request.id}</p>
+                      <p className="text-xs text-neutral-bg/50">
+                        {new Date(request.createdAt).toLocaleDateString("ar")} — {request.itemCount} منتج
+                      </p>
+                    </div>
+                    <RepStockRequestStatusBadge status={request.status} />
+                  </Link>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>آخر حركات المخزون</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <AdminTable>
-            <AdminTableHead>
-              <th className="px-4 py-3 text-start">التاريخ</th>
-              <th className="px-4 py-3 text-start">المنتج</th>
-              <th className="px-4 py-3 text-start">النوع</th>
-              <th className="px-4 py-3 text-start">الكمية</th>
-              <th className="px-4 py-3 text-start">السابق</th>
-              <th className="px-4 py-3 text-start">الجديد</th>
-              <th className="px-4 py-3 text-start">ملاحظات</th>
-            </AdminTableHead>
-            <AdminTableBody>
-              {movements.map((movement) => (
-                <tr key={movement.id}>
-                  <td className="px-4 py-3 text-neutral-bg/70">
-                    {new Date(movement.createdAt).toLocaleString("ar")}
-                  </td>
-                  <td className="px-4 py-3 text-neutral-bg">
-                    {movement.product.nameAr ?? movement.product.name}
-                    <span className="ms-2 text-xs text-neutral-bg/50">{movement.product.sku}</span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <Badge variant={getMovementTypeBadgeVariant(movement.type)}>
-                      {getMovementTypeLabel(movement.type)}
-                    </Badge>
-                  </td>
-                  <td className="px-4 py-3 text-neutral-bg/70">{movement.quantity}</td>
-                  <td className="px-4 py-3 text-neutral-bg/70">{movement.previousQuantity ?? "—"}</td>
-                  <td className="px-4 py-3 text-neutral-bg/70">{movement.newQuantity ?? "—"}</td>
-                  <td className="px-4 py-3 text-neutral-bg/70">{movement.note ?? "—"}</td>
-                </tr>
-              ))}
-              {movements.length === 0 && <AdminEmptyRow colSpan={7} message="لا توجد حركات مخزون بعد" />}
-            </AdminTableBody>
-          </AdminTable>
-        </CardContent>
-      </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>مبيعات اليوم</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="mb-3 text-sm text-neutral-bg/70">
+              {todaySales.length} طلب — إجمالي {formatCurrencyFromCents(todaySalesAgg._sum.totalCents ?? 0)}
+            </p>
+            {todaySales.length === 0 ? (
+              <p className="py-6 text-center text-sm text-neutral-bg/50">لا توجد مبيعات اليوم بعد</p>
+            ) : (
+              <div className="flex flex-col divide-y divide-navy-soft">
+                {todaySales.map((order) => (
+                  <Link
+                    key={order.orderNumber}
+                    href={`/admin/orders/${order.orderNumber}`}
+                    className="flex items-center justify-between py-2 first:pt-0 last:pb-0 hover:opacity-80"
+                  >
+                    <div>
+                      <p className="text-sm text-neutral-bg">{order.orderNumber}</p>
+                      <p className="text-xs text-neutral-bg/50">{order.contactName ?? "—"}</p>
+                    </div>
+                    <span className="text-sm text-neutral-bg">{formatCurrencyFromCents(order.totalCents)}</span>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      <RepCarProductGrid items={gridItems} />
+
+      <RepTransferHistory movements={movements} repIdForInvoiceLinks={rep.id} />
     </div>
   );
 }

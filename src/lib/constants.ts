@@ -70,11 +70,20 @@ export const ORDER_SOURCES = {
   ADMIN_MANUAL: "ADMIN_MANUAL",
 } as const;
 
+/** Rep car-stock restock request lifecycle. Stock only ever mutates on the
+ * PENDING -> ... -> COMPLETED transition (see completeStockRequest). */
 export const STOCK_REQUEST_STATUSES = {
   PENDING: "PENDING",
-  APPROVED: "APPROVED",
+  REVIEWED: "REVIEWED",
+  PREPARED: "PREPARED",
+  COMPLETED: "COMPLETED",
   REJECTED: "REJECTED",
-  FULFILLED: "FULFILLED",
+} as const;
+
+export const STOCK_REQUEST_TYPES = {
+  /** The only type implemented in Phase 27 — rep asks for stock to be
+   * loaded into their car. A RETURN request type is a future-phase idea. */
+  RESTOCK: "RESTOCK",
 } as const;
 
 export const STOCK_RETURN_STATUSES = {
@@ -118,4 +127,5 @@ export const ADMIN_NAV_ITEMS = [
   { label: "Orders", labelAr: "الطلبات", href: "/admin/orders" },
   { label: "Merchants", labelAr: "التجار", href: "/admin/merchants" },
   { label: "Sales Reps", labelAr: "المندوبون", href: "/admin/reps" },
+  { label: "Car Stock Requests", labelAr: "طلبات السيارة", href: "/admin/rep-requests" },
 ] as const;

@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { getMainWarehouse } from "@/lib/inventory";
+import { RepCarHero } from "@/components/reps/RepCarHero";
 import { AssignStockForm } from "../../AssignStockForm";
 
 interface AdminRepAssignStockPageProps {
@@ -43,10 +44,10 @@ export default async function AdminRepAssignStockPage({ params }: AdminRepAssign
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h2 className="text-xl font-semibold text-neutral-bg">تخصيص مخزون — {rep.user.name}</h2>
-        <p className="mt-1 text-sm text-neutral-bg/60">تحويل مخزون من {warehouse.name} إلى المندوب</p>
-      </div>
+      <RepCarHero
+        title="تحميل مخزون إلى السيارة"
+        subtitle={`نقل منتج واحد في كل مرة من ${warehouse.name} إلى سيارة ${rep.user.name} — ينشئ سجل حركة يمكن طباعته كإشعار تحويل`}
+      />
       <AssignStockForm repId={rep.id} products={options} />
     </div>
   );

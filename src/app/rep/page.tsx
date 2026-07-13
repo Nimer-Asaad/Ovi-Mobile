@@ -11,6 +11,9 @@ import { getRepStockStats } from "@/lib/reps";
 import { getMovementTypeLabel, getMovementTypeBadgeVariant } from "@/lib/inventory-labels";
 import { formatCurrencyFromCents } from "@/lib/utils";
 import { ORDER_SOURCES } from "@/lib/constants";
+import { RepCarHero } from "@/components/reps/RepCarHero";
+import { RepStockRequestStatusBadge } from "@/components/reps/RepStockRequestStatusBadge";
+import { getActiveRequestCountForRep, getLatestRequestsForRep } from "@/lib/rep-stock-requests";
 
 export default async function RepDashboardPage() {
   const user = await requireRole([ROLES.SALES_REPRESENTATIVE]);
@@ -24,7 +27,7 @@ export default async function RepDashboardPage() {
   const startOfToday = new Date();
   startOfToday.setHours(0, 0, 0, 0);
 
-  const [stats, recentMovements, todaySalesCount, todaySalesAgg, totalSalesCount, totalSalesAgg] =
+  const [stats, recentMovements, todaySalesCount, todaySalesAgg, totalSalesCount, totalSalesAgg, activeRequestCount, latestRequests] =
     await Promise.all([
       getRepStockStats(locationId),
       locationId
@@ -61,6 +64,8 @@ export default async function RepDashboardPage() {
             _sum: { totalCents: true },
           })
         : Promise.resolve({ _sum: { totalCents: 0 } }),
+      rep ? getActiveRequestCountForRep(rep.id) : Promise.resolve(0),
+      rep ? getLatestRequestsForRep(rep.id, 3) : Promise.resolve([]),
     ]);
 
   return (
@@ -73,7 +78,9 @@ export default async function RepDashboardPage() {
         <LogoutButton />
       </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <RepCarHero subtitle="هذه سيارتك — كل ما تم تحميله لك من المستودع الرئيسي تجده هنا" />
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard label="إجمالي الوحدات المخصصة" value={String(stats.totalUnits)} />
         <StatCard label="عدد المنتجات المختلفة" value={String(stats.distinctProducts)} />
         <StatCard
@@ -84,6 +91,7 @@ export default async function RepDashboardPage() {
             variant: stats.lowStockCount > 0 ? "warning" : "success",
           }}
         />
+        <StatCard label="طلبات مخزون نشطة" value={String(activeRequestCount)} />
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -123,6 +131,35 @@ export default async function RepDashboardPage() {
         </CardContent>
       </Card>
 
+      <Card>
+        <CardHeader>
+          <CardTitle>طلبات تزويد المخزون</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {latestRequests.length === 0 ? (
+            <p className="text-sm text-neutral-bg/60">لم ترسل أي طلب تزويد مخزون بعد.</p>
+          ) : (
+            <div className="flex flex-col divide-y divide-navy-soft">
+              {latestRequests.map((request) => (
+                <Link
+                  key={request.id}
+                  href={`/rep/requests/${request.id}`}
+                  className="flex items-center justify-between py-2 first:pt-0 last:pb-0 hover:opacity-80"
+                >
+                  <div>
+                    <p className="text-sm text-neutral-bg">{request.requestNumber ?? request.id}</p>
+                    <p className="text-xs text-neutral-bg/50">
+                      {new Date(request.createdAt).toLocaleDateString("ar")} — {request.itemCount} منتج
+                    </p>
+                  </div>
+                  <RepStockRequestStatusBadge status={request.status} />
+                </Link>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       <div className="flex flex-wrap gap-3">
         <Link href="/rep/sales/new">
           <Button>بيع جديد</Button>
@@ -130,8 +167,14 @@ export default async function RepDashboardPage() {
         <Link href="/rep/sales">
           <Button variant="outline">مبيعاتي</Button>
         </Link>
+        <Link href="/rep/requests/new">
+          <Button variant="outline">طلب تزويد مخزون</Button>
+        </Link>
+        <Link href="/rep/requests">
+          <Button variant="outline">طلباتي</Button>
+        </Link>
         <Link href="/rep/stock">
-          <Button variant="outline">عرض مخزوني</Button>
+          <Button variant="outline">عرض مخزون السيارة</Button>
         </Link>
         <Link href="/rep/movements">
           <Button variant="outline">سجل الحركات الكامل</Button>

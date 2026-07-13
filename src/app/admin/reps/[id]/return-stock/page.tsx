@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
+import { RepCarHero } from "@/components/reps/RepCarHero";
 import { ReturnStockForm } from "../../ReturnStockForm";
 
 interface AdminRepReturnStockPageProps {
@@ -41,10 +42,10 @@ export default async function AdminRepReturnStockPage({ params }: AdminRepReturn
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h2 className="text-xl font-semibold text-neutral-bg">إرجاع مخزون — {rep.user.name}</h2>
-        <p className="mt-1 text-sm text-neutral-bg/60">إرجاع مخزون من المندوب إلى المستودع الرئيسي</p>
-      </div>
+      <RepCarHero
+        title="إرجاع مخزون من السيارة"
+        subtitle={`إرجاع منتج واحد في كل مرة من سيارة ${rep.user.name} إلى المستودع الرئيسي`}
+      />
       <ReturnStockForm repId={rep.id} products={options} />
     </div>
   );

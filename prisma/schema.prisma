@@ -385,15 +385,29 @@ model OrderItem {
 // Sales representative stock workflow
 // ---------------------------------------------------------------------------
 
-/// StockRequestStatus values: "PENDING" | "APPROVED" | "REJECTED" | "FULFILLED"
+/// StockRequestStatus values: "PENDING" | "REVIEWED" | "PREPARED" | "COMPLETED" | "REJECTED"
+/// StockRequestType values: "RESTOCK" (RETURN reserved for a future phase)
+///
+/// Rep-initiated request for stock to be loaded into their car. Creating,
+/// reviewing, and preparing a request never touches InventoryItem/
+/// StockMovement — only completeStockRequest() does, exactly once, using
+/// each line's approvedQuantity (never requestedQuantity).
 model StockRequest {
-  id         String              @id @default(cuid())
-  salesRepId String
-  salesRep   SalesRepresentative @relation(fields: [salesRepId], references: [id])
-  status     String              @default("PENDING")
-  note       String?
-  createdAt  DateTime            @default(now())
-  updatedAt  DateTime            @updatedAt
+  id            String              @id @default(cuid())
+  /// Friendly business number shown to reps/admin — see generateRequestNumber().
+  requestNumber String?             @unique
+  salesRepId    String
+  salesRep      SalesRepresentative @relation(fields: [salesRepId], references: [id])
+  status        String              @default("PENDING")
+  type          String              @default("RESTOCK")
+  repNote       String?
+  adminNote     String?
+  reviewedAt    DateTime?
+  preparedAt    DateTime?
+  completedAt   DateTime?
+  rejectedAt    DateTime?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
 
   items StockRequestItem[]
 
@@ -401,12 +415,14 @@ model StockRequest {
 }
 
 model StockRequestItem {
-  id             String       @id @default(cuid())
-  stockRequestId String
-  stockRequest   StockRequest @relation(fields: [stockRequestId], references: [id], onDelete: Cascade)
-  productId      String
-  product        Product      @relation(fields: [productId], references: [id])
-  quantity       Int
+  id                String       @id @default(cuid())
+  stockRequestId    String
+  stockRequest      StockRequest @relation(fields: [stockRequestId], references: [id], onDelete: Cascade)
+  productId         String
+  product           Product      @relation(fields: [productId], references: [id])
+  requestedQuantity Int
+  /// Set by admin during review. null = not yet reviewed; 0 = rejected/removed line.
+  approvedQuantity  Int?
 
   @@map("stock_request_items")
 }
