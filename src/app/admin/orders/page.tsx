@@ -41,9 +41,9 @@ export default async function AdminOrdersPage({ searchParams }: AdminOrdersPageP
       ...(trimmedQuery
         ? {
             OR: [
-              { orderNumber: { contains: trimmedQuery } },
-              { contactName: { contains: trimmedQuery } },
-              { contactPhone: { contains: trimmedQuery } },
+              { orderNumber: { contains: trimmedQuery, mode: "insensitive" as const } },
+              { contactName: { contains: trimmedQuery, mode: "insensitive" as const } },
+              { contactPhone: { contains: trimmedQuery, mode: "insensitive" as const } },
             ],
           }
         : {}),

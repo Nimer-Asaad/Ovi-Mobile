@@ -58,9 +58,9 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
     ...(trimmedQuery
       ? {
           OR: [
-            { name: { contains: trimmedQuery } },
-            { nameAr: { contains: trimmedQuery } },
-            { sku: { contains: trimmedQuery } },
+            { name: { contains: trimmedQuery, mode: "insensitive" as const } },
+            { nameAr: { contains: trimmedQuery, mode: "insensitive" as const } },
+            { sku: { contains: trimmedQuery, mode: "insensitive" as const } },
           ],
         }
       : {}),

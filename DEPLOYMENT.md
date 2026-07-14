@@ -1,62 +1,67 @@
 # Deployment Guide
 
 This document is a checklist for the future, real deployment of Ovi Mobile.
-**Nothing in this document has been executed yet** — the app has not been
-deployed, and the production database has not been switched. This is
-preparation only.
+**The app has not been deployed to Vercel yet.** As of Phase 29, the
+database has moved from local SQLite to online PostgreSQL (Supabase
+preferred) — that part of this checklist is done. Vercel deployment itself,
+a real migration history, and cloud media storage are still separate,
+later phases.
 
-## Database: SQLite locally, PostgreSQL in production
+## Database: PostgreSQL (Supabase preferred)
 
-SQLite is fine for local development — it's a single file, needs no
-provisioning, and `npx prisma db push` syncs the schema instantly.
+**This project now uses PostgreSQL** (`prisma/schema.prisma` declares
+`provider = "postgresql"`) — there is no local SQLite fallback anymore.
+[Supabase](https://supabase.com) is the preferred provider for now; Prisma
+Postgres on Vercel is an acceptable alternative. [Neon](https://neon.tech)
+and [Railway](https://railway.app) remain viable if requirements change
+later.
 
-**SQLite is not recommended as the production database on Vercel** (or any
-serverless host). Serverless functions get a fresh, ephemeral filesystem on
-every invocation and may run across multiple instances concurrently — a
-SQLite file written on one invocation is not reliably visible to the next,
-and there is no durable disk to persist it on. This is not a performance
-tuning issue, it is a correctness issue: writes can silently be lost.
+Local development and any deployed environment both point at the same kind
+of database now — the only difference is which `DATABASE_URL`/`DIRECT_URL`
+each environment uses. Local values go in `.env` (gitignored, never
+committed); a deployed environment's values are set directly in that host's
+dashboard (e.g. Vercel's Environment Variables settings) — never committed
+either.
 
-**Recommendation:** before any real production deployment, provision a
-managed PostgreSQL database — [Neon](https://neon.tech),
-[Supabase](https://supabase.com), [Railway](https://railway.app), or
-similar all have a free/starter tier and work well with Prisma + Vercel.
-This project has **not** set one up yet — see "PostgreSQL readiness" below
-for what already supports this and what still needs to happen.
+## PostgreSQL readiness (Phase 29 — done) and what's still pending
 
-## PostgreSQL readiness (design-time, not yet switched)
+The schema (`prisma/schema.prisma`) was written from Phase 1 to make this
+switch low-risk, and that groundwork is why the Phase 29 cutover required no
+model changes:
 
-The schema (`prisma/schema.prisma`) was written to make this switch
-low-risk when it happens:
-
-- **Int money fields**, not `Decimal`/`Float` — SQLite has no native
-  decimal type, so pricing/cost fields are already stored as integer cents.
-  Identical behavior on both databases, no floating-point rounding.
-- **String-based statuses**, not native Prisma `enum` — SQLite doesn't
-  support `enum` columns, PostgreSQL does. Every status/role/type field is a
-  `String` constrained by `src/lib/constants.ts` instead, so the schema is
-  unchanged across both databases. These can optionally be promoted to real
-  `enum` columns after a PostgreSQL cutover, as a separate follow-up, without
+- **Int money fields**, not `Decimal`/`Float` — pricing/cost fields are
+  integer cents, avoiding floating-point rounding, unaffected by the
+  database move.
+- **String-based statuses**, not native Prisma `enum` — kept from the
+  SQLite era. Every status/role/type field is a `String` constrained by
+  `src/lib/constants.ts`. These can optionally be promoted to real `enum`
+  columns now that PostgreSQL is in use, as a separate follow-up, without
   touching application code.
 - **`cuid()` string ids** everywhere — no autoincrement sequence behavior
-  to reconcile between databases.
+  to reconcile.
+
+**Done in Phase 29:**
+- `prisma/schema.prisma` datasource is `provider = "postgresql"`, with
+  `url = env("DATABASE_URL")` and `directUrl = env("DIRECT_URL")`.
+- Six `contains:` search filters across the app (public product search,
+  admin orders/merchants/inventory-movements search, rep sale lookup) now
+  set `mode: "insensitive"` — required because PostgreSQL's `LIKE` (what
+  Prisma's `contains` compiles to) is case-sensitive by default, unlike
+  SQLite's. Without this, existing case-insensitive search UX would have
+  silently regressed.
 
 **What has NOT happened yet, and must not happen without separate
 approval:**
-- The datasource provider is still `provider = "sqlite"` in
-  `prisma/schema.prisma`. Switching it to `"postgresql"` is a deliberate,
-  reviewed step, not a side effect of deployment prep.
-- **No migration history exists.** This project has only ever used
+- **No migration history exists.** This project still only uses
   `npx prisma db push`, which has no concept of a migration history — it
-  just reconciles the live schema. Production must not do this. Before the
-  first production deploy against PostgreSQL:
-  1. Switch the provider in a dedicated, reviewed change.
-  2. Run `npx prisma migrate dev --name init` locally against a real
-     PostgreSQL instance to generate the first migration file.
-  3. Commit `prisma/migrations/`.
-  4. In production, run `npx prisma migrate deploy` (never `db push`,
+  just reconciles the live schema. This is acceptable for the current
+  prototype/demo stage, but production must not do this. Before the first
+  real production deploy:
+  1. Run `npx prisma migrate dev --name init` locally against the
+     PostgreSQL database to generate the first migration file.
+  2. Commit `prisma/migrations/`.
+  3. In production, run `npx prisma migrate deploy` (never `db push`,
      never `migrate dev`) to apply migrations.
-- No Neon/Supabase/Railway project has been created for this app.
 
 ## Vercel deployment checklist
 
@@ -74,37 +79,42 @@ Not yet done — checklist for when it happens:
       generated before `next build` runs
 - [ ] Trigger the first deploy and watch the build log for Prisma or
       TypeScript errors
-- [ ] Do not point production at the SQLite file — see the database section
-      above
+- [ ] Set `DATABASE_URL`/`DIRECT_URL` in Vercel to the **production**
+      Supabase/Postgres project's connection strings — not the same
+      database used for local development (see "Database" above)
+- [ ] Product media (`public/uploads/products/`) is local-disk storage —
+      not production-safe on Vercel's ephemeral filesystem. Do not treat
+      product image/video uploads as durable until cloud storage (Supabase
+      Storage, S3, Cloudinary, or Vercel Blob) replaces it in a later phase.
 
 ## Environment variables checklist
 
 | Variable | Required | Notes |
 | --- | --- | --- |
-| `DATABASE_URL` | Yes | Local: `file:./dev.db`. Production: a PostgreSQL connection string from your provider, set directly in Vercel's dashboard — never committed. |
+| `DATABASE_URL` | Yes | PostgreSQL connection string (Supabase Session pooler for local dev; see "Database" above). Set directly in Vercel's dashboard for deployed environments — never committed. |
+| `DIRECT_URL` | Yes | Non-pooled PostgreSQL connection Prisma uses for `db push`/`migrate`. Same rules as `DATABASE_URL` — never committed. |
 | `NODE_ENV` | No — automatic | Set by the Next.js/Vercel runtime itself (`production` on Vercel builds/deploys). Do not set it manually. Controls: `secure` flag on session cookies (`src/lib/auth/session.ts`), and Prisma query log verbosity (`src/lib/prisma.ts`). |
 | `GOOGLE_CLIENT_ID` | No — optional | Enables the "تسجيل الدخول بواسطة Google" button on `/login`. If unset, that flow safely redirects to a login error instead of working — the rest of the app is unaffected. |
 | `GOOGLE_CLIENT_SECRET` | No — optional | Paired with `GOOGLE_CLIENT_ID`. Never expose client-side. |
-| `GOOGLE_REDIRECT_URI` | No — optional | Must exactly match an "Authorized redirect URI" configured on the Google Cloud Console OAuth client, and must use the production domain in production (e.g. `https://ovimobile.example/auth/google/callback`), not `localhost`. |
+| `GOOGLE_REDIRECT_URI` | No — optional | Must exactly match an "Authorized redirect URI" configured on the Google Cloud Console OAuth client, and must use the production domain in production (e.g. `https://ovimobile.example/auth/google/callback`), not `localhost`. Changing this for a production domain is a separate, later step — not part of Phase 29. |
 
 No other environment variables are read anywhere in the codebase today
-(confirmed by inspection — only `DATABASE_URL`, `NODE_ENV`, and the three
-optional `GOOGLE_*` variables above are referenced). Do not add speculative
-variables ahead of an actual feature
-that needs them.
+(confirmed by inspection — only `DATABASE_URL`, `DIRECT_URL`, `NODE_ENV`,
+and the three optional `GOOGLE_*` variables above are referenced). There is
+no session-signing secret to configure — sessions are DB-backed opaque rows,
+not JWTs. Do not add speculative variables ahead of an actual feature that
+needs them.
 
-## Database migration checklist (for the future PostgreSQL cutover)
+## Migration history checklist (for the future production hardening)
 
 This is intentionally not being done now — listed here so it isn't
-forgotten or done carelessly later.
+forgotten or done carelessly later. The database itself is already
+PostgreSQL (Phase 29); what's still missing is a real migration history in
+place of `db push`.
 
-- [ ] Provision a PostgreSQL database (Neon/Supabase/Railway/other)
-- [ ] Get its connection string, set as `DATABASE_URL` in Vercel (production
-      environment) — do not put it in any committed file
-- [ ] In a dedicated reviewed change: switch
-      `datasource db { provider = "postgresql" }` in `prisma/schema.prisma`
-- [ ] Run `npx prisma migrate dev --name init` locally against the new
-      PostgreSQL database to generate and apply the first migration
+- [ ] In a dedicated reviewed change, run
+      `npx prisma migrate dev --name init` locally against the PostgreSQL
+      database to generate and apply the first migration
 - [ ] Commit the generated `prisma/migrations/` directory
 - [ ] Verify the app still runs correctly locally against PostgreSQL before
       deploying
@@ -182,7 +192,7 @@ Once a real deployment exists, verify before considering it live:
   attempting to reverse-apply a migration).
 - Because there is no migration history yet (see above), there is currently
   nothing to roll back at the database level — this section becomes
-  actionable once the PostgreSQL migration checklist has been completed at
+  actionable once the migration history checklist has been completed at
   least once.
 
 ## Security light review

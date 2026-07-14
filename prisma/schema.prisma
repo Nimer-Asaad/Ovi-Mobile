@@ -1,32 +1,34 @@
-// Ovi Mobile — Prisma schema (Phase 1 draft)
+// Ovi Mobile — Prisma schema
 //
 // Portability note:
-// Prisma's native `enum` type is not supported by SQLite, only by
-// PostgreSQL/MySQL/CockroachDB. Since this schema must run unchanged on
-// SQLite (dev) and PostgreSQL (production), every "enum-like" field below is
-// a `String` constrained to a fixed set of values. The canonical list of
+// Every "enum-like" field below is a `String` constrained to a fixed set of
+// values rather than a native Prisma `enum`, kept from the SQLite era of
+// this project (SQLite has no native enum type). The canonical list of
 // allowed values for each lives in `src/lib/constants.ts` and is mirrored as
-// TypeScript string-literal union types in `src/types/index.ts`. When we cut
-// over to PostgreSQL we can optionally promote these to real `enum` columns
-// without changing application code.
+// TypeScript string-literal union types in `src/types/index.ts`. Now that
+// the datasource is PostgreSQL (Phase 29), these could optionally be
+// promoted to real `enum` columns as a separate follow-up, without changing
+// application code.
 //
 // Money note:
 // All monetary fields are `Int`, storing the smallest currency unit
-// (e.g. agorot for ILS). This avoids floating-point rounding issues and
-// works identically on SQLite and PostgreSQL, where Prisma's `Decimal`
-// type is unsupported on SQLite.
+// (e.g. agorot for ILS) instead of `Decimal`, to avoid floating-point
+// rounding issues — unchanged by the PostgreSQL move.
 //
-// This is a Phase 1 draft: models cover the full domain described in the
-// project brief so later phases can build on a stable shape, but no
-// application code (auth, CRUD, checkout) is wired up yet.
+// Database note (Phase 29):
+// Production/shared development now uses PostgreSQL (Supabase or
+// equivalent) — see DATABASE_URL/DIRECT_URL in .env.example and
+// DEPLOYMENT.md. `directUrl` is the non-pooled connection Prisma uses for
+// `db push`/`migrate`; `url` is the runtime connection.
 
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 // ---------------------------------------------------------------------------

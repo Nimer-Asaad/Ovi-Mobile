@@ -5,7 +5,7 @@ import { isProtectedPath } from "@/lib/auth/protected-routes";
 /**
  * Coarse gate only: redirects to /login if a protected path has no session
  * cookie at all. This runs on the Edge runtime, which can't reach the
- * SQLite-backed Prisma client, so it never makes the real role/status
+ * Node-only Prisma client, so it never makes the real role/status
  * decision — that happens in each area's layout/page via
  * `src/lib/auth/guards.ts` (Node runtime, real DB check).
  */

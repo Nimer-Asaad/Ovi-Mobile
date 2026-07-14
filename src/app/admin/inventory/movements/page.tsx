@@ -37,7 +37,10 @@ export default async function AdminInventoryMovementsPage({ searchParams }: Admi
       ...(trimmedQuery
         ? {
             product: {
-              OR: [{ name: { contains: trimmedQuery } }, { sku: { contains: trimmedQuery } }],
+              OR: [
+                { name: { contains: trimmedQuery, mode: "insensitive" as const } },
+                { sku: { contains: trimmedQuery, mode: "insensitive" as const } },
+              ],
             },
           }
         : {}),

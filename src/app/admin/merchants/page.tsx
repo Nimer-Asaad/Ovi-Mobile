@@ -24,10 +24,10 @@ export default async function AdminMerchantsPage({ searchParams }: AdminMerchant
       ...(trimmedQuery
         ? {
             OR: [
-              { businessName: { contains: trimmedQuery } },
-              { user: { name: { contains: trimmedQuery } } },
-              { user: { email: { contains: trimmedQuery } } },
-              { user: { phone: { contains: trimmedQuery } } },
+              { businessName: { contains: trimmedQuery, mode: "insensitive" as const } },
+              { user: { name: { contains: trimmedQuery, mode: "insensitive" as const } } },
+              { user: { email: { contains: trimmedQuery, mode: "insensitive" as const } } },
+              { user: { phone: { contains: trimmedQuery, mode: "insensitive" as const } } },
             ],
           }
         : {}),

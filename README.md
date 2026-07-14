@@ -23,7 +23,7 @@ is not live in production.
 
 - **Framework:** Next.js 15 (App Router, Server Components, Server Actions)
 - **Language:** TypeScript (strict mode)
-- **Database ORM:** Prisma — SQLite locally, PostgreSQL-ready for production (see below)
+- **Database ORM:** Prisma — PostgreSQL (Supabase or equivalent; see below)
 - **Styling:** Tailwind CSS, RTL/Arabic-first design
 - **Validation:** Zod
 - **Auth:** DB-backed opaque sessions (no JWT), `crypto.scrypt` password hashing
@@ -37,6 +37,7 @@ is not live in production.
 ```bash
 npm install
 cp .env.example .env
+# then fill in DATABASE_URL / DIRECT_URL (see "Database" below) before continuing
 npx prisma generate
 npx prisma db push
 npm run db:seed
@@ -61,7 +62,7 @@ npm start
 | --- | --- |
 | `npm install` | Install dependencies (also runs `prisma generate` via `postinstall`) |
 | `npx prisma generate` | Regenerate the Prisma Client from `schema.prisma` |
-| `npx prisma db push` | Sync the database schema (SQLite file locally) without a migration history |
+| `npx prisma db push` | Sync the database schema directly against `DATABASE_URL`/`DIRECT_URL`, without a migration history |
 | `npm run db:seed` | Seed development accounts + sample catalog/stock — **local only, never run against production** |
 | `npm run dev` | Start the dev server |
 | `npm run build` | Production build (`next build`) |
@@ -90,8 +91,7 @@ npm start
   inventory, reps, and merchant forms
 - `src/middleware.ts` — coarse cookie-presence gate for protected routes
 - `src/types` — shared TypeScript types
-- `prisma/schema.prisma` — data model (SQLite now, PostgreSQL-ready later —
-  see "Database" below)
+- `prisma/schema.prisma` — data model (PostgreSQL — see "Database" below)
 - `prisma/seed.ts` — seed script (dev accounts + sample catalog + demo stock)
 
 ## Authentication
@@ -131,42 +131,59 @@ Seeded by `npm run db:seed`. Local development only — never use these in produ
 
 ## Database
 
-**Local development uses SQLite** (`prisma/dev.db`, gitignored) — zero setup,
-nothing to provision, `npx prisma db push` syncs the schema directly.
+**This project uses PostgreSQL** (`prisma/schema.prisma` declares
+`provider = "postgresql"`) — [Supabase](https://supabase.com) Postgres is
+the preferred provider for now; Prisma Postgres on Vercel is an acceptable
+alternative. There is no local SQLite fallback anymore (Phase 29) —
+`DATABASE_URL`/`DIRECT_URL` must point at a real Postgres database, local or
+hosted, before `npx prisma db push` or `npm run dev` will work.
 
-**Production should use PostgreSQL, not SQLite.** The schema was written
-with this in mind from Phase 1:
+- `DATABASE_URL` — the runtime connection Prisma uses for normal queries.
+  For local development against Supabase, use the **Session pooler**
+  connection string (Project Settings → Database → Connection string) — it
+  behaves like a normal long-lived connection with no prepared-statement
+  caveats. The Transaction pooler (`?pgbouncer=true`) is a serverless/Vercel
+  concern for a later phase, not local development.
+- `DIRECT_URL` — the non-pooled connection Prisma uses for `db push`/
+  `migrate`. Use the direct or session connection here too.
+- Never commit either value — put them in your local `.env` (already
+  gitignored). See `.env.example` for the placeholder shape.
+
+The schema was written to make a SQLite↔PostgreSQL move low-risk when it
+happened, and that groundwork is why the cutover in Phase 29 required no
+model changes:
 
 - Every "enum-like" field (order status, role, stock movement type, etc.) is
   a `String` constrained by `src/lib/constants.ts`, not a native Prisma
-  `enum` — SQLite doesn't support native enums, PostgreSQL does. This keeps
-  the schema identical across both, and these can optionally be promoted to
-  real `enum` columns after a PostgreSQL cutover without changing
-  application code.
+  `enum`. These could optionally be promoted to real `enum` columns as a
+  separate follow-up, without changing application code.
 - All money fields are `Int` (smallest currency unit, e.g. agorot), never
-  `Float`/`Decimal` — SQLite has no native decimal type, so this keeps
-  behavior identical on both databases and avoids floating-point rounding
-  entirely.
+  `Float`/`Decimal` — avoids floating-point rounding entirely.
 - All ids are `cuid()` strings — no database-specific autoincrement
   behavior to reconcile.
 
-**The datasource provider has not been switched yet** — `prisma/schema.prisma`
-still declares `provider = "sqlite"`. See [DEPLOYMENT.md](DEPLOYMENT.md) for
-the full PostgreSQL migration checklist before that switch happens.
+**This project currently uses `prisma db push`, not migrations** — fine for
+this prototype/demo stage (`npx prisma db push` initializes the schema on an
+empty database, then `npm run db:seed` populates demo data). Before any real
+production traffic, switch to a real migration history (`npx prisma migrate
+dev --name init` to generate it, `npx prisma migrate deploy` to apply it in
+production) — see DEPLOYMENT.md.
 
-**This project currently uses `prisma db push`, not migrations.** That's
-fine for local development, but production must use a real migration
-history (`npx prisma migrate dev` to generate it, `npx prisma migrate
-deploy` to apply it) rather than continuing to push schema changes directly
-— see DEPLOYMENT.md.
+**Product media uploads are unaffected by this database move and remain
+local-disk only** (`public/uploads/products/`, see below) — moving the
+database online does not move previously uploaded files, and local disk
+storage is not production-safe on Vercel (ephemeral filesystem). Migrating
+uploads to object storage (Supabase Storage, S3, Cloudinary, or Vercel
+Blob) is a future phase, before real production use.
 
 ## Deployment
 
-Not yet deployed. See [DEPLOYMENT.md](DEPLOYMENT.md) for the full checklist
-before any real deployment — environment variables, database migration
-plan, build steps, and post-deploy verification. The suggested path is
-Vercel (native Next.js support) with a managed PostgreSQL provider (Neon,
-Supabase, or Railway) once the app is ready to go live.
+Not yet deployed to Vercel — the database is now online PostgreSQL (see
+"Database" above), but Vercel deployment itself, cloud media storage, and a
+real migration history are separate, later phases. See
+[DEPLOYMENT.md](DEPLOYMENT.md) for the full checklist before any real
+deployment — environment variables, migration plan, build steps, and
+post-deploy verification.
 
 ## Notes
 

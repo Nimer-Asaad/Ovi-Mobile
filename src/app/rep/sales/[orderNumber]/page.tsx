@@ -72,7 +72,7 @@ export default async function RepSaleDetailPage({ params }: RepSaleDetailPagePro
   }
 
   const movement = await prisma.stockMovement.findFirst({
-    where: { note: { contains: orderNumber } },
+    where: { note: { contains: orderNumber, mode: "insensitive" as const } },
     select: { type: true, quantity: true, previousQuantity: true, newQuantity: true, createdAt: true },
   });
 
