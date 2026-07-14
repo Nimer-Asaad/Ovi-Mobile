@@ -13,14 +13,14 @@ export function AdminSidebar() {
   const pathname = usePathname();
 
   return (
-    <aside className="hidden w-64 shrink-0 border-e border-chrome-border bg-chrome md:block print:hidden">
+    <aside className="hidden w-64 shrink-0 border-e border-chrome-border bg-chrome md:block md:sticky md:top-0 md:h-screen md:self-start md:overflow-y-auto print:hidden">
       <div className="flex h-16 items-center px-6">
         <span className="text-sm font-semibold tracking-wide text-gold-champagne">
           Ovi Mobile — الإدارة
         </span>
       </div>
 
-      <nav className="flex flex-col gap-1 px-3 py-2">
+      <nav className="flex flex-col gap-1 px-3 py-2 pb-6">
         {ADMIN_NAV_ITEMS.map((item) => {
           const isActive =
             item.href === "/admin"

@@ -94,21 +94,7 @@ export const productSchema = z
 export type ProductInput = z.infer<typeof productSchema>;
 
 // ---------------------------------------------------------------------------
-// Product images
-// ---------------------------------------------------------------------------
-
-/** Each of the 5 URL fields is optional independently — empty ones are
- * dropped before saving, so an all-empty submission is still valid. */
-const imageUrlField = z.string().optional().refine((v) => !v || /^https?:\/\//.test(v), {
-  message: "رابط الصورة يجب أن يبدأ بـ http:// أو https://",
-});
-
-export const productImagesSchema = z.object({
-  mainImageUrl: imageUrlField,
-  imageUrl2: imageUrlField,
-  imageUrl3: imageUrlField,
-  imageUrl4: imageUrlField,
-  imageUrl5: imageUrlField,
-});
-
-export type ProductImagesInput = z.infer<typeof productImagesSchema>;
+// Product media (images/videos) — the dynamic add/remove/upload fields
+// submitted by ProductMediaUploader are read and validated directly in
+// admin/products/actions.ts (MIME/size checks live in
+// src/lib/validation/productMedia.ts), not through a Zod object here.

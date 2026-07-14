@@ -1,18 +1,13 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
-import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { Button } from "@/components/ui/Button";
-import { Badge } from "@/components/ui/Badge";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { AdminTable, AdminTableHead, AdminTableBody, AdminEmptyRow } from "@/components/admin/AdminTable";
-import { AdminStatusBadge } from "@/components/admin/AdminStatusBadge";
-import { ProductImagePlaceholder } from "@/components/catalog/ProductImagePlaceholder";
+import { InventoryLiveSearch, type AdminInventoryRow } from "@/components/admin/inventory/InventoryLiveSearch";
 import { getMainWarehouse, isLowStock } from "@/lib/inventory";
 
 interface AdminInventoryPageProps {
   searchParams: Promise<{
-    q?: string;
     category?: string;
     brand?: string;
     lowStock?: string;
@@ -24,8 +19,7 @@ interface AdminInventoryPageProps {
 type SortOption = "lowest" | "highest" | "newest" | "name";
 
 export default async function AdminInventoryPage({ searchParams }: AdminInventoryPageProps) {
-  const { q, category, brand, lowStock, active, sort } = await searchParams;
-  const trimmedQuery = q?.trim();
+  const { category, brand, lowStock, active, sort } = await searchParams;
   const sortOption: SortOption = sort === "highest" || sort === "newest" || sort === "name" ? sort : "lowest";
 
   const [warehouse, categories, brands] = await Promise.all([
@@ -40,9 +34,6 @@ export default async function AdminInventoryPage({ searchParams }: AdminInventor
       ...(brand ? { brandId: brand } : {}),
       ...(active === "active" ? { isActive: true } : {}),
       ...(active === "inactive" ? { isActive: false } : {}),
-      ...(trimmedQuery
-        ? { OR: [{ name: { contains: trimmedQuery } }, { sku: { contains: trimmedQuery } }] }
-        : {}),
     },
     select: {
       id: true,
@@ -53,6 +44,7 @@ export default async function AdminInventoryPage({ searchParams }: AdminInventor
       category: { select: { name: true, nameAr: true } },
       brand: { select: { name: true } },
       images: {
+        where: { mediaType: "IMAGE" },
         select: { url: true, altText: true },
         orderBy: [{ isMain: "desc" }, { sortOrder: "asc" }],
         take: 1,
@@ -87,6 +79,18 @@ export default async function AdminInventoryPage({ searchParams }: AdminInventor
     }
   });
 
+  const inventoryRows: AdminInventoryRow[] = rows.map((row) => ({
+    id: row.id,
+    sku: row.sku,
+    name: row.name,
+    categoryName: row.category?.nameAr ?? row.category?.name ?? null,
+    brandName: row.brand?.name ?? null,
+    stock: row.stock,
+    isActive: row.isActive,
+    isLowStockRow: isLowStock(row.stock),
+    thumbnail: row.images[0] ?? null,
+  }));
+
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
@@ -106,12 +110,8 @@ export default async function AdminInventoryPage({ searchParams }: AdminInventor
 
       <form
         method="GET"
-        className="grid grid-cols-1 gap-4 rounded-card border border-navy-soft bg-navy-surface p-4 sm:grid-cols-2 lg:grid-cols-6"
+        className="grid grid-cols-1 gap-4 rounded-card border border-navy-soft bg-navy-surface p-4 sm:grid-cols-2 lg:grid-cols-5"
       >
-        <div className="lg:col-span-2">
-          <Input name="q" label="بحث بالاسم أو رمز المنتج" defaultValue={trimmedQuery ?? ""} />
-        </div>
-
         <Select name="category" label="القسم" defaultValue={category ?? ""}>
           <option value="">كل الأقسام</option>
           {categories.map((c) => (
@@ -148,80 +148,12 @@ export default async function AdminInventoryPage({ searchParams }: AdminInventor
           مخزون منخفض فقط
         </label>
 
-        <div className="flex items-end lg:col-span-6">
+        <div className="flex items-end lg:col-span-5">
           <Button type="submit">تصفية</Button>
         </div>
       </form>
 
-      <AdminTable>
-        <AdminTableHead>
-          <th className="px-4 py-3 text-start"></th>
-          <th className="px-4 py-3 text-start">الاسم</th>
-          <th className="px-4 py-3 text-start">SKU</th>
-          <th className="px-4 py-3 text-start">القسم</th>
-          <th className="px-4 py-3 text-start">العلامة</th>
-          <th className="px-4 py-3 text-start">المخزون</th>
-          <th className="px-4 py-3 text-start">الحالة</th>
-          <th className="px-4 py-3 text-start"></th>
-        </AdminTableHead>
-        <AdminTableBody>
-          {rows.map((row) => {
-            const thumbnail = row.images[0];
-            const lowStockRow = isLowStock(row.stock);
-            return (
-              <tr key={row.id}>
-                <td className="px-4 py-3">
-                  <div className="h-12 w-12 overflow-hidden rounded-card">
-                    {thumbnail ? (
-                      // eslint-disable-next-line @next/next/no-img-element -- arbitrary admin-entered external URLs
-                      <img
-                        src={thumbnail.url}
-                        alt={thumbnail.altText ?? row.name}
-                        className="h-full w-full object-cover"
-                    loading="lazy"
-                      />
-                    ) : (
-                      <ProductImagePlaceholder className="h-full w-full" />
-                    )}
-                  </div>
-                </td>
-                <td className="px-4 py-3 text-neutral-bg">{row.name}</td>
-                <td className="px-4 py-3 text-neutral-bg/70">{row.sku}</td>
-                <td className="px-4 py-3 text-neutral-bg/70">
-                  {row.category?.nameAr ?? row.category?.name ?? "—"}
-                </td>
-                <td className="px-4 py-3 text-neutral-bg/70">{row.brand?.name ?? "—"}</td>
-                <td className="px-4 py-3">
-                  <div className="flex items-center gap-2">
-                    <span className="text-neutral-bg">{row.stock}</span>
-                    {lowStockRow && <Badge variant="warning">مخزون منخفض</Badge>}
-                  </div>
-                </td>
-                <td className="px-4 py-3">
-                  <AdminStatusBadge isActive={row.isActive} />
-                </td>
-                <td className="px-4 py-3">
-                  <div className="flex items-center justify-end gap-3">
-                    <Link
-                      href={`/admin/inventory/adjust?productId=${row.id}`}
-                      className="text-sm text-gold-champagne hover:underline"
-                    >
-                      تعديل
-                    </Link>
-                    <Link
-                      href={`/admin/inventory/movements?productId=${row.id}`}
-                      className="text-sm text-gold-champagne hover:underline"
-                    >
-                      السجل
-                    </Link>
-                  </div>
-                </td>
-              </tr>
-            );
-          })}
-          {rows.length === 0 && <AdminEmptyRow colSpan={8} message="لا توجد منتجات مطابقة" />}
-        </AdminTableBody>
-      </AdminTable>
+      <InventoryLiveSearch rows={inventoryRows} />
     </div>
   );
 }

@@ -44,6 +44,9 @@ export default async function ProductDetailPage({ params }: ProductDetailPagePro
   if (!product) notFound();
 
   const totalStock = product.inventoryItems.reduce((sum, item) => sum + item.quantity, 0);
+  // Main is always enforced IMAGE on save, but this stays defensive since
+  // the gallery's images list here is unfiltered (it also carries videos).
+  const mainImageUrl = product.images.find((image) => image.mediaType === "IMAGE")?.url ?? null;
   const priceCents = readCatalogPriceCents(product);
   const isWholesale = isWholesalePriced(product);
   const title = product.nameAr ?? product.name;
@@ -88,7 +91,7 @@ export default async function ProductDetailPage({ params }: ProductDetailPagePro
               isFeatured={product.isFeatured}
               totalStock={totalStock}
               cartEligibility={cartEligibility}
-              imageUrl={product.images[0]?.url ?? null}
+              imageUrl={mainImageUrl}
             />
           </div>
 

@@ -6,7 +6,9 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth/guards";
 import { ROLES } from "@/lib/constants";
-import { productSchema, productImagesSchema } from "@/lib/validation/catalog";
+import { productSchema } from "@/lib/validation/catalog";
+import { validateMediaFile, inferMediaTypeFromUrl, type MediaType } from "@/lib/validation/productMedia";
+import { saveUploadedProductFile } from "@/lib/uploads";
 import type { z } from "zod";
 
 export interface ProductFormState {
@@ -15,7 +17,8 @@ export interface ProductFormState {
 }
 
 const DUPLICATE_SKU_MESSAGE = "رمز المنتج (SKU) مستخدم بالفعل";
-const DUPLICATE_IMAGE_MESSAGE = "لا يمكن استخدام نفس رابط الصورة أكثر من مرة";
+const DUPLICATE_MEDIA_MESSAGE = "لا يمكن استخدام نفس رابط الوسائط أكثر من مرة";
+const INVALID_MEDIA_URL_MESSAGE = "روابط الوسائط يجب أن تبدأ بـ http:// أو https://";
 
 function parseProductForm(formData: FormData) {
   return productSchema.safeParse({
@@ -32,16 +35,6 @@ function parseProductForm(formData: FormData) {
   });
 }
 
-function parseImagesForm(formData: FormData) {
-  return productImagesSchema.safeParse({
-    mainImageUrl: formData.get("mainImageUrl")?.toString().trim() || undefined,
-    imageUrl2: formData.get("imageUrl2")?.toString().trim() || undefined,
-    imageUrl3: formData.get("imageUrl3")?.toString().trim() || undefined,
-    imageUrl4: formData.get("imageUrl4")?.toString().trim() || undefined,
-    imageUrl5: formData.get("imageUrl5")?.toString().trim() || undefined,
-  });
-}
-
 function fieldErrorsFrom(error: z.ZodError) {
   const fieldErrors: Record<string, string> = {};
   for (const issue of error.issues) {
@@ -51,37 +44,103 @@ function fieldErrorsFrom(error: z.ZodError) {
   return fieldErrors;
 }
 
-/** Ordered, de-duplicated list of non-empty image URLs from the 5 form
- * fields (main first, then additional 1-4). Returns null if a URL repeats. */
-function collectImageUrls(images: {
-  mainImageUrl?: string;
-  imageUrl2?: string;
-  imageUrl3?: string;
-  imageUrl4?: string;
-  imageUrl5?: string;
-}): string[] | null {
-  const urls = [images.mainImageUrl, images.imageUrl2, images.imageUrl3, images.imageUrl4, images.imageUrl5].filter(
-    (url): url is string => typeof url === "string" && url.trim() !== "",
-  );
-
-  if (new Set(urls).size !== urls.length) {
-    return null;
-  }
-
-  return urls;
+interface MediaEntry {
+  url: string;
+  mediaType: MediaType;
 }
 
-async function replaceProductImages(productId: string, urls: string[], productName: string): Promise<void> {
+type CollectMediaResult = { ok: true; entries: { url: string; mediaType: MediaType; isMain: boolean }[] } | { ok: false; error: string };
+
+/**
+ * Reads the dynamic media_<i>_* fields written by ProductMediaUploader.
+ * Every entry is re-validated server-side (MIME/size for uploads, http(s)
+ * prefix for pasted URLs) — the client's disabled/hidden inputs are only a
+ * UX hint, never trusted alone. The requested main slot (mainMediaIndex) is
+ * only honored if it resolves to an IMAGE; otherwise this falls back to the
+ * first IMAGE entry, or no main at all, so a video can never become main
+ * regardless of what the client submitted.
+ */
+async function collectProductMedia(formData: FormData): Promise<CollectMediaResult> {
+  const count = Math.max(0, Math.min(50, parseInt(formData.get("mediaCount")?.toString() ?? "0", 10) || 0));
+  const requestedMainIndex = parseInt(formData.get("mainMediaIndex")?.toString() ?? "-1", 10);
+
+  const slotEntries: (MediaEntry | null)[] = [];
+
+  for (let i = 0; i < count; i++) {
+    const kind = formData.get(`media_${i}_kind`)?.toString();
+
+    if (kind === "existing") {
+      const url = formData.get(`media_${i}_url`)?.toString();
+      const mediaType = formData.get(`media_${i}_mediaType`)?.toString();
+      if (url && (mediaType === "IMAGE" || mediaType === "VIDEO")) {
+        slotEntries.push({ url, mediaType });
+      } else {
+        slotEntries.push(null);
+      }
+      continue;
+    }
+
+    if (kind === "new") {
+      const file = formData.get(`media_${i}_file`);
+      if (file instanceof File && file.size > 0) {
+        const validation = validateMediaFile(file);
+        if (!validation.ok || !validation.mediaType || !validation.extension) {
+          return { ok: false, error: validation.error ?? "ملف وسائط غير صالح" };
+        }
+        const savedUrl = await saveUploadedProductFile(file, validation.extension);
+        slotEntries.push({ url: savedUrl, mediaType: validation.mediaType });
+        continue;
+      }
+
+      const url = formData.get(`media_${i}_url`)?.toString().trim();
+      if (url) {
+        if (!/^https?:\/\//.test(url)) {
+          return { ok: false, error: INVALID_MEDIA_URL_MESSAGE };
+        }
+        slotEntries.push({ url, mediaType: inferMediaTypeFromUrl(url) });
+      } else {
+        slotEntries.push(null);
+      }
+      continue;
+    }
+
+    slotEntries.push(null);
+  }
+
+  const entries = slotEntries.filter((entry): entry is MediaEntry => entry !== null);
+
+  if (new Set(entries.map((entry) => entry.url)).size !== entries.length) {
+    return { ok: false, error: DUPLICATE_MEDIA_MESSAGE };
+  }
+
+  const requestedMain =
+    requestedMainIndex >= 0 && requestedMainIndex < slotEntries.length ? slotEntries[requestedMainIndex] : null;
+  const mainEntry = requestedMain?.mediaType === "IMAGE" ? requestedMain : (entries.find((e) => e.mediaType === "IMAGE") ?? null);
+
+  const ordered = mainEntry ? [mainEntry, ...entries.filter((entry) => entry !== mainEntry)] : entries;
+
+  return {
+    ok: true,
+    entries: ordered.map((entry, index) => ({ ...entry, isMain: mainEntry !== null && index === 0 })),
+  };
+}
+
+async function replaceProductImages(
+  productId: string,
+  entries: { url: string; mediaType: MediaType; isMain: boolean }[],
+  productName: string,
+): Promise<void> {
   await prisma.$transaction([
     prisma.productImage.deleteMany({ where: { productId } }),
-    ...(urls.length > 0
+    ...(entries.length > 0
       ? [
           prisma.productImage.createMany({
-            data: urls.map((url, index) => ({
+            data: entries.map((entry, index) => ({
               productId,
-              url,
+              url: entry.url,
+              mediaType: entry.mediaType,
               altText: productName,
-              isMain: index === 0,
+              isMain: entry.isMain,
               sortOrder: index,
             })),
           }),
@@ -97,18 +156,13 @@ export async function createProduct(
   await requireRole([ROLES.ADMIN]);
 
   const parsed = parseProductForm(formData);
-  const imagesParsed = parseImagesForm(formData);
-
-  if (!parsed.success || !imagesParsed.success) {
-    const fieldErrors: Record<string, string> = {};
-    if (!parsed.success) Object.assign(fieldErrors, fieldErrorsFrom(parsed.error));
-    if (!imagesParsed.success) Object.assign(fieldErrors, fieldErrorsFrom(imagesParsed.error));
-    return { fieldErrors };
+  if (!parsed.success) {
+    return { fieldErrors: fieldErrorsFrom(parsed.error) };
   }
 
-  const imageUrls = collectImageUrls(imagesParsed.data);
-  if (imageUrls === null) {
-    return { error: DUPLICATE_IMAGE_MESSAGE };
+  const media = await collectProductMedia(formData);
+  if (!media.ok) {
+    return { fieldErrors: { media: media.error } };
   }
 
   const existingSku = await prisma.product.findUnique({ where: { sku: parsed.data.sku } });
@@ -143,8 +197,8 @@ export async function createProduct(
     throw err;
   }
 
-  if (imageUrls.length > 0) {
-    await replaceProductImages(productId, imageUrls, parsed.data.name);
+  if (media.entries.length > 0) {
+    await replaceProductImages(productId, media.entries, parsed.data.name);
   }
 
   revalidatePath("/admin/products");
@@ -161,18 +215,13 @@ export async function updateProduct(
   await requireRole([ROLES.ADMIN]);
 
   const parsed = parseProductForm(formData);
-  const imagesParsed = parseImagesForm(formData);
-
-  if (!parsed.success || !imagesParsed.success) {
-    const fieldErrors: Record<string, string> = {};
-    if (!parsed.success) Object.assign(fieldErrors, fieldErrorsFrom(parsed.error));
-    if (!imagesParsed.success) Object.assign(fieldErrors, fieldErrorsFrom(imagesParsed.error));
-    return { fieldErrors };
+  if (!parsed.success) {
+    return { fieldErrors: fieldErrorsFrom(parsed.error) };
   }
 
-  const imageUrls = collectImageUrls(imagesParsed.data);
-  if (imageUrls === null) {
-    return { error: DUPLICATE_IMAGE_MESSAGE };
+  const media = await collectProductMedia(formData);
+  if (!media.ok) {
+    return { fieldErrors: { media: media.error } };
   }
 
   const existingSku = await prisma.product.findFirst({
@@ -208,7 +257,7 @@ export async function updateProduct(
     throw err;
   }
 
-  await replaceProductImages(id, imageUrls, parsed.data.name);
+  await replaceProductImages(id, media.entries, parsed.data.name);
 
   revalidatePath("/admin/products");
   revalidatePath("/admin");

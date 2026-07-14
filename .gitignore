@@ -17,6 +17,11 @@
 /prisma/dev.db-journal
 /prisma/migrations/**/migration_lock.toml.bak
 
+# locally uploaded product media (Phase 28) — local/dev storage only, never
+# committed; migrate to object storage (S3/Supabase/Cloudinary) before
+# production
+/public/uploads/
+
 # misc
 .DS_Store
 *.pem

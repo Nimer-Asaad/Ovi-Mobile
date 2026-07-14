@@ -22,7 +22,11 @@ export const PUBLIC_PRODUCT_CARD_SELECT = {
   isFeatured: true,
   category: { select: { name: true, nameAr: true } },
   brand: { select: { name: true } },
+  // Main media is always enforced IMAGE on save (see admin/products/actions.ts),
+  // but the thumbnail query still filters explicitly so a video can never
+  // leak into a plain <img> thumbnail if that invariant is ever violated.
   images: {
+    where: { mediaType: "IMAGE" },
     select: { url: true, altText: true },
     orderBy: [{ isMain: "desc" }, { sortOrder: "asc" }],
     take: 1,
@@ -43,6 +47,7 @@ export const MERCHANT_PRODUCT_CARD_SELECT = {
   category: { select: { name: true, nameAr: true } },
   brand: { select: { name: true } },
   images: {
+    where: { mediaType: "IMAGE" },
     select: { url: true, altText: true },
     orderBy: [{ isMain: "desc" }, { sortOrder: "asc" }],
     take: 1,
@@ -63,8 +68,10 @@ export const PUBLIC_PRODUCT_DETAIL_SELECT = {
   categoryId: true,
   category: { select: { name: true, nameAr: true, slug: true } },
   brand: { select: { name: true, slug: true } },
+  // Full gallery — unfiltered so videos still show, unlike the card
+  // thumbnail selects above.
   images: {
-    select: { url: true, altText: true, isMain: true, sortOrder: true },
+    select: { url: true, altText: true, mediaType: true, isMain: true, sortOrder: true },
     orderBy: [{ isMain: "desc" }, { sortOrder: "asc" }],
   },
   /* Only Main Warehouse stock is shown/purchasable here — rep-assigned
@@ -87,7 +94,7 @@ export const MERCHANT_PRODUCT_DETAIL_SELECT = {
   category: { select: { name: true, nameAr: true, slug: true } },
   brand: { select: { name: true, slug: true } },
   images: {
-    select: { url: true, altText: true, isMain: true, sortOrder: true },
+    select: { url: true, altText: true, mediaType: true, isMain: true, sortOrder: true },
     orderBy: [{ isMain: "desc" }, { sortOrder: "asc" }],
   },
   /* Only Main Warehouse stock is shown/purchasable here — rep-assigned
