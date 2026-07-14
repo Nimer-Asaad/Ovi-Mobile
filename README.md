@@ -178,12 +178,15 @@ Blob) is a future phase, before real production use.
 
 ## Deployment
 
-Not yet deployed to Vercel — the database is now online PostgreSQL (see
-"Database" above), but Vercel deployment itself, cloud media storage, and a
-real migration history are separate, later phases. See
-[DEPLOYMENT.md](DEPLOYMENT.md) for the full checklist before any real
-deployment — environment variables, migration plan, build steps, and
-post-deploy verification.
+Not yet deployed to Vercel. The database is online PostgreSQL (see
+"Database" above) and, as of Phase 30, the codebase is prepared for a clean
+Vercel deploy (`build` script runs `prisma generate` before `next build`,
+required environment variables and the Supabase pooler choice are
+documented) — but the actual Vercel import/deploy hasn't happened yet, and
+cloud media storage and a real migration history remain separate, later
+phases. See [DEPLOYMENT.md](DEPLOYMENT.md) for the full checklist —
+environment variables, database/pooler setup, Google OAuth production
+redirect, the product-upload limitation, and post-deploy verification.
 
 ## Notes
 
