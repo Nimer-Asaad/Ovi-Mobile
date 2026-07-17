@@ -24,6 +24,11 @@ interface OrderDetailPageProps {
   params: Promise<{ orderNumber: string }>;
 }
 
+// Queries live DB/session data behind an auth guard, and has no shared
+// layout to hang this on — force dynamic explicitly (see
+// admin/layout.tsx for the full rationale).
+export const dynamic = "force-dynamic";
+
 export default async function OrderDetailPage({ params }: OrderDetailPageProps) {
   const { orderNumber } = await params;
   const user = await requireUser();

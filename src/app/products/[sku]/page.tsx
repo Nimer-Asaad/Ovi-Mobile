@@ -19,6 +19,12 @@ import {
   MERCHANT_PRODUCT_DETAIL_SELECT,
 } from "@/lib/catalog-queries";
 
+// Queries live DB/session data on every request — force dynamic rendering
+// explicitly so a future refactor can't accidentally make this eligible
+// for build-time static generation (see DEPLOYMENT.md's Phase 29/31 notes
+// on why build-time Prisma query bursts are risky).
+export const dynamic = "force-dynamic";
+
 interface ProductDetailPageProps {
   params: Promise<{ sku: string }>;
 }

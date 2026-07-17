@@ -21,6 +21,15 @@ export interface ManualOrderState {
   error?: string;
 }
 
+/** Thrown inside the order transaction when a line's Main Warehouse stock
+ * is no longer sufficient at commit time — caught outside to return a
+ * clean Arabic message instead of a raw transaction rollback error. */
+class InsufficientStockError extends Error {
+  constructor(public readonly productName: string) {
+    super("INSUFFICIENT_STOCK");
+  }
+}
+
 const PARSE_ERROR_MESSAGE = "بيانات الطلب غير صالحة";
 
 function generateOrderNumber(): string {
@@ -204,13 +213,29 @@ export async function createManualOrder(
           },
         });
 
+        // Atomic conditional decrement per line — never writes an absolute
+        // quantity computed from a stale pre-transaction read. `count !==
+        // 1` means a concurrent order already consumed the stock, so this
+        // whole order (and any lines already decremented in this loop)
+        // rolls back — nothing is oversold.
         for (const item of parsed.data.items) {
-          const previousQuantity = stockByProductId.get(item.productId) ?? 0;
-          const newQuantity = previousQuantity - item.quantity;
+          const decremented = await tx.inventoryItem.updateMany({
+            where: {
+              productId: item.productId,
+              locationId: warehouse.id,
+              quantity: { gte: item.quantity },
+            },
+            data: { quantity: { decrement: item.quantity } },
+          });
 
-          await tx.inventoryItem.update({
+          if (decremented.count !== 1) {
+            const product = productById.get(item.productId);
+            throw new InsufficientStockError(product?.nameAr ?? product?.name ?? item.productId);
+          }
+
+          const current = await tx.inventoryItem.findUniqueOrThrow({
             where: { productId_locationId: { productId: item.productId, locationId: warehouse.id } },
-            data: { quantity: newQuantity },
+            select: { quantity: true },
           });
 
           await tx.stockMovement.create({
@@ -220,8 +245,8 @@ export async function createManualOrder(
               fromLocationId: warehouse.id,
               toLocationId: null,
               quantity: item.quantity,
-              previousQuantity,
-              newQuantity,
+              previousQuantity: current.quantity + item.quantity,
+              newQuantity: current.quantity,
               note: `طلب يدوي — طلب ${orderNumber}`,
               createdById: admin.id,
             },
@@ -231,6 +256,11 @@ export async function createManualOrder(
       succeeded = true;
       break;
     } catch (err) {
+      if (err instanceof InsufficientStockError) {
+        return {
+          error: `الكمية المطلوبة من "${err.productName}" لم تعد متوفرة، يرجى تحديث الطلب`,
+        };
+      }
       const isDuplicateOrderNumber =
         err instanceof Prisma.PrismaClientKnownRequestError &&
         err.code === "P2002" &&

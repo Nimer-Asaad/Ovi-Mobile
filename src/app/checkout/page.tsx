@@ -9,6 +9,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { CheckoutForm } from "./CheckoutForm";
 
+// Queries live DB/session data behind an auth guard, and has no shared
+// layout to hang this on — force dynamic explicitly (see
+// admin/layout.tsx for the full rationale).
+export const dynamic = "force-dynamic";
+
 export default async function CheckoutPage() {
   const user = await requireCartEligibleUser();
   const cart = await getCurrentUserCart(user);

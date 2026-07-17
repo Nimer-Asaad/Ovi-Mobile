@@ -9,8 +9,8 @@ export default async function AdminProductsPage() {
   const products = await prisma.product.findMany({
     orderBy: { createdAt: "desc" },
     include: {
-      category: true,
-      brand: true,
+      category: { select: { name: true, nameAr: true } },
+      brand: { select: { name: true } },
       supplier: { select: { name: true } },
       // Main Warehouse stock only — rep-assigned stock is tracked separately under /admin/reps.
       inventoryItems: { where: { location: { isDefault: true } }, select: { quantity: true } },

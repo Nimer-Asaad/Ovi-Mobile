@@ -12,6 +12,12 @@ export interface RepStockRequestActionState {
   error?: string;
 }
 
+/** Thrown inside completeStockRequest's transaction when a line's Main
+ * Warehouse stock is no longer sufficient at commit time — carries the
+ * product name, caught outside to return a clean Arabic message instead
+ * of a raw transaction rollback error. */
+class InsufficientStockError extends Error {}
+
 const PARSE_ERROR_MESSAGE = "بيانات المراجعة غير صالحة";
 
 function revalidateRequestPaths(requestId: string, salesRepId: string): void {
@@ -205,18 +211,11 @@ export async function completeStockRequest(
   const repLocation = await getOrCreateRepLocation(request.salesRep.id, request.salesRep.user.name);
 
   const productIds = linesToTransfer.map((line) => line.productId);
-  const [warehouseItems, repItems] = await Promise.all([
-    prisma.inventoryItem.findMany({
-      where: { productId: { in: productIds }, locationId: warehouse.id },
-      select: { productId: true, quantity: true },
-    }),
-    prisma.inventoryItem.findMany({
-      where: { productId: { in: productIds }, locationId: repLocation.id },
-      select: { productId: true, quantity: true },
-    }),
-  ]);
+  const warehouseItems = await prisma.inventoryItem.findMany({
+    where: { productId: { in: productIds }, locationId: warehouse.id },
+    select: { productId: true, quantity: true },
+  });
   const warehouseQtyByProduct = new Map(warehouseItems.map((item) => [item.productId, item.quantity]));
-  const repQtyByProduct = new Map(repItems.map((item) => [item.productId, item.quantity]));
 
   const products = await prisma.product.findMany({
     where: { id: { in: productIds } },
@@ -247,21 +246,31 @@ export async function completeStockRequest(
       }
 
       for (const line of linesToTransfer) {
-        const previousWarehouseQuantity = warehouseQtyByProduct.get(line.productId) ?? 0;
-        const previousRepQuantity = repQtyByProduct.get(line.productId) ?? 0;
-        const newWarehouseQuantity = previousWarehouseQuantity - line.approvedQuantity;
-        const newRepQuantity = previousRepQuantity + line.approvedQuantity;
-
-        await tx.inventoryItem.upsert({
-          where: { productId_locationId: { productId: line.productId, locationId: warehouse.id } },
-          update: { quantity: newWarehouseQuantity },
-          create: { productId: line.productId, locationId: warehouse.id, quantity: newWarehouseQuantity },
+        // Atomic conditional decrement on the source (warehouse) — never a
+        // stale read-then-write. `count !== 1` means the warehouse no
+        // longer has enough stock for this line, so the whole completion
+        // rolls back rather than silently going negative.
+        const decremented = await tx.inventoryItem.updateMany({
+          where: { productId: line.productId, locationId: warehouse.id, quantity: { gte: line.approvedQuantity } },
+          data: { quantity: { decrement: line.approvedQuantity } },
         });
+        if (decremented.count !== 1) {
+          const product = productById.get(line.productId);
+          throw new InsufficientStockError(product?.nameAr ?? product?.name ?? line.productId);
+        }
+
+        // Atomic increment on the destination (rep car).
         await tx.inventoryItem.upsert({
           where: { productId_locationId: { productId: line.productId, locationId: repLocation.id } },
-          update: { quantity: newRepQuantity },
-          create: { productId: line.productId, locationId: repLocation.id, quantity: newRepQuantity },
+          update: { quantity: { increment: line.approvedQuantity } },
+          create: { productId: line.productId, locationId: repLocation.id, quantity: line.approvedQuantity },
         });
+
+        const repItemAfter = await tx.inventoryItem.findUniqueOrThrow({
+          where: { productId_locationId: { productId: line.productId, locationId: repLocation.id } },
+          select: { quantity: true },
+        });
+
         await tx.stockMovement.create({
           data: {
             type: STOCK_MOVEMENT_TYPES.REP_ASSIGNMENT,
@@ -269,8 +278,8 @@ export async function completeStockRequest(
             fromLocationId: warehouse.id,
             toLocationId: repLocation.id,
             quantity: line.approvedQuantity,
-            previousQuantity: previousRepQuantity,
-            newQuantity: newRepQuantity,
+            previousQuantity: repItemAfter.quantity - line.approvedQuantity,
+            newQuantity: repItemAfter.quantity,
             note: `استلام طلب مخزون سيارة — طلب ${noteSuffix}`,
             createdById: admin.id,
           },
@@ -285,6 +294,11 @@ export async function completeStockRequest(
   } catch (err) {
     if (err instanceof Error && err.message === ALREADY_PROCESSED) {
       return { error: "تم استلام هذا الطلب بالفعل" };
+    }
+    if (err instanceof InsufficientStockError) {
+      return {
+        error: `الكمية المتوفرة من "${err.message}" في المستودع الرئيسي لم تعد كافية`,
+      };
     }
     throw err;
   }

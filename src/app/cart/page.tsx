@@ -13,6 +13,11 @@ import { ProductImagePlaceholder } from "@/components/catalog/ProductImagePlaceh
 import { CartQuantityForm } from "./CartQuantityForm";
 import { removeCartItem, clearCart } from "./actions";
 
+// Queries live DB/session data behind an auth guard, and has no shared
+// layout to hang this on — force dynamic explicitly (see
+// admin/layout.tsx for the full rationale).
+export const dynamic = "force-dynamic";
+
 export default async function CartPage() {
   const user = await requireCartEligibleUser();
   const cart = await getCurrentUserCart(user);

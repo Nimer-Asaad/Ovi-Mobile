@@ -13,6 +13,11 @@ export interface RepStockTransferState {
   error?: string;
 }
 
+/** Thrown inside a transfer transaction when the source location's stock
+ * is no longer sufficient at commit time — caught outside to return a
+ * clean Arabic message instead of a raw transaction rollback error. */
+class InsufficientStockError extends Error {}
+
 const PARSE_ERROR_MESSAGE = "بيانات التحويل غير صالحة";
 
 function revalidateRepPaths(repId: string): void {
@@ -74,52 +79,50 @@ export async function assignStockToRep(
   const warehouse = await getMainWarehouse();
   const repLocation = await getOrCreateRepLocation(rep.id, rep.user.name);
 
-  const [warehouseItem, repItem] = await Promise.all([
-    prisma.inventoryItem.findUnique({
-      where: { productId_locationId: { productId, locationId: warehouse.id } },
-      select: { quantity: true },
-    }),
-    prisma.inventoryItem.findUnique({
-      where: { productId_locationId: { productId, locationId: repLocation.id } },
-      select: { quantity: true },
-    }),
-  ]);
+  try {
+    await prisma.$transaction(async (tx) => {
+      // Atomic conditional decrement on the source (warehouse) — never a
+      // stale read-then-write. `count !== 1` means the warehouse no
+      // longer has enough stock, so nothing is transferred.
+      const decremented = await tx.inventoryItem.updateMany({
+        where: { productId, locationId: warehouse.id, quantity: { gte: quantity } },
+        data: { quantity: { decrement: quantity } },
+      });
+      if (decremented.count !== 1) {
+        throw new InsufficientStockError("الكمية المطلوبة أكبر من المخزون المتوفر في المستودع الرئيسي");
+      }
 
-  const previousWarehouseQuantity = warehouseItem?.quantity ?? 0;
-  const previousRepQuantity = repItem?.quantity ?? 0;
+      // Atomic increment on the destination (rep car) — safe even if two
+      // transfers to the same rep/product land at the same moment.
+      await tx.inventoryItem.upsert({
+        where: { productId_locationId: { productId, locationId: repLocation.id } },
+        update: { quantity: { increment: quantity } },
+        create: { productId, locationId: repLocation.id, quantity },
+      });
 
-  if (quantity > previousWarehouseQuantity) {
-    return { error: "الكمية المطلوبة أكبر من المخزون المتوفر في المستودع الرئيسي" };
+      const repItemAfter = await tx.inventoryItem.findUniqueOrThrow({
+        where: { productId_locationId: { productId, locationId: repLocation.id } },
+        select: { quantity: true },
+      });
+
+      await tx.stockMovement.create({
+        data: {
+          type: STOCK_MOVEMENT_TYPES.REP_ASSIGNMENT,
+          productId,
+          fromLocationId: warehouse.id,
+          toLocationId: repLocation.id,
+          quantity,
+          previousQuantity: repItemAfter.quantity - quantity,
+          newQuantity: repItemAfter.quantity,
+          note: notes,
+          createdById: admin.id,
+        },
+      });
+    });
+  } catch (err) {
+    if (err instanceof InsufficientStockError) return { error: err.message };
+    throw err;
   }
-
-  const newWarehouseQuantity = previousWarehouseQuantity - quantity;
-  const newRepQuantity = previousRepQuantity + quantity;
-
-  await prisma.$transaction([
-    prisma.inventoryItem.upsert({
-      where: { productId_locationId: { productId, locationId: warehouse.id } },
-      update: { quantity: newWarehouseQuantity },
-      create: { productId, locationId: warehouse.id, quantity: newWarehouseQuantity },
-    }),
-    prisma.inventoryItem.upsert({
-      where: { productId_locationId: { productId, locationId: repLocation.id } },
-      update: { quantity: newRepQuantity },
-      create: { productId, locationId: repLocation.id, quantity: newRepQuantity },
-    }),
-    prisma.stockMovement.create({
-      data: {
-        type: STOCK_MOVEMENT_TYPES.REP_ASSIGNMENT,
-        productId,
-        fromLocationId: warehouse.id,
-        toLocationId: repLocation.id,
-        quantity,
-        previousQuantity: previousRepQuantity,
-        newQuantity: newRepQuantity,
-        note: notes,
-        createdById: admin.id,
-      },
-    }),
-  ]);
 
   revalidateRepPaths(repId);
   redirect(`/admin/reps/${repId}`);
@@ -157,56 +160,53 @@ export async function returnStockFromRep(
   const warehouse = await getMainWarehouse();
   const repLocation = await prisma.stockLocation.findUnique({ where: { salesRepId: rep.id } });
 
-  const repItem = repLocation
-    ? await prisma.inventoryItem.findUnique({
-        where: { productId_locationId: { productId, locationId: repLocation.id } },
-        select: { quantity: true },
-      })
-    : null;
-  const previousRepQuantity = repItem?.quantity ?? 0;
-
-  if (quantity > previousRepQuantity) {
-    return { error: "الكمية المطلوبة أكبر من مخزون المندوب الحالي" };
-  }
-
   if (!repLocation) {
     return { error: "المندوب لا يملك مخزوناً لإرجاعه" };
   }
 
-  const warehouseItem = await prisma.inventoryItem.findUnique({
-    where: { productId_locationId: { productId, locationId: warehouse.id } },
-    select: { quantity: true },
-  });
-  const previousWarehouseQuantity = warehouseItem?.quantity ?? 0;
+  try {
+    await prisma.$transaction(async (tx) => {
+      // Atomic conditional decrement on the source (rep car) — never a
+      // stale read-then-write. `count !== 1` means the rep no longer has
+      // enough stock, so nothing is returned.
+      const decremented = await tx.inventoryItem.updateMany({
+        where: { productId, locationId: repLocation.id, quantity: { gte: quantity } },
+        data: { quantity: { decrement: quantity } },
+      });
+      if (decremented.count !== 1) {
+        throw new InsufficientStockError("الكمية المطلوبة أكبر من مخزون المندوب الحالي");
+      }
 
-  const newRepQuantity = previousRepQuantity - quantity;
-  const newWarehouseQuantity = previousWarehouseQuantity + quantity;
+      // Atomic increment on the destination (warehouse).
+      await tx.inventoryItem.upsert({
+        where: { productId_locationId: { productId, locationId: warehouse.id } },
+        update: { quantity: { increment: quantity } },
+        create: { productId, locationId: warehouse.id, quantity },
+      });
 
-  await prisma.$transaction([
-    prisma.inventoryItem.upsert({
-      where: { productId_locationId: { productId, locationId: repLocation.id } },
-      update: { quantity: newRepQuantity },
-      create: { productId, locationId: repLocation.id, quantity: newRepQuantity },
-    }),
-    prisma.inventoryItem.upsert({
-      where: { productId_locationId: { productId, locationId: warehouse.id } },
-      update: { quantity: newWarehouseQuantity },
-      create: { productId, locationId: warehouse.id, quantity: newWarehouseQuantity },
-    }),
-    prisma.stockMovement.create({
-      data: {
-        type: STOCK_MOVEMENT_TYPES.REP_RETURN,
-        productId,
-        fromLocationId: repLocation.id,
-        toLocationId: warehouse.id,
-        quantity,
-        previousQuantity: previousRepQuantity,
-        newQuantity: newRepQuantity,
-        note: notes,
-        createdById: admin.id,
-      },
-    }),
-  ]);
+      const repItemAfter = await tx.inventoryItem.findUniqueOrThrow({
+        where: { productId_locationId: { productId, locationId: repLocation.id } },
+        select: { quantity: true },
+      });
+
+      await tx.stockMovement.create({
+        data: {
+          type: STOCK_MOVEMENT_TYPES.REP_RETURN,
+          productId,
+          fromLocationId: repLocation.id,
+          toLocationId: warehouse.id,
+          quantity,
+          previousQuantity: repItemAfter.quantity + quantity,
+          newQuantity: repItemAfter.quantity,
+          note: notes,
+          createdById: admin.id,
+        },
+      });
+    });
+  } catch (err) {
+    if (err instanceof InsufficientStockError) return { error: err.message };
+    throw err;
+  }
 
   revalidateRepPaths(repId);
   redirect(`/admin/reps/${repId}`);

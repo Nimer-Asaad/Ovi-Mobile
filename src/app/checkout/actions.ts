@@ -6,13 +6,23 @@ import { prisma } from "@/lib/prisma";
 import { requireCartEligibleUser } from "@/lib/auth/guards";
 import { getCurrentUserCart, getAvailableStock } from "@/lib/cart";
 import { getPriceModeForUser, readCatalogPriceCents } from "@/lib/catalog-queries";
+import { getMainWarehouse } from "@/lib/inventory";
 import { checkoutSchema } from "@/lib/validation/checkout";
-import { ORDER_SOURCES, ORDER_STATUSES, PAYMENT_METHODS, PAYMENT_STATUSES } from "@/lib/constants";
+import { ORDER_SOURCES, ORDER_STATUSES, PAYMENT_METHODS, PAYMENT_STATUSES, STOCK_MOVEMENT_TYPES } from "@/lib/constants";
 import type { z } from "zod";
 
 export interface CheckoutState {
   error?: string;
   fieldErrors?: Record<string, string>;
+}
+
+/** Thrown inside the checkout transaction when a line's Main Warehouse
+ * stock is no longer sufficient at commit time — caught outside to return
+ * a clean Arabic message instead of a raw transaction rollback error. */
+class InsufficientStockError extends Error {
+  constructor(public readonly productName: string) {
+    super("INSUFFICIENT_STOCK");
+  }
 }
 
 function fieldErrorsFrom(error: z.ZodError) {
@@ -67,6 +77,10 @@ export async function placeOrder(_prevState: CheckoutState, formData: FormData):
     }
   }
 
+  // Main Warehouse only — rep car stock is never part of storefront
+  // checkout availability (matches getAvailableStock/STOCK_CHECK_PRODUCT_SELECT).
+  const warehouse = await getMainWarehouse();
+
   const isWholesaleOrder = getPriceModeForUser(user) === "wholesale";
 
   const orderItemsData = cart.items.map((item) => {
@@ -110,10 +124,63 @@ export async function placeOrder(_prevState: CheckoutState, formData: FormData):
   for (let attempt = 0; attempt < 3; attempt += 1) {
     orderNumber = generateOrderNumber();
     try {
-      const order = await prisma.order.create({ data: { ...orderData, orderNumber } });
+      const order = await prisma.$transaction(async (tx) => {
+        const created = await tx.order.create({ data: { ...orderData, orderNumber } });
+
+        // Decrement Main Warehouse stock atomically, one line at a time —
+        // `quantity: { gte: item.quantity }` in the `where` makes this a
+        // single conditional UPDATE, not a stale read-then-write, so a
+        // concurrent checkout on the same product can never both succeed
+        // and drive stock negative. If the row no longer has enough stock
+        // (or no longer exists), `count` is 0 and the whole order rolls
+        // back — nothing is oversold.
+        for (const item of cart.items) {
+          const decremented = await tx.inventoryItem.updateMany({
+            where: {
+              productId: item.product.id,
+              locationId: warehouse.id,
+              quantity: { gte: item.quantity },
+            },
+            data: { quantity: { decrement: item.quantity } },
+          });
+
+          if (decremented.count !== 1) {
+            throw new InsufficientStockError(item.product.name);
+          }
+
+          const current = await tx.inventoryItem.findUniqueOrThrow({
+            where: { productId_locationId: { productId: item.product.id, locationId: warehouse.id } },
+            select: { quantity: true },
+          });
+
+          await tx.stockMovement.create({
+            data: {
+              type: STOCK_MOVEMENT_TYPES.SALE_OUT,
+              productId: item.product.id,
+              fromLocationId: warehouse.id,
+              toLocationId: null,
+              quantity: item.quantity,
+              previousQuantity: current.quantity + item.quantity,
+              newQuantity: current.quantity,
+              note: `طلب ${orderNumber}`,
+              createdById: user.id,
+            },
+          });
+        }
+
+        await tx.cartItem.deleteMany({ where: { cartId: cart.id } });
+
+        return created;
+      });
+
       createdOrderId = order.id;
       break;
     } catch (err) {
+      if (err instanceof InsufficientStockError) {
+        return {
+          error: `الكمية المطلوبة من "${err.productName}" لم تعد متوفرة، يرجى تحديث السلة`,
+        };
+      }
       const isDuplicateOrderNumber =
         err instanceof Prisma.PrismaClientKnownRequestError &&
         err.code === "P2002" &&
@@ -125,8 +192,6 @@ export async function placeOrder(_prevState: CheckoutState, formData: FormData):
   if (!createdOrderId) {
     return { error: "تعذّر إنشاء رقم الطلب، حاول مرة أخرى" };
   }
-
-  await prisma.cartItem.deleteMany({ where: { cartId: cart.id } });
 
   redirect(`/orders/${orderNumber}`);
 }

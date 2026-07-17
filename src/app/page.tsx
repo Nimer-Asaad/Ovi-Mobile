@@ -19,6 +19,12 @@ import { BrandShowcase } from "@/components/storefront/BrandShowcase";
 import { TrustStrip } from "@/components/storefront/TrustStrip";
 import { StorefrontSection } from "@/components/storefront/StorefrontSection";
 
+// Queries live DB/session data on every request — force dynamic rendering
+// explicitly so a future refactor can't accidentally make this eligible
+// for build-time static generation (see DEPLOYMENT.md's Phase 29/31 notes
+// on why build-time Prisma query bursts are risky).
+export const dynamic = "force-dynamic";
+
 export default async function HomePage() {
   const user = await getSession();
   const priceMode = getPriceModeForUser(user);

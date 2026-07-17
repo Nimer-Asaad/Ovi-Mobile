@@ -3,6 +3,15 @@ import { AdminTopbar } from "@/components/layout/AdminTopbar";
 import { requireRole } from "@/lib/auth/guards";
 import { ROLES } from "@/lib/constants";
 
+// Every /admin/** page queries the DB behind an auth guard — force dynamic
+// at the layout so the whole subtree is never attempted for static
+// generation. Relying on cookies()-triggered implicit dynamism wasn't
+// enough: Next.js's build-time "Collecting page data" step still executed
+// page-level Prisma calls (see DEPLOYMENT.md). This is a route segment
+// config read statically from this file, not runtime API-call detection,
+// so it skips that build-time render attempt entirely.
+export const dynamic = "force-dynamic";
+
 /** Admin dashboard shell. Only ADMIN sessions may render anything under
  * /admin — enforced here so every admin route inherits the guard. */
 export default async function AdminLayout({

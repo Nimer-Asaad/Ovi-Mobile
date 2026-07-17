@@ -19,37 +19,41 @@ interface AdminRepRequestDetailPageProps {
 export default async function AdminRepRequestDetailPage({ params }: AdminRepRequestDetailPageProps) {
   const { requestId } = await params;
 
-  const request = await prisma.stockRequest.findUnique({
-    where: { id: requestId },
-    select: {
-      id: true,
-      requestNumber: true,
-      status: true,
-      repNote: true,
-      adminNote: true,
-      createdAt: true,
-      reviewedAt: true,
-      preparedAt: true,
-      completedAt: true,
-      rejectedAt: true,
-      salesRep: { select: { id: true, user: { select: { name: true, email: true } } } },
-      items: {
-        select: {
-          id: true,
-          requestedQuantity: true,
-          approvedQuantity: true,
-          product: { select: { id: true, sku: true, name: true, nameAr: true } },
+  // `request` and `warehouse` don't depend on each other — fetch both in
+  // parallel instead of two sequential round-trips.
+  const [request, warehouse] = await Promise.all([
+    prisma.stockRequest.findUnique({
+      where: { id: requestId },
+      select: {
+        id: true,
+        requestNumber: true,
+        status: true,
+        repNote: true,
+        adminNote: true,
+        createdAt: true,
+        reviewedAt: true,
+        preparedAt: true,
+        completedAt: true,
+        rejectedAt: true,
+        salesRep: { select: { id: true, user: { select: { name: true, email: true } } } },
+        items: {
+          select: {
+            id: true,
+            requestedQuantity: true,
+            approvedQuantity: true,
+            product: { select: { id: true, sku: true, name: true, nameAr: true } },
+          },
         },
       },
-    },
-  });
+    }),
+    getMainWarehouse(),
+  ]);
 
   if (!request) {
     notFound();
   }
 
   const productIds = request.items.map((item) => item.product.id);
-  const warehouse = await getMainWarehouse();
 
   const [warehouseItems, repLocation] = await Promise.all([
     prisma.inventoryItem.findMany({

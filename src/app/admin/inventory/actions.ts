@@ -12,6 +12,12 @@ export interface StockAdjustmentState {
   error?: string;
 }
 
+/** Thrown inside the stock-movement transaction for any validation failure
+ * that depends on a fresh in-transaction read (insufficient stock, no-op
+ * adjustment, negative floor) — caught outside to return the same clean
+ * Arabic message as before, instead of a raw rollback error. */
+class StockActionError extends Error {}
+
 const PARSE_ERROR_MESSAGE = "بيانات التعديل غير صالحة";
 const POSITIVE_QUANTITY_MESSAGE = "الكمية يجب أن تكون رقماً صحيحاً أكبر من صفر";
 const NO_OP_MESSAGE = "الكمية الجديدة مساوية للكمية الحالية، لم يتم تنفيذ أي تعديل";
@@ -55,61 +61,93 @@ export async function createStockMovement(
     return { error: "لا يمكن تعديل مخزون منتج غير مفعل" };
   }
 
+  if (movementType !== MANUAL_STOCK_MOVEMENT_TYPES.ADJUSTMENT && quantity <= 0) {
+    return { error: POSITIVE_QUANTITY_MESSAGE };
+  }
+
   const warehouse = await getMainWarehouse();
+  const itemWhere = { productId_locationId: { productId, locationId: warehouse.id } };
 
-  const existingItem = await prisma.inventoryItem.findUnique({
-    where: { productId_locationId: { productId, locationId: warehouse.id } },
-    select: { quantity: true },
-  });
-  const previousQuantity = existingItem?.quantity ?? 0;
+  try {
+    await prisma.$transaction(async (tx) => {
+      if (movementType === MANUAL_STOCK_MOVEMENT_TYPES.ADJUSTMENT) {
+        // Absolute set, not a delta — read the current value as the very
+        // last step before writing (inside the transaction) so the window
+        // for a concurrent change to make this stale is as small as
+        // possible; quantity entered is the exact final stock level.
+        const existingItem = await tx.inventoryItem.findUnique({ where: itemWhere, select: { quantity: true } });
+        const previousQuantity = existingItem?.quantity ?? 0;
 
-  let newQuantity: number;
-  let movementQuantity: number;
+        if (quantity === previousQuantity) {
+          throw new StockActionError(NO_OP_MESSAGE);
+        }
+        if (quantity < 0) {
+          throw new StockActionError("لا يمكن أن يكون المخزون أقل من صفر");
+        }
 
-  if (movementType === MANUAL_STOCK_MOVEMENT_TYPES.STOCK_IN) {
-    if (quantity <= 0) return { error: POSITIVE_QUANTITY_MESSAGE };
-    newQuantity = previousQuantity + quantity;
-    movementQuantity = quantity;
-  } else if (movementType === MANUAL_STOCK_MOVEMENT_TYPES.STOCK_OUT) {
-    if (quantity <= 0) return { error: POSITIVE_QUANTITY_MESSAGE };
-    if (quantity > previousQuantity) {
-      return { error: "الكمية المطلوب إخراجها أكبر من المخزون الحالي" };
-    }
-    newQuantity = previousQuantity - quantity;
-    movementQuantity = quantity;
-  } else {
-    // ADJUSTMENT: quantity entered is the exact final stock level.
-    if (quantity === previousQuantity) {
-      return { error: NO_OP_MESSAGE };
-    }
-    newQuantity = quantity;
-    movementQuantity = Math.abs(newQuantity - previousQuantity);
+        await tx.inventoryItem.upsert({
+          where: itemWhere,
+          update: { quantity },
+          create: { productId, locationId: warehouse.id, quantity },
+        });
+
+        await tx.stockMovement.create({
+          data: {
+            type: movementType,
+            productId,
+            quantity: Math.abs(quantity - previousQuantity),
+            previousQuantity,
+            newQuantity: quantity,
+            note: notes,
+            createdById: admin.id,
+            toLocationId: warehouse.id,
+          },
+        });
+        return;
+      }
+
+      if (movementType === MANUAL_STOCK_MOVEMENT_TYPES.STOCK_OUT) {
+        // Atomic conditional decrement — never reads a stale quantity
+        // before writing. `count !== 1` means the row didn't have enough
+        // stock (or didn't exist), so the whole transaction rolls back.
+        const decremented = await tx.inventoryItem.updateMany({
+          where: { productId, locationId: warehouse.id, quantity: { gte: quantity } },
+          data: { quantity: { decrement: quantity } },
+        });
+        if (decremented.count !== 1) {
+          throw new StockActionError("الكمية المطلوب إخراجها أكبر من المخزون الحالي");
+        }
+      } else {
+        // STOCK_IN: atomic increment, safe even if two admins stock the
+        // same product in at the same moment.
+        await tx.inventoryItem.upsert({
+          where: itemWhere,
+          update: { quantity: { increment: quantity } },
+          create: { productId, locationId: warehouse.id, quantity },
+        });
+      }
+
+      const after = await tx.inventoryItem.findUniqueOrThrow({ where: itemWhere, select: { quantity: true } });
+      const isStockOut = movementType === MANUAL_STOCK_MOVEMENT_TYPES.STOCK_OUT;
+
+      await tx.stockMovement.create({
+        data: {
+          type: movementType,
+          productId,
+          quantity,
+          previousQuantity: isStockOut ? after.quantity + quantity : after.quantity - quantity,
+          newQuantity: after.quantity,
+          note: notes,
+          createdById: admin.id,
+          toLocationId: isStockOut ? undefined : warehouse.id,
+          fromLocationId: isStockOut ? warehouse.id : undefined,
+        },
+      });
+    });
+  } catch (err) {
+    if (err instanceof StockActionError) return { error: err.message };
+    throw err;
   }
-
-  if (newQuantity < 0) {
-    return { error: "لا يمكن أن يكون المخزون أقل من صفر" };
-  }
-
-  await prisma.$transaction([
-    prisma.inventoryItem.upsert({
-      where: { productId_locationId: { productId, locationId: warehouse.id } },
-      update: { quantity: newQuantity },
-      create: { productId, locationId: warehouse.id, quantity: newQuantity },
-    }),
-    prisma.stockMovement.create({
-      data: {
-        type: movementType,
-        productId,
-        quantity: movementQuantity,
-        previousQuantity,
-        newQuantity,
-        note: notes,
-        createdById: admin.id,
-        toLocationId: movementType === MANUAL_STOCK_MOVEMENT_TYPES.STOCK_OUT ? undefined : warehouse.id,
-        fromLocationId: movementType === MANUAL_STOCK_MOVEMENT_TYPES.STOCK_OUT ? warehouse.id : undefined,
-      },
-    }),
-  ]);
 
   revalidateInventoryPaths();
   redirect("/admin/inventory");

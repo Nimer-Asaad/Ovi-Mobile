@@ -17,6 +17,11 @@ import {
 } from "@/lib/order-labels";
 import { ORDER_SOURCES } from "@/lib/constants";
 
+// Queries live DB/session data behind an auth guard, and has no shared
+// layout to hang this on — force dynamic explicitly (see
+// admin/layout.tsx for the full rationale).
+export const dynamic = "force-dynamic";
+
 export default async function OrdersPage() {
   const user = await requireUser();
 

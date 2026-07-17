@@ -12,6 +12,11 @@ export interface RepSaleState {
   error?: string;
 }
 
+/** Thrown inside the sale transaction when the rep's car stock is no
+ * longer sufficient at commit time — caught outside to return a clean
+ * Arabic message instead of a raw transaction rollback error. */
+class InsufficientStockError extends Error {}
+
 const PARSE_ERROR_MESSAGE = "بيانات البيع غير صالحة";
 
 function generateOrderNumber(): string {
@@ -92,7 +97,6 @@ export async function createRepSale(_prevState: RepSaleState, formData: FormData
     return { error: "لم يتم العثور على موقع مخزون المندوب" };
   }
 
-  const newQuantity = previousQuantity - quantity;
   const totalCents = unitPriceCents * quantity;
 
   let orderNumber = "";
@@ -125,9 +129,21 @@ export async function createRepSale(_prevState: RepSaleState, formData: FormData
           },
         });
 
-        await tx.inventoryItem.update({
+        // Atomic conditional decrement — never a stale read-then-write. If
+        // the rep's car stock is no longer sufficient (e.g. a concurrent
+        // sale of the same item), `count !== 1` and the whole sale rolls
+        // back instead of driving stock negative.
+        const decremented = await tx.inventoryItem.updateMany({
+          where: { productId, locationId, quantity: { gte: quantity } },
+          data: { quantity: { decrement: quantity } },
+        });
+        if (decremented.count !== 1) {
+          throw new InsufficientStockError("INSUFFICIENT_STOCK");
+        }
+
+        const current = await tx.inventoryItem.findUniqueOrThrow({
           where: { productId_locationId: { productId, locationId } },
-          data: { quantity: newQuantity },
+          select: { quantity: true },
         });
 
         await tx.stockMovement.create({
@@ -137,8 +153,8 @@ export async function createRepSale(_prevState: RepSaleState, formData: FormData
             fromLocationId: locationId,
             toLocationId: null,
             quantity,
-            previousQuantity,
-            newQuantity,
+            previousQuantity: current.quantity + quantity,
+            newQuantity: current.quantity,
             note: `بيع مباشر — طلب ${orderNumber}`,
             createdById: user.id,
           },
@@ -147,6 +163,9 @@ export async function createRepSale(_prevState: RepSaleState, formData: FormData
       succeeded = true;
       break;
     } catch (err) {
+      if (err instanceof InsufficientStockError) {
+        return { error: "الكمية المطلوبة أكبر من مخزونك الحالي" };
+      }
       const isDuplicateOrderNumber =
         err instanceof Prisma.PrismaClientKnownRequestError &&
         err.code === "P2002" &&

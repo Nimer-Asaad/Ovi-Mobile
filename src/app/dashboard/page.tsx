@@ -14,6 +14,11 @@ import { CustomerQuickActions } from "@/components/customer/CustomerQuickActions
 import { formatCurrencyFromCents } from "@/lib/utils";
 import { getOrderStatusLabel, getOrderStatusBadgeVariant } from "@/lib/order-labels";
 
+// Queries live DB/session data behind an auth guard, and has no shared
+// layout to hang this on — force dynamic explicitly (see
+// admin/layout.tsx for the full rationale).
+export const dynamic = "force-dynamic";
+
 /** Universal post-login landing spot. Non-customer roles are bounced to
  * their real area; retail customers land on a shopping-focused hub. */
 export default async function DashboardPage() {

@@ -104,35 +104,94 @@ separate step, not a side effect of this preparation phase.
 
 ### C) Database connection strings for Vercel
 
-- [ ] `DATABASE_URL` = the same **Supabase session pooler (port 5432)**
-      connection string style already proven to work for local
-      `npm run build` in Phase 29 — **not** the transaction pooler
-      (port 6543 + `?pgbouncer=true`).
+**Update (Phase 31): the session-pooler choice below was reverted.** After
+the first real Vercel deploy, the app hit this **runtime** error on
+ordinary page requests (not during the build):
 
-  **Why session pooler, for now:** Next.js's build-time "Collecting page
-  data" step executes every dynamic admin page's Prisma query at least
-  once to classify it, and does so in a concurrent burst across many
-  routes. In Phase 29 that burst reliably saturated the transaction
-  pooler's connection slots and failed the build twice in a row; the
-  identical build against the session pooler passed cleanly both times.
-  Vercel's build step is the same kind of single build machine running the
-  same `next build`, so it would hit the same risk. This app also has no
-  real production traffic yet, so the session pooler's lower
-  connection-concurrency ceiling (its main downside vs. the transaction
-  pooler) isn't a practical cost today.
+```
+PrismaClientInitializationError
+EMAXCONNSESSION
+max clients reached in session mode
+pool_size: 15
+```
 
-  **This is a prototype/demo-stage choice, not a permanent one.** Once
-  this app has real concurrent user traffic, or once the build-time
-  concurrent-query burst is separately investigated, revisit switching
-  `DATABASE_URL` to the transaction pooler (6543 + `pgbouncer=true`) — the
-  standard recommendation for serverless — or raising the Supabase
-  pooler's connection limit in the project dashboard. No code change is
-  needed to make that switch later; it's a connection-string value only.
+This is the standard failure mode of pairing a serverless platform with a
+session-mode pooler: Supabase's session pooler holds each connection open
+for the lifetime of the client, and every concurrent Vercel serverless
+invocation opens its own Prisma connection pool against the same small
+slot ceiling (15, per the error above). Under any real concurrent traffic
+those slots exhaust quickly. The Phase 29 rationale for session pooler
+(below, kept for history) was about a *build-time* concurrent-query burst,
+not runtime traffic — the fix is to use different poolers for the two
+situations instead of the same one for both:
 
-- [ ] `DIRECT_URL` = the same session/direct connection on port 5432,
-      exactly as used locally — this is only for manual `db push`/
-      `migrate`/Prisma Studio operations, never invoked automatically by
-      the Vercel build (see below).
+- [ ] **`DATABASE_URL` (runtime queries) = Supabase transaction pooler,
+      port 6543, with `?pgbouncer=true&connection_limit=1`.** This is the
+      standard Prisma-on-serverless recommendation: transaction mode
+      returns each connection to the pool as soon as a query finishes
+      (instead of holding it for the client's lifetime), so many
+      concurrent serverless invocations can share Supabase's pooler
+      without exhausting it. `connection_limit=1` caps each Prisma
+      Client's own internal pool to one connection — correct for a
+      serverless function, which handles requests one at a time per
+      invocation anyway, and avoids one lambda instance alone opening
+      several connections.
+
+  Example shape only — do not use real credentials here or anywhere in
+  this file:
+  ```
+  DATABASE_URL="postgresql://<user>:<password>@<host>.pooler.supabase.com:6543/postgres?pgbouncer=true&connection_limit=1"
+  ```
+
+- [ ] `DIRECT_URL` = **unchanged, still the session/direct pooler, port
+      5432** — this is only for manual `db push`/`migrate`/Prisma Studio
+      operations, run from a developer machine, never invoked
+      automatically by the Vercel build (see below). Transaction-mode
+      poolers do not support the prepared-statement / schema-introspection
+      behavior `db push`/`migrate` need, which is exactly why `DIRECT_URL`
+      stays separate from `DATABASE_URL` in `prisma/schema.prisma`.
+
+  Example shape only:
+  ```
+  DIRECT_URL="postgresql://<user>:<password>@<host>.pooler.supabase.com:5432/postgres"
+  ```
+
+- [ ] **This is a Vercel dashboard / environment-variable change only —
+      no application code changes are needed.** `prisma/schema.prisma`
+      already reads `url = env("DATABASE_URL")` and
+      `directUrl = env("DIRECT_URL")`; only the connection-string
+      *values* in Vercel's Environment Variables settings need to change.
+      Update `DATABASE_URL` there to the transaction-pooler shape above,
+      leave `DIRECT_URL` as-is, then trigger a redeploy.
+
+- [ ] **Watch the next build after this change.** The Phase 29 concern
+      below (build-time query burst against the transaction pooler) was
+      observed locally, not yet confirmed against Vercel's own build
+      machine with this exact setup. If a future Vercel build fails with
+      pooler-saturation errors during "Collecting page data", that is a
+      build-time-only symptom and does not mean the runtime fix above was
+      wrong — it means the build step specifically may need its own
+      handling (e.g. Vercel's build environment is a separate concern from
+      the deployed function runtime). Do not revert `DATABASE_URL` back to
+      the session pooler to fix a build failure; that reintroduces the
+      runtime `EMAXCONNSESSION` error this change fixes. Report back
+      instead so the build-time case can be investigated separately.
+
+<details>
+<summary>Original Phase 29 rationale for the session pooler (superseded above, kept for history)</summary>
+
+Next.js's build-time "Collecting page data" step executes every dynamic
+admin page's Prisma query at least once to classify it, and does so in a
+concurrent burst across many routes. In Phase 29 that burst reliably
+saturated the transaction pooler's connection slots and failed the build
+twice in a row; the identical build against the session pooler passed
+cleanly both times. That reasoning was sound for the build step, but it
+was then also applied to the runtime `DATABASE_URL`, which is what caused
+the Phase 31 `EMAXCONNSESSION` incident above — the build-time and
+runtime connection strings don't have to be the same value, only
+`DIRECT_URL` needs to stay stable across both.
+
+</details>
 - [ ] **Do not run `npx prisma db push` or `npm run db:seed` as part of
       the Vercel build.** Nothing in the `build` script does this, and
       nothing should be added to make it do this — the schema and seed
@@ -189,8 +248,8 @@ expect them to work once this app is actually deployed to Vercel.
 
 | Variable | Required | Notes |
 | --- | --- | --- |
-| `DATABASE_URL` | Yes | PostgreSQL connection string — Supabase **session pooler, port 5432**, both locally and on Vercel for now (see "Vercel deployment checklist" → C above for why, and the tradeoff of revisiting this later). Set directly in Vercel's dashboard for deployed environments — never committed. |
-| `DIRECT_URL` | Yes | Non-pooled/session PostgreSQL connection Prisma uses for `db push`/`migrate`, run manually only — never invoked by the Vercel build. Same rules as `DATABASE_URL` — never committed. |
+| `DATABASE_URL` | Yes | PostgreSQL connection string. **On Vercel: Supabase transaction pooler, port 6543, `?pgbouncer=true&connection_limit=1`** (see "Vercel deployment checklist" → C above — this fixed a Phase 31 `EMAXCONNSESSION` runtime error). Locally, the session pooler (port 5432) remains fine for `npm run dev`/`npm run build` on a single developer machine. Set directly in Vercel's dashboard for deployed environments — never committed. |
+| `DIRECT_URL` | Yes | Non-pooled/session PostgreSQL connection (port 5432) Prisma uses for `db push`/`migrate`/Studio, run manually only — never invoked by the Vercel build. Same value shape locally and on Vercel. Never committed. |
 | `NODE_ENV` | No — automatic | Set by the Next.js/Vercel runtime itself (`production` on Vercel builds/deploys). Do not set it manually. Controls: `secure` flag on session cookies (`src/lib/auth/session.ts`), and Prisma query log verbosity (`src/lib/prisma.ts`). |
 | `GOOGLE_CLIENT_ID` | No — optional | Enables the "تسجيل الدخول بواسطة Google" button on `/login`. If unset, that flow safely redirects to a login error instead of working — the rest of the app is unaffected. |
 | `GOOGLE_CLIENT_SECRET` | No — optional | Paired with `GOOGLE_CLIENT_ID`. Never expose client-side. |
