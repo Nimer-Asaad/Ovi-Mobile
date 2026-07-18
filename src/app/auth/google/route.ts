@@ -7,6 +7,7 @@ import {
   buildGoogleAuthUrl,
   generateGoogleState,
   getGoogleOAuthConfig,
+  resolveRequestOrigin,
 } from "@/lib/auth/google";
 
 /** Entry point for "تسجيل الدخول بواسطة Google" — redirects to Google's
@@ -15,7 +16,7 @@ export async function GET(request: Request) {
   const config = getGoogleOAuthConfig();
 
   if (!config) {
-    return NextResponse.redirect(new URL("/login?error=google_unavailable", request.url));
+    return NextResponse.redirect(new URL("/login?error=google_unavailable", resolveRequestOrigin(request)));
   }
 
   const state = generateGoogleState();

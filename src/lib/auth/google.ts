@@ -14,6 +14,58 @@ export const GOOGLE_STATE_COOKIE_OPTIONS = {
   path: "/",
 };
 
+/// Max valid DNS hostname length (RFC 1035), plus room for an optional port.
+const MAX_FORWARDED_HOST_LENGTH = 253;
+/// hostname[:port] only — no scheme, path, spaces, or extra segments.
+const FORWARDED_HOST_PATTERN = /^[a-zA-Z0-9.-]+(:\d+)?$/;
+
+/** A reverse proxy chain can put multiple comma-separated values in these
+ * headers; only the first, trimmed value is ever considered, and it must
+ * look like a plain hostname[:port] within a sane length — anything else
+ * (unbounded length, embedded scheme/path, multiple hosts) is rejected
+ * rather than trusted. */
+function normalizeForwardedHost(value: string | null): string | null {
+  if (!value) return null;
+  const candidate = value.split(",")[0]?.trim();
+  if (!candidate || candidate.length > MAX_FORWARDED_HOST_LENGTH || !FORWARDED_HOST_PATTERN.test(candidate)) {
+    return null;
+  }
+  return candidate;
+}
+
+function normalizeForwardedProto(value: string | null): "http" | "https" | null {
+  if (!value) return null;
+  const candidate = value.split(",")[0]?.trim().toLowerCase();
+  return candidate === "http" || candidate === "https" ? candidate : null;
+}
+
+/** Resolves the public-facing origin for building OAuth redirect targets.
+ * `next start` behind a reverse proxy does not reflect the proxy's Host
+ * header in `request.url` — it always reports the Node server's own bind
+ * address (e.g. "http://localhost:3000") — so this prefers the proxy's
+ * forwarded headers (nginx sets Host / X-Forwarded-Proto here; X-Forwarded-
+ * Host is checked too in case that changes) and only falls back to
+ * `request.url`'s origin when neither header is present, which keeps local
+ * `next dev` (no proxy in front) working exactly as before. Every candidate
+ * is normalized to a single, validated value — never trusted as an
+ * unbounded or comma-separated string straight from the header. */
+export function resolveRequestOrigin(request: Request): string {
+  const forwardedHost =
+    normalizeForwardedHost(request.headers.get("x-forwarded-host")) ??
+    normalizeForwardedHost(request.headers.get("host"));
+
+  if (!forwardedHost) {
+    return new URL(request.url).origin;
+  }
+
+  const requestUrlProto = new URL(request.url).protocol.replace(":", "");
+  const forwardedProto =
+    normalizeForwardedProto(request.headers.get("x-forwarded-proto")) ??
+    (requestUrlProto === "http" || requestUrlProto === "https" ? requestUrlProto : "https");
+
+  return `${forwardedProto}://${forwardedHost}`;
+}
+
 export interface GoogleOAuthConfig {
   clientId: string;
   clientSecret: string;
@@ -75,11 +127,28 @@ export async function exchangeGoogleCode(
       }),
     });
 
-    if (!response.ok) return null;
+    if (!response.ok) {
+      const errorBody = (await response.json().catch(() => null)) as
+        | { error?: string; error_description?: string }
+        | null;
+      console.error("[google-oauth] token exchange rejected by Google", {
+        status: response.status,
+        error: errorBody?.error,
+        error_description: errorBody?.error_description,
+      });
+      return null;
+    }
 
     const data = (await response.json()) as Partial<GoogleTokenResponse>;
-    return typeof data.access_token === "string" ? data.access_token : null;
-  } catch {
+    if (typeof data.access_token !== "string") {
+      console.error("[google-oauth] token exchange response missing access_token");
+      return null;
+    }
+    return data.access_token;
+  } catch (err) {
+    console.error("[google-oauth] token exchange request threw", {
+      message: err instanceof Error ? err.message : String(err),
+    });
     return null;
   }
 }
@@ -99,7 +168,10 @@ export async function fetchGoogleUserInfo(accessToken: string): Promise<GoogleUs
       headers: { Authorization: `Bearer ${accessToken}` },
     });
 
-    if (!response.ok) return null;
+    if (!response.ok) {
+      console.error("[google-oauth] userinfo fetch rejected by Google", { status: response.status });
+      return null;
+    }
 
     const data = (await response.json()) as {
       email?: string;
@@ -107,14 +179,20 @@ export async function fetchGoogleUserInfo(accessToken: string): Promise<GoogleUs
       name?: string;
     };
 
-    if (!data.email || typeof data.email !== "string") return null;
+    if (!data.email || typeof data.email !== "string") {
+      console.error("[google-oauth] userinfo response missing email");
+      return null;
+    }
 
     return {
       email: data.email.trim().toLowerCase(),
       emailVerified: data.email_verified === true || data.email_verified === "true",
       name: typeof data.name === "string" && data.name.trim() ? data.name.trim() : null,
     };
-  } catch {
+  } catch (err) {
+    console.error("[google-oauth] userinfo request threw", {
+      message: err instanceof Error ? err.message : String(err),
+    });
     return null;
   }
 }

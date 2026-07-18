@@ -11,10 +11,11 @@ import {
   exchangeGoogleCode,
   fetchGoogleUserInfo,
   getGoogleOAuthConfig,
+  resolveRequestOrigin,
 } from "@/lib/auth/google";
 
 function errorRedirect(request: Request, code: string): NextResponse {
-  return NextResponse.redirect(new URL(`/login?error=${code}`, request.url));
+  return NextResponse.redirect(new URL(`/login?error=${code}`, resolveRequestOrigin(request)));
 }
 
 /** Google redirects the browser here after the consent screen. Validates
@@ -77,7 +78,7 @@ export async function GET(request: Request) {
           role: existingUser.role as Role,
           merchantStatus: existingUser.merchantProfile?.status ?? null,
         }),
-        request.url,
+        resolveRequestOrigin(request),
       ),
     );
   }
@@ -94,7 +95,7 @@ export async function GET(request: Request) {
     });
 
     await createSession(newUser.id);
-    return NextResponse.redirect(new URL("/dashboard", request.url));
+    return NextResponse.redirect(new URL("/dashboard", resolveRequestOrigin(request)));
   } catch (err) {
     // Concurrent signup created the same email between the lookup above and
     // this create — fall back to a fresh lookup rather than erroring.
@@ -102,9 +103,13 @@ export async function GET(request: Request) {
       const racedUser = await prisma.user.findUnique({ where: { email: googleUser.email } });
       if (racedUser && racedUser.isActive) {
         await createSession(racedUser.id);
-        return NextResponse.redirect(new URL("/dashboard", request.url));
+        return NextResponse.redirect(new URL("/dashboard", resolveRequestOrigin(request)));
       }
     }
+    console.error("[google-oauth] user create/session failed", {
+      prismaCode: err instanceof Prisma.PrismaClientKnownRequestError ? err.code : undefined,
+      message: err instanceof Error ? err.message : String(err),
+    });
     return errorRedirect(request, "google_failed");
   }
 }
