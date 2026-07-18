@@ -93,6 +93,41 @@ export const STOCK_RETURN_STATUSES = {
   COMPLETED: "COMPLETED",
 } as const;
 
+/** Real events actually written today: LOGIN / LOGOUT (see
+ * src/lib/auth/session.ts). The rest are modeled and ready for the
+ * storefront to start writing, but nothing fabricates them — see the Users
+ * admin feature report for why they aren't wired yet. */
+export const USER_ACTIVITY_EVENT_TYPES = {
+  LOGIN: "LOGIN",
+  LOGOUT: "LOGOUT",
+  PRODUCT_VIEWED: "PRODUCT_VIEWED",
+  ADDED_TO_CART: "ADDED_TO_CART",
+  REMOVED_FROM_CART: "REMOVED_FROM_CART",
+  CHECKOUT_STARTED: "CHECKOUT_STARTED",
+  ORDER_CREATED: "ORDER_CREATED",
+  ORDER_CANCELLED: "ORDER_CANCELLED",
+  SEARCH_QUERY: "SEARCH_QUERY",
+  ADMIN_ACTION: "ADMIN_ACTION",
+} as const;
+
+export const ADMIN_AUDIT_ACTIONS = {
+  ROLE_CHANGED: "ROLE_CHANGED",
+  ACCOUNT_DISABLED: "ACCOUNT_DISABLED",
+  ACCOUNT_ENABLED: "ACCOUNT_ENABLED",
+  MERCHANT_APPROVED: "MERCHANT_APPROVED",
+  MERCHANT_REJECTED: "MERCHANT_REJECTED",
+  MERCHANT_SUSPENDED: "MERCHANT_SUSPENDED",
+  MERCHANT_STATUS_RESET: "MERCHANT_STATUS_RESET",
+} as const;
+
+/** Derived from User.passwordHash: Google-authenticated accounts are always
+ * created with passwordHash: null (see src/app/auth/google/callback/route.ts) —
+ * no separate column needed to know how a user registered. */
+export const REGISTRATION_METHODS = {
+  GOOGLE: "GOOGLE",
+  EMAIL_PASSWORD: "EMAIL_PASSWORD",
+} as const;
+
 export const DEFAULT_CURRENCY = "ILS" as const;
 
 export const PAYMENT_METHODS = {
@@ -125,6 +160,7 @@ export const ADMIN_NAV_ITEMS = [
   { label: "Suppliers", labelAr: "الموردون", href: "/admin/suppliers" },
   { label: "Inventory", labelAr: "المخزون", href: "/admin/inventory" },
   { label: "Orders", labelAr: "الطلبات", href: "/admin/orders" },
+  { label: "Users", labelAr: "المستخدمون", href: "/admin/users" },
   { label: "Merchants", labelAr: "التجار", href: "/admin/merchants" },
   { label: "Sales Reps", labelAr: "المندوبون", href: "/admin/reps" },
   { label: "Car Stock Requests", labelAr: "طلبات السيارة", href: "/admin/rep-requests" },

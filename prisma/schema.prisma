@@ -38,23 +38,33 @@ datasource db {
 /// Role values: "ADMIN" | "RETAIL_CUSTOMER" | "WHOLESALE_MERCHANT" | "SALES_REPRESENTATIVE"
 /// See src/lib/constants.ts -> ROLES
 model User {
-  id           String   @id @default(cuid())
+  id           String    @id @default(cuid())
   role         String
   name         String
-  email        String   @unique
+  email        String    @unique
   phone        String?
   passwordHash String?
-  isActive     Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  avatarUrl    String?
+  isActive     Boolean   @default(true)
+  /// Set on every successful login (email/password, Google, or registration
+  /// auto-login) — see createSession() in src/lib/auth/session.ts.
+  lastLoginAt  DateTime?
+  /// Debounced "last seen" timestamp, refreshed by getSession() at most once
+  /// every LAST_ACTIVE_REFRESH_MS — see src/lib/auth/session.ts.
+  lastActiveAt DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
   merchantProfile            Merchant?
   salesRepresentativeProfile SalesRepresentative?
 
-  ordersPlaced   Order[]         @relation("OrderCustomer")
-  stockMovements StockMovement[] @relation("StockMovementCreatedBy")
-  sessions       Session[]
-  cart           Cart?
+  ordersPlaced      Order[]             @relation("OrderCustomer")
+  stockMovements    StockMovement[]     @relation("StockMovementCreatedBy")
+  sessions          Session[]
+  cart              Cart?
+  activityEvents    UserActivityEvent[]
+  auditLogsAsAdmin  AdminAuditLog[]     @relation("AuditLogAdmin")
+  auditLogsAsTarget AdminAuditLog[]     @relation("AuditLogTarget")
 
   @@map("users")
 }
@@ -112,6 +122,73 @@ model Session {
   createdAt DateTime @default(now())
 
   @@map("sessions")
+}
+
+// ---------------------------------------------------------------------------
+// Activity tracking & admin audit log
+// ---------------------------------------------------------------------------
+
+/// UserActivityEventType values:
+/// "LOGIN" | "LOGOUT" | "PRODUCT_VIEWED" | "ADDED_TO_CART" |
+/// "REMOVED_FROM_CART" | "CHECKOUT_STARTED" | "ORDER_CREATED" |
+/// "ORDER_CANCELLED" | "SEARCH_QUERY" | "ADMIN_ACTION"
+///
+/// Append-only event log, one row per tracked user action. Designed to scale
+/// to millions of rows: no relations are ever joined for a list read (the
+/// admin user-detail page reads a bounded, ordered slice by userId), ids are
+/// cuid (no auto-increment contention), and the two composite indexes below
+/// cover the only two access patterns this table needs — "recent events for
+/// one user" and "recent events of one type across all users". Rows are
+/// never updated, only inserted, and are safe to periodically archive/prune
+/// by createdAt without touching any other table.
+///
+/// Only LOGIN/LOGOUT are currently written (see src/lib/auth/session.ts).
+/// The remaining event types are modeled and ready, but intentionally not
+/// yet wired into the storefront (cart/checkout/search/product-browsing)
+/// flows — see the Users admin feature report for why.
+model UserActivityEvent {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String
+  /// Free-form event detail (e.g. { productId, sku } for PRODUCT_VIEWED,
+  /// { query } for SEARCH_QUERY). Never contains secrets or tokens.
+  metadata  Json?
+  ipAddress String?
+  userAgent String?
+  device    String?
+  browser   String?
+  os        String?
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([type, createdAt])
+  @@map("user_activity_events")
+}
+
+/// AdminAuditAction values:
+/// "ROLE_CHANGED" | "ACCOUNT_DISABLED" | "ACCOUNT_ENABLED" |
+/// "MERCHANT_APPROVED" | "MERCHANT_REJECTED" | "MERCHANT_SUSPENDED" |
+/// "MERCHANT_STATUS_RESET"
+///
+/// Append-only. Every sensitive admin action against a user account is
+/// recorded here with the old and new value, independent of
+/// UserActivityEvent (which tracks the target user's own behavior, not what
+/// an admin did to them).
+model AdminAuditLog {
+  id           String   @id @default(cuid())
+  adminUserId  String
+  adminUser    User     @relation("AuditLogAdmin", fields: [adminUserId], references: [id])
+  targetUserId String
+  targetUser   User     @relation("AuditLogTarget", fields: [targetUserId], references: [id], onDelete: Cascade)
+  action       String
+  oldValue     Json?
+  newValue     Json?
+  createdAt    DateTime @default(now())
+
+  @@index([targetUserId, createdAt])
+  @@index([adminUserId, createdAt])
+  @@map("admin_audit_logs")
 }
 
 // ---------------------------------------------------------------------------
