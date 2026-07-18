@@ -1,6 +1,7 @@
 "use client";
 
-import { useActionState, useRef, useState } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { changeUserRole, type UserActionState } from "../actions";
 import { Select } from "@/components/ui/Select";
 import { Button } from "@/components/ui/Button";
@@ -24,10 +25,23 @@ interface RoleChangeFormProps {
  * self-demotion) are enforced again in changeUserRole regardless of what
  * this form allows the admin to select. */
 export function RoleChangeForm({ userId, currentRole }: RoleChangeFormProps) {
+  const router = useRouter();
   const [selectedRole, setSelectedRole] = useState(currentRole);
   const action = changeUserRole.bind(null, userId, selectedRole);
   const [state, formAction, isPending] = useActionState(action, initialState);
   const formRef = useRef<HTMLFormElement>(null);
+
+  // Re-fetch server-rendered data (role badge, audit log, etc.) the moment
+  // the action succeeds — router.refresh() re-runs the page's Server
+  // Components without a full reload, so the success message below (client
+  // state, untouched by refresh) stays visible. Never fires on error: state
+  // is a fresh object per action call, so this only re-runs on a genuine
+  // new success, not a stale re-render of the same state.
+  useEffect(() => {
+    if (state.success) {
+      router.refresh();
+    }
+  }, [state, router]);
 
   const hasChanged = selectedRole !== currentRole;
   const touchesAdmin = selectedRole === ROLES.ADMIN || currentRole === ROLES.ADMIN;

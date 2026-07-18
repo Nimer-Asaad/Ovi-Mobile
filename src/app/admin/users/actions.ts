@@ -11,8 +11,6 @@ export interface UserActionState {
   success?: string;
 }
 
-const NO_STATE_CHANGE: UserActionState = {};
-
 function revalidateUserPaths(userId: string): void {
   revalidatePath("/admin/users");
   revalidatePath(`/admin/users/${userId}`);
@@ -142,5 +140,3 @@ export async function toggleUserActive(
 
   return { success: willDisable ? "تم إيقاف الحساب" : "تم تفعيل الحساب" };
 }
-
-export const emptyUserActionState = NO_STATE_CHANGE;
