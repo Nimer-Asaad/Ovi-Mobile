@@ -231,6 +231,27 @@ viable — before uploads are relied on in a deployed environment. Until
 then: uploads keep working locally in dev exactly as before; just don't
 expect them to work once this app is actually deployed to Vercel.
 
+**Update — actual production deployment is a VPS, not Vercel.** The app is
+live behind Nginx + PM2 on a VPS, so the read-only-filesystem limitation
+above does not apply there. However, Next.js's `next start` only discovers
+files present in `public/` at process boot, so a file written to
+`public/uploads/` while the server is already running previously 404'd
+until the next PM2 restart. This is now fixed at the Nginx layer: `/uploads/`
+is served directly via an `alias` location block in
+`/etc/nginx/sites-available/ovimobile.net` (added outside this repo, on the
+server), bypassing Next.js entirely for that path — uploads are available
+immediately, no PM2 restart required.
+
+Production notes:
+- Uploads live at `/var/www/ovi-mobile/public/uploads/` on the VPS —
+  Nginx serves them directly from the public `/uploads/` URL prefix.
+- **Never run `git clean -fdx` in production** — `public/uploads/` is
+  gitignored and untracked, so a clean wipes every uploaded file with no
+  git history to recover from.
+- Back up this directory separately from the database (see the backup
+  recommendation the object-storage migration above should eventually
+  replace).
+
 ### F) First deployment checks (once actually deployed — not done yet)
 
 - [ ] Admin login
