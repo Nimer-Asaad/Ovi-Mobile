@@ -36,16 +36,27 @@ export default async function ProductDetailPage({ params }: ProductDetailPagePro
   const priceMode = getPriceModeForUser(user);
   const cartEligibility = getCartEligibility(user);
 
-  const product =
-    priceMode === "wholesale"
-      ? await prisma.product.findFirst({
-          where: { sku: sku.toUpperCase(), isActive: true },
-          select: MERCHANT_PRODUCT_DETAIL_SELECT,
-        })
-      : await prisma.product.findFirst({
-          where: { sku: sku.toUpperCase(), isActive: true },
-          select: PUBLIC_PRODUCT_DETAIL_SELECT,
-        });
+  let product;
+  try {
+    product =
+      priceMode === "wholesale"
+        ? await prisma.product.findFirst({
+            where: { sku: sku.toUpperCase(), isActive: true },
+            select: MERCHANT_PRODUCT_DETAIL_SELECT,
+          })
+        : await prisma.product.findFirst({
+            where: { sku: sku.toUpperCase(), isActive: true },
+            select: PUBLIC_PRODUCT_DETAIL_SELECT,
+          });
+  } catch (err) {
+    console.error("[products/[sku]] product query failed", {
+      route: "/products/[sku]",
+      sku,
+      priceMode,
+      message: err instanceof Error ? err.message : String(err),
+    });
+    throw err;
+  }
 
   if (!product) notFound();
 
