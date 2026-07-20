@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Card, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { ProductImagePlaceholder } from "@/components/catalog/ProductImagePlaceholder";
+import { ProductThumbnail } from "@/components/catalog/ProductThumbnail";
 import { AddToCartButton } from "@/components/cart/AddToCartButton";
 import { formatCurrencyFromCents } from "@/lib/utils";
 import { isWholesalePriced, readCatalogPriceCents } from "@/lib/catalog-queries";
@@ -28,12 +29,10 @@ export function ProductCard({ product, cartEligibility = "ineligible" }: Product
       <Link href={`/products/${encodeURIComponent(product.sku)}`} className="flex flex-1 flex-col">
         <div className="aspect-square w-full overflow-hidden bg-navy-soft">
           {thumbnail ? (
-            // eslint-disable-next-line @next/next/no-img-element -- arbitrary admin-entered external URLs
-            <img
-              src={thumbnail.url}
+            <ProductThumbnail
+              url={thumbnail.url}
               alt={thumbnail.altText ?? product.name}
               className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
-              loading="lazy"
             />
           ) : (
             <ProductImagePlaceholder className="h-full w-full" />

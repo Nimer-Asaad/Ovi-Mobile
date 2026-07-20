@@ -7,7 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth/guards";
 import { ROLES } from "@/lib/constants";
 import { productSchema } from "@/lib/validation/catalog";
-import { validateMediaFile, inferMediaTypeFromUrl, type MediaType } from "@/lib/validation/productMedia";
+import { validateMediaBuffer, inferMediaTypeFromUrl, type MediaType } from "@/lib/validation/productMedia";
 import { saveUploadedProductFile } from "@/lib/uploads";
 import type { z } from "zod";
 
@@ -83,12 +83,16 @@ async function collectProductMedia(formData: FormData): Promise<CollectMediaResu
     if (kind === "new") {
       const file = formData.get(`media_${i}_file`);
       if (file instanceof File && file.size > 0) {
-        const validation = validateMediaFile(file);
-        if (!validation.ok || !validation.mediaType || !validation.extension) {
-          return { ok: false, error: validation.error ?? "ملف وسائط غير صالح" };
+        const buffer = Buffer.from(await file.arrayBuffer());
+        const validation = validateMediaBuffer(buffer);
+        if (!validation.ok) {
+          return { ok: false, error: validation.error };
         }
-        const savedUrl = await saveUploadedProductFile(file, validation.extension);
-        slotEntries.push({ url: savedUrl, mediaType: validation.mediaType });
+        const saved = await saveUploadedProductFile(buffer, validation);
+        if (!saved.ok) {
+          return { ok: false, error: saved.error };
+        }
+        slotEntries.push({ url: saved.url, mediaType: validation.mediaType });
         continue;
       }
 

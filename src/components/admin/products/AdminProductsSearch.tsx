@@ -9,6 +9,7 @@ import { AdminStatusBadge } from "@/components/admin/AdminStatusBadge";
 import { ActiveToggleForm } from "@/components/admin/ActiveToggleForm";
 import { HighlightedText } from "@/components/admin/HighlightedText";
 import { ProductImagePlaceholder } from "@/components/catalog/ProductImagePlaceholder";
+import { ProductThumbnail } from "@/components/catalog/ProductThumbnail";
 import { formatCurrencyFromCents } from "@/lib/utils";
 
 export interface AdminProductRow {
@@ -91,12 +92,10 @@ export function AdminProductsSearch({ products }: AdminProductsSearchProps) {
               <td className="px-4 py-3">
                 <div className="h-12 w-12 overflow-hidden rounded-card">
                   {product.thumbnail ? (
-                    // eslint-disable-next-line @next/next/no-img-element -- arbitrary admin-entered/uploaded URLs
-                    <img
-                      src={product.thumbnail.url}
+                    <ProductThumbnail
+                      url={product.thumbnail.url}
                       alt={product.thumbnail.altText ?? product.name}
                       className="h-full w-full object-cover"
-                      loading="lazy"
                     />
                   ) : (
                     <ProductImagePlaceholder className="h-full w-full" />

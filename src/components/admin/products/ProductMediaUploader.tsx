@@ -26,7 +26,8 @@ interface ProductMediaUploaderProps {
   error?: string;
 }
 
-const ACCEPT = "image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm";
+const ACCEPT =
+  "image/jpeg,image/png,image/webp,image/heic,image/heif,video/mp4,video/webm,.jpg,.jpeg,.png,.webp,.heic,.heif,.mp4,.webm";
 
 function makeKey(): string {
   return Math.random().toString(36).slice(2);
@@ -36,6 +37,21 @@ function slotIsVideo(slot: MediaSlot): boolean {
   if (slot.kind === "existing") return slot.existingMediaType === "VIDEO";
   if (slot.file) return slot.file.type.startsWith("video/");
   return /\.(mp4|webm)(\?|$)/i.test(slot.urlInput);
+}
+
+/** The browser cannot decode/preview HEIC/HEIF for display (no native
+ * `<img>` support in any current engine), so a blob preview would always
+ * come back as a broken image — detected here by MIME type first, falling
+ * back to the filename extension since iOS Safari often leaves `file.type`
+ * empty for HEIC. The real, authoritative format check still happens
+ * server-side on the actual file bytes (src/lib/validation/productMedia.ts)
+ * — this is a display-only heuristic, never trusted for validation. */
+function slotIsUnpreviewableHeic(slot: MediaSlot): boolean {
+  if (slot.kind !== "new" || !slot.file) return false;
+  const type = slot.file.type.toLowerCase();
+  if (type === "image/heic" || type === "image/heif") return true;
+  if (type === "") return /\.(heic|heif)$/i.test(slot.file.name);
+  return false;
 }
 
 function slotPreviewUrl(slot: MediaSlot): string | null {
@@ -67,6 +83,15 @@ export function ProductMediaUploader({ existingMedia = [], error }: ProductMedia
 
   const firstImageIndex = slots.findIndex((slot) => !slotIsVideo(slot));
   const [mainIndex, setMainIndex] = useState(firstImageIndex);
+  // Keys of previews ("<slotKey>:<previewUrl>") whose <img>/<video> failed to
+  // load — swapped to a placeholder instead of the browser's broken-media
+  // icon. Keyed by preview identity, not just slot, so picking a new file in
+  // the same slot clears the failed state automatically.
+  const [failedPreviews, setFailedPreviews] = useState<Set<string>>(new Set());
+
+  function markPreviewFailed(previewKey: string) {
+    setFailedPreviews((prev) => new Set(prev).add(previewKey));
+  }
 
   function addSlot() {
     setSlots((prev) => [...prev, { key: makeKey(), kind: "new", urlInput: "" }]);
@@ -120,17 +145,41 @@ export function ProductMediaUploader({ existingMedia = [], error }: ProductMedia
           const preview = slotPreviewUrl(slot);
           const isVideo = slotIsVideo(slot);
           const isMain = mainIndex === index;
+          const previewKey = `${slot.key}:${preview ?? ""}`;
+          const previewFailed = failedPreviews.has(previewKey);
+          const isHeicNoPreview = slotIsUnpreviewableHeic(slot);
 
           return (
             <div key={slot.key} className="flex flex-col gap-3 rounded-card border border-navy-soft p-3">
               <div className="flex aspect-square w-full items-center justify-center overflow-hidden rounded-card bg-navy-deep">
-                {preview ? (
+                {isHeicNoPreview ? (
+                  <div className="flex flex-col items-center gap-1 px-2 text-center">
+                    <span className="rounded-card bg-gold-champagne/15 px-2 py-1 text-[10px] font-semibold text-gold-dark">
+                      HEIC
+                    </span>
+                    <span className="line-clamp-2 text-xs text-neutral-bg/60">{slot.file?.name}</span>
+                    <span className="text-[10px] text-neutral-bg/40">سيتم تحويلها تلقائياً بعد الحفظ</span>
+                  </div>
+                ) : preview && !previewFailed ? (
                   isVideo ? (
-                    <video src={preview} className="h-full w-full object-cover" muted controls />
+                    <video
+                      src={preview}
+                      className="h-full w-full object-cover"
+                      muted
+                      controls
+                      onError={() => markPreviewFailed(previewKey)}
+                    />
                   ) : (
                     // eslint-disable-next-line @next/next/no-img-element -- local blob preview or arbitrary admin URL
-                    <img src={preview} alt="" className="h-full w-full object-cover" />
+                    <img
+                      src={preview}
+                      alt=""
+                      className="h-full w-full object-cover"
+                      onError={() => markPreviewFailed(previewKey)}
+                    />
                   )
+                ) : previewFailed ? (
+                  <span className="px-2 text-center text-xs text-neutral-bg/40">تعذر تحميل المعاينة</span>
                 ) : (
                   <span className="text-xs text-neutral-bg/40">لا توجد معاينة</span>
                 )}
@@ -208,8 +257,8 @@ export function ProductMediaUploader({ existingMedia = [], error }: ProductMedia
           إضافة وسائط
         </Button>
         <p className="text-xs text-neutral-bg/50">
-          صور: JPEG وPNG وWebP وGIF حتى 5 ميجابايت — فيديو: MP4 وWebM حتى 50 ميجابايت. الصورة الرئيسية يجب أن تكون
-          صورة وليست فيديو.
+          صور: JPEG وPNG وWebP وHEIC/HEIF (صور آيفون) حتى 5 ميجابايت — يتم تحويلها جميعاً تلقائياً إلى WebP بعد الحفظ.
+          صيغة GIF لم تعد مدعومة. فيديو: MP4 وWebM حتى 50 ميجابايت. الصورة الرئيسية يجب أن تكون صورة وليست فيديو.
         </p>
       </div>
     </div>
