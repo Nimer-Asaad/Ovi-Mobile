@@ -20,8 +20,10 @@ export const PUBLIC_PRODUCT_CARD_SELECT = {
   descriptionAr: true,
   retailPriceCents: true,
   isFeatured: true,
+  createdAt: true,
   category: { select: { name: true, nameAr: true } },
   brand: { select: { name: true } },
+  inventoryItems: { where: { location: { isDefault: true } }, select: { quantity: true } },
   // Main media is always enforced IMAGE on save (see admin/products/actions.ts),
   // but the thumbnail query still filters explicitly so a video can never
   // leak into a plain <img> thumbnail if that invariant is ever violated.
@@ -29,7 +31,7 @@ export const PUBLIC_PRODUCT_CARD_SELECT = {
     where: { mediaType: "IMAGE" },
     select: { url: true, altText: true },
     orderBy: [{ isMain: "desc" }, { sortOrder: "asc" }],
-    take: 1,
+    take: 2,
   },
 } satisfies Prisma.ProductSelect;
 
@@ -44,13 +46,15 @@ export const MERCHANT_PRODUCT_CARD_SELECT = {
   descriptionAr: true,
   wholesalePriceCents: true,
   isFeatured: true,
+  createdAt: true,
   category: { select: { name: true, nameAr: true } },
   brand: { select: { name: true } },
+  inventoryItems: { where: { location: { isDefault: true } }, select: { quantity: true } },
   images: {
     where: { mediaType: "IMAGE" },
     select: { url: true, altText: true },
     orderBy: [{ isMain: "desc" }, { sortOrder: "asc" }],
-    take: 1,
+    take: 2,
   },
 } satisfies Prisma.ProductSelect;
 
