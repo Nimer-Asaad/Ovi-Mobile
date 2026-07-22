@@ -7,6 +7,7 @@ import { ProductCard } from "@/components/catalog/ProductCard";
 import { ProductBreadcrumbs } from "@/components/catalog/ProductBreadcrumbs";
 import { ProductPurchasePanel } from "@/components/catalog/ProductPurchasePanel";
 import { ProductInfoTabs } from "@/components/catalog/ProductInfoTabs";
+import { ProductViewTracker } from "@/components/catalog/ProductViewTracker";
 import { getSession } from "@/lib/auth/session";
 import { getCartEligibility } from "@/lib/cart";
 import {
@@ -88,6 +89,7 @@ export default async function ProductDetailPage({ params }: ProductDetailPagePro
 
   return (
     <div className="flex min-h-screen flex-col">
+      <ProductViewTracker productId={product.id} />
       <Header />
 
       <main className="flex-1">

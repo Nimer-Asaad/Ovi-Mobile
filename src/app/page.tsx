@@ -2,7 +2,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/auth/session";
 import { getShopCtaHref, getPostLoginRedirect } from "@/lib/auth/redirects";
-import { getCartEligibility } from "@/lib/cart";
+import { getCartEligibility, getCartItemCount } from "@/lib/cart";
 import {
   getPriceModeForUser,
   getActiveCategories,
@@ -21,6 +21,8 @@ import { StorefrontSection } from "@/components/storefront/StorefrontSection";
 import { PromotionalBanner } from "@/components/storefront/PromotionalBanner";
 import { CollectionsGrid } from "@/components/storefront/CollectionsGrid";
 import { getHomepageCollections } from "@/lib/homepage-queries";
+import { RecentlyViewedSection } from "@/components/storefront/RecentlyViewedSection";
+import { ContinueShoppingCard } from "@/components/storefront/ContinueShoppingCard";
 
 // Queries live DB/session data on every request — force dynamic rendering
 // explicitly so a future refactor can't accidentally make this eligible
@@ -34,7 +36,7 @@ export default async function HomePage() {
   const cartEligibility = getCartEligibility(user);
   const shopCtaHref = getShopCtaHref(user);
 
-  const [categories, brands, featuredProducts, newArrivals, collections] = await Promise.all([
+  const [categories, brands, featuredProducts, newArrivals, collections, cartItemCount] = await Promise.all([
     getActiveCategories(),
     getActiveBrands(),
     priceMode === "wholesale"
@@ -64,6 +66,7 @@ export default async function HomePage() {
           take: 8,
         }),
     getHomepageCollections(),
+    user && cartEligibility === "eligible" ? getCartItemCount(user.id) : Promise.resolve(0),
   ]);
 
   return (
@@ -83,6 +86,8 @@ export default async function HomePage() {
         <StorefrontSection title="تسوّق حسب القسم" subtitle="وصول أسرع إلى كل ما يحتاجه هاتفك">
           <CategoryStrip categories={categories} variant="cards" />
         </StorefrontSection>
+
+        <ContinueShoppingCard cartItemCount={cartItemCount} />
 
         {featuredProducts.length > 0 && (
           <StorefrontSection
@@ -129,6 +134,8 @@ export default async function HomePage() {
             <CollectionsGrid collections={collections} />
           </StorefrontSection>
         )}
+
+        <RecentlyViewedSection cartEligibility={cartEligibility} />
 
         <StorefrontSection>
           <PromotionalBanner />
