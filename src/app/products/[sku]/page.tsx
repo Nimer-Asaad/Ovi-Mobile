@@ -8,8 +8,10 @@ import { ProductBreadcrumbs } from "@/components/catalog/ProductBreadcrumbs";
 import { ProductPurchasePanel } from "@/components/catalog/ProductPurchasePanel";
 import { ProductInfoTabs } from "@/components/catalog/ProductInfoTabs";
 import { ProductViewTracker } from "@/components/catalog/ProductViewTracker";
+import { WishlistButton } from "@/components/wishlist/WishlistButton";
 import { getSession } from "@/lib/auth/session";
 import { getCartEligibility } from "@/lib/cart";
+import { isProductWishlisted } from "@/lib/wishlist";
 import {
   getPriceModeForUser,
   isWholesalePriced,
@@ -71,21 +73,25 @@ export default async function ProductDetailPage({ params }: ProductDetailPagePro
   const categoryName = product.category?.nameAr ?? product.category?.name ?? null;
   const brandName = product.brand?.name ?? null;
 
-  const relatedProducts = product.categoryId
+  const relatedProductsQuery = product.categoryId
     ? priceMode === "wholesale"
-      ? await prisma.product.findMany({
+      ? prisma.product.findMany({
           where: { isActive: true, categoryId: product.categoryId, id: { not: product.id } },
           select: MERCHANT_PRODUCT_CARD_SELECT,
           orderBy: { createdAt: "desc" },
           take: 4,
         })
-      : await prisma.product.findMany({
+      : prisma.product.findMany({
           where: { isActive: true, categoryId: product.categoryId, id: { not: product.id } },
           select: PUBLIC_PRODUCT_CARD_SELECT,
           orderBy: { createdAt: "desc" },
           take: 4,
         })
-    : [];
+    : Promise.resolve([]);
+  const [relatedProducts, initialSaved] = await Promise.all([
+    relatedProductsQuery,
+    user ? isProductWishlisted(user.id, product.id) : Promise.resolve(false),
+  ]);
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -99,19 +105,22 @@ export default async function ProductDetailPage({ params }: ProductDetailPagePro
           <div className="mt-6 grid grid-cols-1 gap-8 lg:grid-cols-2">
             <ProductGallery images={product.images} name={title} />
 
-            <ProductPurchasePanel
-              productId={product.id}
-              title={title}
-              sku={product.sku}
-              categoryName={categoryName}
-              brandName={brandName}
-              priceCents={priceCents}
-              isWholesale={isWholesale}
-              isFeatured={product.isFeatured}
-              totalStock={totalStock}
-              cartEligibility={cartEligibility}
-              imageUrl={mainImageUrl}
-            />
+            <div className="flex flex-col gap-4">
+              <ProductPurchasePanel
+                productId={product.id}
+                title={title}
+                sku={product.sku}
+                categoryName={categoryName}
+                brandName={brandName}
+                priceCents={priceCents}
+                isWholesale={isWholesale}
+                isFeatured={product.isFeatured}
+                totalStock={totalStock}
+                cartEligibility={cartEligibility}
+                imageUrl={mainImageUrl}
+              />
+              <WishlistButton productId={product.id} initialSaved={initialSaved} isAuthenticated={Boolean(user)} />
+            </div>
           </div>
 
           <div className="mt-10">

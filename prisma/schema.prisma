@@ -62,6 +62,7 @@ model User {
   stockMovements    StockMovement[]     @relation("StockMovementCreatedBy")
   sessions          Session[]
   cart              Cart?
+  wishlistItems     WishlistItem[]
   activityEvents    UserActivityEvent[]
   auditLogsAsAdmin  AdminAuditLog[]     @relation("AuditLogAdmin")
   auditLogsAsTarget AdminAuditLog[]     @relation("AuditLogTarget")
@@ -273,6 +274,7 @@ model Product {
   stockReturnItems  StockReturnItem[]
   images            ProductImage[]
   cartItems         CartItem[]
+  wishlistItems     WishlistItem[]
 
   @@map("products")
 }
@@ -307,6 +309,19 @@ model CartItem {
 
   @@unique([cartId, productId])
   @@map("cart_items")
+}
+
+model WishlistItem {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product  @relation(fields: [productId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@unique([userId, productId])
+  @@index([userId])
+  @@map("wishlist_items")
 }
 
 /// One product can have multiple images; at most one is marked `isMain`.
