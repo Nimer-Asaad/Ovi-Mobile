@@ -106,6 +106,7 @@ export async function placeOrder(_prevState: CheckoutState, formData: FormData):
     status: ORDER_STATUSES.PENDING,
     customerId: user.id,
     merchantId,
+    stockLocationId: warehouse.id,
     subtotalCents,
     totalCents: subtotalCents,
     contactName: parsed.data.contactName,

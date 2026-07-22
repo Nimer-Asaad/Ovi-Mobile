@@ -8,6 +8,7 @@ import { ProductImagePlaceholder } from "@/components/catalog/ProductImagePlaceh
 import { formatCurrencyFromCents } from "@/lib/utils";
 import { ORDER_SOURCES } from "@/lib/constants";
 import { getOrderStatusLabel, getOrderStatusBadgeVariant, getOrderSourceLabel } from "@/lib/order-labels";
+import { getValidNextOrderStatuses, isTerminalOrderStatus } from "@/lib/order-lifecycle";
 import { OrderStatusForm } from "../OrderStatusForm";
 import { PaymentStatusForm } from "../PaymentStatusForm";
 
@@ -35,8 +36,21 @@ export default async function AdminOrderDetailPage({ params }: AdminOrderDetailP
       paymentMethod: true,
       paymentStatus: true,
       paidAmountCents: true,
+      inventoryRestoredAt: true,
       createdAt: true,
       updatedAt: true,
+      stockLocation: { select: { name: true } },
+      inventoryCompensation: { select: { type: true, createdAt: true } },
+      statusHistory: {
+        select: {
+          fromStatus: true,
+          toStatus: true,
+          reason: true,
+          createdAt: true,
+          changedBy: { select: { name: true } },
+        },
+        orderBy: { createdAt: "asc" },
+      },
       customer: { select: { name: true, email: true } },
       merchant: { select: { businessName: true, taxId: true, status: true } },
       createdByRep: { select: { employeeCode: true, user: { select: { name: true, phone: true } } } },
@@ -69,6 +83,8 @@ export default async function AdminOrderDetailPage({ params }: AdminOrderDetailP
 
   const isWholesaleOrder = order.source === ORDER_SOURCES.WHOLESALE;
   const isRepSale = order.source === ORDER_SOURCES.REP_SALE;
+  const validNextStatuses = getValidNextOrderStatuses(order.status, order.source);
+  const isTerminal = isTerminalOrderStatus(order.status);
 
   return (
     <div className="flex flex-col gap-6">
@@ -263,11 +279,76 @@ export default async function AdminOrderDetailPage({ params }: AdminOrderDetailP
 
       <Card>
         <CardHeader>
+          <CardTitle>سلامة دورة الطلب والمخزون</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <dl className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-3">
+            <div>
+              <dt className="text-neutral-bg/50">موقع المخزون الأصلي</dt>
+              <dd className="text-neutral-bg">{order.stockLocation?.name ?? "غير مسجل (طلب قديم)"}</dd>
+            </div>
+            <div>
+              <dt className="text-neutral-bg/50">حالة المخزون</dt>
+              <dd className="text-neutral-bg">
+                {order.inventoryRestoredAt ? "تم استرجاع المخزون" : "لم يتم استرجاع المخزون"}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-neutral-bg/50">دورة الحالة</dt>
+              <dd className="text-neutral-bg">{isTerminal ? "حالة نهائية" : "نشطة"}</dd>
+            </div>
+          </dl>
+          {!order.stockLocation && !order.inventoryRestoredAt && (
+            <p className="mt-4 rounded-card border border-amber-300/50 bg-amber-50 p-3 text-sm text-amber-800">
+              هذا طلب قديم لا يحتوي على موقع المخزون الأصلي. سيُمنع الإلغاء أو الإرجاع الآلي حتى تتم مراجعة المخزون يدويًا.
+            </p>
+          )}
+          {order.inventoryRestoredAt && (
+            <p className="mt-3 text-xs text-neutral-bg/60">
+              تاريخ الاسترجاع: {new Date(order.inventoryRestoredAt).toLocaleString("ar")}
+              {order.inventoryCompensation ? ` · نوع الحركة: ${order.inventoryCompensation.type}` : ""}
+            </p>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>سجل حالات الطلب</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {order.statusHistory.length === 0 ? (
+            <p className="text-sm text-neutral-bg/60">لا توجد انتقالات مسجلة لهذا الطلب حتى الآن.</p>
+          ) : (
+            <ol className="flex flex-col gap-3">
+              {order.statusHistory.map((entry, index) => (
+                <li key={`${entry.createdAt.toISOString()}-${index}`} className="rounded-card border border-navy-soft p-3 text-sm">
+                  <p className="font-medium text-neutral-bg">
+                    {getOrderStatusLabel(entry.fromStatus)} ← {getOrderStatusLabel(entry.toStatus)}
+                  </p>
+                  <p className="mt-1 text-xs text-neutral-bg/60">
+                    بواسطة {entry.changedBy.name} · {new Date(entry.createdAt).toLocaleString("ar")}
+                  </p>
+                  {entry.reason && <p className="mt-2 text-sm text-neutral-bg/80">السبب: {entry.reason}</p>}
+                </li>
+              ))}
+            </ol>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
           <CardTitle>إدارة الحالة</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
-            <OrderStatusForm orderNumber={order.orderNumber} currentStatus={order.status} />
+            <OrderStatusForm
+              orderNumber={order.orderNumber}
+              currentStatus={order.status}
+              validNextStatuses={validNextStatuses}
+              paymentStatus={order.paymentStatus}
+            />
             <PaymentStatusForm orderNumber={order.orderNumber} currentStatus={order.paymentStatus} />
           </div>
         </CardContent>

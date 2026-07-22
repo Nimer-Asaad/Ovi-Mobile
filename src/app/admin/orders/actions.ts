@@ -4,7 +4,9 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth/guards";
 import { ROLES } from "@/lib/constants";
-import { orderStatusSchema, paymentStatusSchema } from "@/lib/validation/order";
+import { orderLifecycleTransitionSchema, paymentStatusSchema } from "@/lib/validation/order";
+import { transitionOrderStatus } from "@/lib/order-lifecycle";
+import type { OrderStatus } from "@/types";
 
 export interface OrderActionState {
   error?: string;
@@ -24,19 +26,31 @@ export async function updateOrderStatus(
   _prevState: OrderActionState,
   formData: FormData,
 ): Promise<OrderActionState> {
-  await requireRole([ROLES.ADMIN]);
+  const admin = await requireRole([ROLES.ADMIN]);
 
-  const parsed = orderStatusSchema.safeParse(formData.get("status")?.toString());
+  const parsed = orderLifecycleTransitionSchema.safeParse({
+    ...Object.fromEntries(formData.entries()),
+    orderNumber,
+  });
   if (!parsed.success) {
-    return { error: "حالة الطلب غير صالحة" };
+    return { error: parsed.error.issues[0]?.message ?? "بيانات تحديث حالة الطلب غير صالحة" };
   }
 
-  const existing = await prisma.order.findUnique({ where: { orderNumber }, select: { id: true } });
-  if (!existing) {
-    return { error: "الطلب غير موجود" };
+  try {
+    const result = await transitionOrderStatus({
+      orderNumber: parsed.data.orderNumber,
+      requestedStatus: parsed.data.status as OrderStatus,
+      reason: parsed.data.reason,
+      actorUserId: admin.id,
+    });
+    if (!result.ok) return { error: result.message };
+  } catch {
+    console.error("[admin/orders] lifecycle transition failed", {
+      route: "/admin/orders/[orderNumber]",
+      operation: "transition-status",
+    });
+    return { error: "تعذر تحديث حالة الطلب، حاول مرة أخرى" };
   }
-
-  await prisma.order.update({ where: { orderNumber }, data: { status: parsed.data } });
 
   revalidateOrderPaths(orderNumber);
   return { success: true };

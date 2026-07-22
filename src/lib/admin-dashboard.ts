@@ -33,7 +33,10 @@ export async function getOrdersSalesTrend(): Promise<TrendPoint[]> {
   start.setDate(start.getDate() - 6);
 
   const orders = await prisma.order.findMany({
-    where: { createdAt: { gte: start } },
+    where: {
+      createdAt: { gte: start },
+      status: { notIn: [ORDER_STATUSES.CANCELLED, ORDER_STATUSES.RETURNED] },
+    },
     select: { createdAt: true, totalCents: true },
   });
 

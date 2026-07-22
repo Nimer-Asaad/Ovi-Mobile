@@ -58,14 +58,16 @@ model User {
   merchantProfile            Merchant?
   salesRepresentativeProfile SalesRepresentative?
 
-  ordersPlaced      Order[]             @relation("OrderCustomer")
-  stockMovements    StockMovement[]     @relation("StockMovementCreatedBy")
-  sessions          Session[]
-  cart              Cart?
-  wishlistItems     WishlistItem[]
-  activityEvents    UserActivityEvent[]
-  auditLogsAsAdmin  AdminAuditLog[]     @relation("AuditLogAdmin")
-  auditLogsAsTarget AdminAuditLog[]     @relation("AuditLogTarget")
+  ordersPlaced       Order[]                      @relation("OrderCustomer")
+  stockMovements     StockMovement[]              @relation("StockMovementCreatedBy")
+  sessions           Session[]
+  cart               Cart?
+  wishlistItems      WishlistItem[]
+  orderStatusChanges OrderStatusHistory[]         @relation("OrderStatusChangedBy")
+  orderCompensations OrderInventoryCompensation[] @relation("OrderCompensationCreatedBy")
+  activityEvents     UserActivityEvent[]
+  auditLogsAsAdmin   AdminAuditLog[]              @relation("AuditLogAdmin")
+  auditLogsAsTarget  AdminAuditLog[]              @relation("AuditLogTarget")
 
   @@map("users")
 }
@@ -361,9 +363,11 @@ model StockLocation {
   createdAt  DateTime             @default(now())
   updatedAt  DateTime             @updatedAt
 
-  inventoryItems InventoryItem[]
-  movementsFrom  StockMovement[] @relation("MovementFromLocation")
-  movementsTo    StockMovement[] @relation("MovementToLocation")
+  inventoryItems     InventoryItem[]
+  movementsFrom      StockMovement[]              @relation("MovementFromLocation")
+  movementsTo        StockMovement[]              @relation("MovementToLocation")
+  fulfilledOrders    Order[]
+  orderCompensations OrderInventoryCompensation[]
 
   @@map("stock_locations")
 }
@@ -416,7 +420,7 @@ model StockMovement {
 // ---------------------------------------------------------------------------
 
 /// OrderStatus values:
-/// "PENDING" | "CONFIRMED" | "PROCESSING" | "SHIPPED" | "DELIVERED" |
+/// "PENDING" | "CONFIRMED" | "PREPARING" | "OUT_FOR_DELIVERY" | "DELIVERED" |
 /// "CANCELLED" | "RETURNED"
 ///
 /// OrderSource values: "RETAIL" | "WHOLESALE" | "REP_SALE" | "ADMIN_MANUAL"
@@ -434,6 +438,10 @@ model Order {
 
   createdByRepId String?
   createdByRep   SalesRepresentative? @relation("OrderCreatedByRep", fields: [createdByRepId], references: [id])
+
+  stockLocationId     String?
+  stockLocation       StockLocation? @relation(fields: [stockLocationId], references: [id])
+  inventoryRestoredAt DateTime?
 
   currency      String @default("ILS")
   subtotalCents Int
@@ -460,9 +468,12 @@ model Order {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  items OrderItem[]
+  items                 OrderItem[]
+  statusHistory         OrderStatusHistory[]
+  inventoryCompensation OrderInventoryCompensation?
 
   @@index([customerId])
+  @@index([stockLocationId])
   @@map("orders")
 }
 
@@ -477,6 +488,38 @@ model OrderItem {
   totalCents     Int
 
   @@map("order_items")
+}
+
+model OrderStatusHistory {
+  id          String   @id @default(cuid())
+  orderId     String
+  order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  fromStatus  String
+  toStatus    String
+  reason      String?
+  changedById String
+  changedBy   User     @relation("OrderStatusChangedBy", fields: [changedById], references: [id])
+  createdAt   DateTime @default(now())
+
+  @@index([orderId, createdAt])
+  @@index([changedById])
+  @@map("order_status_history")
+}
+
+model OrderInventoryCompensation {
+  id              String        @id @default(cuid())
+  orderId         String        @unique
+  order           Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  stockLocationId String
+  stockLocation   StockLocation @relation(fields: [stockLocationId], references: [id])
+  type            String
+  createdById     String
+  createdBy       User          @relation("OrderCompensationCreatedBy", fields: [createdById], references: [id])
+  createdAt       DateTime      @default(now())
+
+  @@index([stockLocationId])
+  @@index([createdById])
+  @@map("order_inventory_compensations")
 }
 
 // ---------------------------------------------------------------------------

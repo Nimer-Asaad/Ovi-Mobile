@@ -111,6 +111,7 @@ export async function createRepSale(_prevState: RepSaleState, formData: FormData
             orderNumber,
             source: ORDER_SOURCES.REP_SALE,
             status: ORDER_STATUSES.DELIVERED,
+            stockLocationId: locationId,
             customerId: null,
             createdByRepId: rep.id,
             subtotalCents: totalCents,

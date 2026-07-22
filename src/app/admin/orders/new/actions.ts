@@ -196,6 +196,7 @@ export async function createManualOrder(
             orderNumber,
             source: ORDER_SOURCES.ADMIN_MANUAL,
             status: ORDER_STATUSES.CONFIRMED,
+            stockLocationId: warehouse.id,
             customerId: resolvedCustomerId,
             merchantId: resolvedMerchantId,
             subtotalCents,
