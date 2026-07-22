@@ -19,6 +19,8 @@ import { BrandShowcase } from "@/components/storefront/BrandShowcase";
 import { TrustStrip } from "@/components/storefront/TrustStrip";
 import { StorefrontSection } from "@/components/storefront/StorefrontSection";
 import { PromotionalBanner } from "@/components/storefront/PromotionalBanner";
+import { CollectionsGrid } from "@/components/storefront/CollectionsGrid";
+import { getHomepageCollections } from "@/lib/homepage-queries";
 
 // Queries live DB/session data on every request — force dynamic rendering
 // explicitly so a future refactor can't accidentally make this eligible
@@ -32,7 +34,7 @@ export default async function HomePage() {
   const cartEligibility = getCartEligibility(user);
   const shopCtaHref = getShopCtaHref(user);
 
-  const [categories, brands, featuredProducts, newArrivals] = await Promise.all([
+  const [categories, brands, featuredProducts, newArrivals, collections] = await Promise.all([
     getActiveCategories(),
     getActiveBrands(),
     priceMode === "wholesale"
@@ -61,6 +63,7 @@ export default async function HomePage() {
           orderBy: { createdAt: "desc" },
           take: 8,
         }),
+    getHomepageCollections(),
   ]);
 
   return (
@@ -118,8 +121,21 @@ export default async function HomePage() {
           </StorefrontSection>
         )}
 
+        {collections.length > 0 && (
+          <StorefrontSection
+            title="مجموعات مختارة"
+            subtitle="وجهات سريعة إلى مجموعات متوفرة حاليًا في متجر Ovi Mobile"
+          >
+            <CollectionsGrid collections={collections} />
+          </StorefrontSection>
+        )}
+
         <StorefrontSection>
           <PromotionalBanner />
+        </StorefrontSection>
+
+        <StorefrontSection>
+          <TrustStrip />
         </StorefrontSection>
 
         <StorefrontSection
@@ -128,10 +144,6 @@ export default async function HomePage() {
           className="overflow-hidden border-y border-navy-soft bg-navy-surface"
         >
           <BrandShowcase brands={brands} />
-        </StorefrontSection>
-
-        <StorefrontSection>
-          <TrustStrip />
         </StorefrontSection>
       </main>
 
