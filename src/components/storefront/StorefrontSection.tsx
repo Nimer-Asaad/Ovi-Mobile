@@ -17,12 +17,12 @@ export interface StorefrontSectionProps {
 export function StorefrontSection({ title, subtitle, action, className, children }: StorefrontSectionProps) {
   return (
     <section className={cn("animate-fade-in", className)}>
-      <div className="mx-auto max-w-6xl px-4 py-12 md:py-16">
+      <div className="mx-auto max-w-6xl px-4 py-14 sm:px-6 md:py-20 lg:px-4 lg:py-24">
         {(title || action) && (
-          <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
-            <div>
-              {title && <h2 className="text-2xl font-semibold text-neutral-bg">{title}</h2>}
-              {subtitle && <p className="mt-1 text-sm text-neutral-bg/60">{subtitle}</p>}
+          <div className="mb-9 flex flex-wrap items-end justify-between gap-4 md:mb-11">
+            <div className="max-w-2xl">
+              {title && <h2 className="text-2xl font-bold tracking-tight text-neutral-bg sm:text-3xl">{title}</h2>}
+              {subtitle && <p className="mt-2 text-sm leading-6 text-neutral-bg/60 sm:text-base">{subtitle}</p>}
             </div>
             {action}
           </div>

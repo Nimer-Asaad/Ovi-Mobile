@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 700" role="img" aria-labelledby="title desc">
+  <title id="title">منتجات للأفراد والتجار</title><desc id="desc">مجموعة عبوات وإكسسوارات هاتف بتنسيق متجر فاخر</desc>
+  <defs><linearGradient id="bg" x2="1" y2="1"><stop stop-color="#0f304d"/><stop offset="1" stop-color="#061525"/></linearGradient><radialGradient id="g"><stop stop-color="#c9a14a" stop-opacity=".48"/><stop offset="1" stop-color="#c9a14a" stop-opacity="0"/></radialGradient><filter id="s"><feDropShadow dy="22" stdDeviation="25" flood-opacity=".42"/></filter></defs>
+  <rect width="1600" height="700" fill="url(#bg)"/><circle cx="420" cy="330" r="390" fill="url(#g)"/>
+  <g filter="url(#s)"><rect x="105" y="220" width="230" height="340" rx="24" fill="#f4f0e7" transform="rotate(-8 105 220)"/><rect x="330" y="130" width="245" height="410" rx="26" fill="#d8b96e" transform="rotate(3 330 130)"/><rect x="575" y="250" width="220" height="300" rx="24" fill="#eef0ef" transform="rotate(9 575 250)"/></g>
+  <g fill="#0b2034"><circle cx="223" cy="378" r="65"/><path d="M405 260h105v150H405z"/><circle cx="683" cy="390" r="60" fill="none" stroke="#0b2034" stroke-width="24"/></g>
+  <g fill="#fff" opacity=".06"><rect x="990" y="90" width="390" height="390" rx="80" transform="rotate(18 990 90)"/><circle cx="1360" cy="590" r="180"/></g>
+</svg>

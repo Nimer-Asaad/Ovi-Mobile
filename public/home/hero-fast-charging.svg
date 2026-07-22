@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 700" role="img" aria-labelledby="title desc">
+  <title id="title">حلول شحن سريع</title><desc id="desc">شاحن وكابل مضاءان بلون ذهبي على خلفية كحلية</desc>
+  <defs><linearGradient id="bg"><stop stop-color="#183958"/><stop offset="1" stop-color="#061525"/></linearGradient><radialGradient id="g"><stop stop-color="#e5c77e" stop-opacity=".6"/><stop offset="1" stop-color="#e5c77e" stop-opacity="0"/></radialGradient><filter id="s"><feDropShadow dy="25" stdDeviation="24" flood-opacity=".45"/></filter></defs>
+  <rect width="1600" height="700" fill="url(#bg)"/><ellipse cx="380" cy="390" rx="420" ry="380" fill="url(#g)"/>
+  <g filter="url(#s)"><rect x="175" y="175" width="310" height="360" rx="55" fill="#f8f5ec"/><rect x="280" y="120" width="36" height="90" rx="10" fill="#d4b468"/><rect x="352" y="120" width="36" height="90" rx="10" fill="#d4b468"/><rect x="270" y="335" width="120" height="58" rx="29" fill="#0b2034"/><path d="M327 348l-22 37h23l-8 30 37-48h-24l14-19z" fill="#e0bd68"/></g>
+  <path d="M490 500c210 85 280-95 430-55 85 23 110 91 90 158" fill="none" stroke="#e0bd68" stroke-width="20" stroke-linecap="round"/><rect x="968" y="566" width="85" height="50" rx="14" fill="#f8f5ec" transform="rotate(12 968 566)"/>
+  <g fill="#fff" opacity=".08"><path d="M950 90h360l-180 270z"/><circle cx="1420" cy="560" r="180"/></g>
+</svg>

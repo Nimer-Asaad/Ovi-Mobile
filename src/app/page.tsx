@@ -63,14 +63,14 @@ export default async function HomePage() {
           tertiaryLabel={!user ? "انضم كتاجر جملة" : undefined}
         />
 
-        <StorefrontSection title="تسوّق حسب القسم" subtitle="اختر القسم المناسب لاحتياجاتك">
+        <StorefrontSection title="تسوّق حسب القسم" subtitle="وصول أسرع إلى كل ما يحتاجه هاتفك">
           <CategoryStrip categories={categories} variant="cards" />
         </StorefrontSection>
 
         {featuredProducts.length > 0 && (
           <StorefrontSection
             title="منتجات مميزة"
-            subtitle="أفضل المنتجات اختياراً لهذا الأسبوع"
+            subtitle="منتجات مختارة بعناية تجمع بين الجودة والأداء"
             action={
               <Link href="/products" className="text-sm font-medium text-gold-dark hover:underline">
                 عرض جميع المنتجات
@@ -86,9 +86,9 @@ export default async function HomePage() {
         )}
 
         <StorefrontSection
-          title="البراندات"
-          subtitle="نتعامل مع علامات تجارية موثوقة"
-          className="border-t border-navy-soft bg-navy-surface"
+          title="علامات نثق بها"
+          subtitle="اكتشف منتجاتك المفضلة من علامات تجارية موثوقة"
+          className="overflow-hidden border-y border-navy-soft bg-navy-surface"
         >
           <BrandShowcase brands={brands} />
         </StorefrontSection>

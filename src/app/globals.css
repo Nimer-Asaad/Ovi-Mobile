@@ -10,6 +10,45 @@
   }
 }
 
+@keyframes brand-marquee-forward {
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(-50%, 0, 0); }
+}
+
+@keyframes brand-marquee-reverse {
+  from { transform: translate3d(-50%, 0, 0); }
+  to { transform: translate3d(0, 0, 0); }
+}
+
+.brand-showcase-mask {
+  -webkit-mask-image: linear-gradient(to right, transparent, black 7%, black 93%, transparent);
+  mask-image: linear-gradient(to right, transparent, black 7%, black 93%, transparent);
+}
+
+.brand-marquee-track {
+  display: flex;
+  width: max-content;
+  will-change: transform;
+  animation: brand-marquee-forward 42s linear infinite;
+}
+
+.brand-marquee-track.brand-marquee-reverse {
+  animation-name: brand-marquee-reverse;
+  animation-duration: 48s;
+}
+
+.brand-marquee-group {
+  display: flex;
+  flex-shrink: 0;
+  gap: 1rem;
+  padding-inline-end: 1rem;
+}
+
+.brand-marquee:hover .brand-marquee-track,
+.brand-marquee:focus-within .brand-marquee-track {
+  animation-play-state: paused;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
