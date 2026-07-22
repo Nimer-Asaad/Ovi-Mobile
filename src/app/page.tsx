@@ -18,6 +18,7 @@ import { CategoryStrip } from "@/components/storefront/CategoryStrip";
 import { BrandShowcase } from "@/components/storefront/BrandShowcase";
 import { TrustStrip } from "@/components/storefront/TrustStrip";
 import { StorefrontSection } from "@/components/storefront/StorefrontSection";
+import { PromotionalBanner } from "@/components/storefront/PromotionalBanner";
 
 // Queries live DB/session data on every request — force dynamic rendering
 // explicitly so a future refactor can't accidentally make this eligible
@@ -31,7 +32,7 @@ export default async function HomePage() {
   const cartEligibility = getCartEligibility(user);
   const shopCtaHref = getShopCtaHref(user);
 
-  const [categories, brands, featuredProducts] = await Promise.all([
+  const [categories, brands, featuredProducts, newArrivals] = await Promise.all([
     getActiveCategories(),
     getActiveBrands(),
     priceMode === "wholesale"
@@ -43,6 +44,19 @@ export default async function HomePage() {
         })
       : prisma.product.findMany({
           where: { isActive: true, isFeatured: true },
+          select: PUBLIC_PRODUCT_CARD_SELECT,
+          orderBy: { createdAt: "desc" },
+          take: 8,
+        }),
+    priceMode === "wholesale"
+      ? prisma.product.findMany({
+          where: { isActive: true },
+          select: MERCHANT_PRODUCT_CARD_SELECT,
+          orderBy: { createdAt: "desc" },
+          take: 8,
+        })
+      : prisma.product.findMany({
+          where: { isActive: true },
           select: PUBLIC_PRODUCT_CARD_SELECT,
           orderBy: { createdAt: "desc" },
           take: 8,
@@ -69,21 +83,44 @@ export default async function HomePage() {
 
         {featuredProducts.length > 0 && (
           <StorefrontSection
-            title="منتجات مميزة"
-            subtitle="منتجات مختارة بعناية تجمع بين الجودة والأداء"
+            title="منتجات مختارة"
+            subtitle="اختيارات مميزة بعناية من أحدث إكسسوارات ومستلزمات الموبايل"
             action={
-              <Link href="/products" className="text-sm font-medium text-gold-dark hover:underline">
-                عرض جميع المنتجات
+              <Link href="/products" className="rounded-full border border-gold-champagne/35 px-4 py-2 text-sm font-semibold text-gold-dark transition-colors hover:border-gold-champagne hover:bg-gold-champagne/10">
+                عرض كل المنتجات
               </Link>
             }
           >
-            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4 lg:gap-6">
               {featuredProducts.map((product) => (
                 <ProductCard key={product.id} product={product} cartEligibility={cartEligibility} />
               ))}
             </div>
           </StorefrontSection>
         )}
+
+        {newArrivals.length > 0 && (
+          <StorefrontSection
+            title="وصل حديثًا"
+            subtitle="أحدث المنتجات التي انضمت إلى متجر Ovi Mobile"
+            className="border-y border-navy-soft/70 bg-white/35"
+            action={
+              <Link href="/products" className="rounded-full border border-gold-champagne/35 px-4 py-2 text-sm font-semibold text-gold-dark transition-colors hover:border-gold-champagne hover:bg-gold-champagne/10">
+                عرض كل المنتجات
+              </Link>
+            }
+          >
+            <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4 lg:gap-6">
+              {newArrivals.map((product) => (
+                <ProductCard key={product.id} product={product} cartEligibility={cartEligibility} />
+              ))}
+            </div>
+          </StorefrontSection>
+        )}
+
+        <StorefrontSection>
+          <PromotionalBanner />
+        </StorefrontSection>
 
         <StorefrontSection
           title="علامات نثق بها"

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Card } from "@/components/ui/Card";
+import { CategoryIcon } from "@/components/storefront/CategoryIcon";
 import type { StorefrontCategory } from "@/lib/catalog-queries";
 
 export interface CategoryStripProps {
@@ -16,20 +17,26 @@ export interface CategoryStripProps {
 export function CategoryStrip({ categories, variant = "pills" }: CategoryStripProps) {
   if (variant === "cards") {
     return (
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+      <nav aria-label="تصفح أقسام المتجر" className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-4">
         {categories.map((category) => (
-          <Link key={category.slug} href={`/products?category=${category.slug}`}>
-            <Card className="flex h-full flex-col items-center justify-center gap-2 py-8 text-center transition-all hover:-translate-y-0.5 hover:border-gold-champagne/50 hover:shadow-lg">
-              <span className="font-medium text-neutral-bg">{category.nameAr ?? category.name}</span>
+          <Link key={category.slug} href={`/products?category=${category.slug}`} aria-label={`تصفح قسم ${category.nameAr ?? category.name}`}>
+            <Card className="group flex min-h-36 h-full flex-col items-center justify-center gap-4 overflow-hidden px-3 py-7 text-center transition-all duration-300 hover:-translate-y-1 hover:border-gold-champagne/55 hover:shadow-[0_18px_38px_-24px_rgba(6,20,37,0.5)] sm:min-h-40">
+              <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gold-champagne/12 text-gold-dark ring-1 ring-gold-champagne/20 transition duration-300 group-hover:scale-105 group-hover:bg-gold-champagne/18 sm:h-16 sm:w-16">
+                <CategoryIcon slug={category.slug} className="h-8 w-8 sm:h-9 sm:w-9" />
+              </span>
+              <span className="font-semibold text-neutral-bg">{category.nameAr ?? category.name}</span>
             </Card>
           </Link>
         ))}
-        <Link href="/products">
-          <Card className="flex h-full flex-col items-center justify-center gap-2 border-dashed py-8 text-center text-gold-dark transition-all hover:-translate-y-0.5 hover:border-gold-champagne/50 hover:shadow-lg">
-            <span className="font-medium">كل المنتجات</span>
+        <Link href="/products" aria-label="تصفح كل المنتجات">
+          <Card className="group flex min-h-36 h-full flex-col items-center justify-center gap-4 border-dashed px-3 py-7 text-center text-gold-dark transition-all duration-300 hover:-translate-y-1 hover:border-gold-champagne/65 hover:shadow-[0_18px_38px_-24px_rgba(201,161,74,0.5)] sm:min-h-40">
+            <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-navy-soft/70 ring-1 ring-navy-soft transition duration-300 group-hover:scale-105 sm:h-16 sm:w-16">
+              <CategoryIcon slug="all-products" className="h-8 w-8 sm:h-9 sm:w-9" />
+            </span>
+            <span className="font-semibold">كل المنتجات</span>
           </Card>
         </Link>
-      </div>
+      </nav>
     );
   }
 
