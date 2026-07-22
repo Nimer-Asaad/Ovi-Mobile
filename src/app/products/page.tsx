@@ -1,4 +1,6 @@
-import type { Prisma } from "@prisma/client";
+import type { Metadata } from "next";
+import Link from "next/link";
+import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
@@ -8,9 +10,10 @@ import { ProductSearchBar } from "@/components/catalog/ProductSearchBar";
 import { ProductFilters } from "@/components/catalog/ProductFilters";
 import { ProductSortSelect } from "@/components/catalog/ProductSortSelect";
 import { ActiveFilterChips } from "@/components/catalog/ActiveFilterChips";
+import { MobileFilterDrawer } from "@/components/catalog/MobileFilterDrawer";
+import { Pagination } from "@/components/catalog/Pagination";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Button } from "@/components/ui/Button";
-import Link from "next/link";
 import { getSession } from "@/lib/auth/session";
 import { getCartEligibility } from "@/lib/cart";
 import {
@@ -20,149 +23,172 @@ import {
   PUBLIC_PRODUCT_CARD_SELECT,
   MERCHANT_PRODUCT_CARD_SELECT,
 } from "@/lib/catalog-queries";
-import { normalizeProductSort, PRODUCT_SORT_OPTIONS, type ProductSort } from "@/lib/product-filter-url";
+import {
+  buildProductOrderBy,
+  buildProductWhere,
+  parseCatalogSearchParams,
+  type RawCatalogSearchParams,
+} from "@/lib/catalog-filters";
+import { buildProductsUrl, PRODUCT_SORT_OPTIONS } from "@/lib/product-filter-url";
 
-// Queries live DB/session data on every request — force dynamic rendering
-// explicitly so a future refactor can't accidentally make this eligible
-// for build-time static generation (see DEPLOYMENT.md's Phase 29/31 notes
-// on why build-time Prisma query bursts are risky).
 export const dynamic = "force-dynamic";
+const PRODUCTS_PAGE_SIZE = 24;
 
 interface ProductsPageProps {
-  searchParams: Promise<{ category?: string; brand?: string; q?: string; sort?: string }>;
+  searchParams: Promise<RawCatalogSearchParams>;
 }
 
-function getOrderBy(
-  sort: ProductSort,
-  priceField: "retailPriceCents" | "wholesalePriceCents",
-): Prisma.ProductOrderByWithRelationInput[] {
-  switch (sort) {
-    case PRODUCT_SORT_OPTIONS.NAME:
-      return [{ nameAr: "asc" }, { name: "asc" }];
-    case PRODUCT_SORT_OPTIONS.PRICE_ASC:
-      return [{ [priceField]: "asc" }];
-    case PRODUCT_SORT_OPTIONS.PRICE_DESC:
-      return [{ [priceField]: "desc" }];
-    default:
-      return [{ createdAt: "desc" }];
+export async function generateMetadata({ searchParams }: ProductsPageProps): Promise<Metadata> {
+  const params = parseCatalogSearchParams(await searchParams);
+  const isDefaultSort = params.sort === PRODUCT_SORT_OPTIONS.LATEST;
+  const singleCategory = Boolean(params.category && !params.brand && !params.q && !params.inStock && !params.isNew && isDefaultSort);
+  const singleBrand = Boolean(params.brand && !params.category && !params.q && !params.inStock && !params.isNew && isDefaultSort);
+
+  let title = "المنتجات | Ovi Mobile";
+  let validSingleFilter = false;
+  if (singleCategory) {
+    const category = await prisma.category.findFirst({ where: { slug: params.category, isActive: true }, select: { name: true, nameAr: true } });
+    if (category) {
+      title = `${category.nameAr ?? category.name} | Ovi Mobile`;
+      validSingleFilter = true;
+    }
+  } else if (singleBrand) {
+    const brand = await prisma.brand.findFirst({ where: { slug: params.brand, isActive: true }, select: { name: true } });
+    if (brand) {
+      title = `${brand.name} | Ovi Mobile`;
+      validSingleFilter = true;
+    }
   }
+
+  const isPlainCatalog = !params.q && !params.category && !params.brand && !params.inStock && !params.isNew && isDefaultSort;
+  const noindex = params.page > 1 || Boolean(params.q) || (!isPlainCatalog && !validSingleFilter);
+  const canonical = validSingleFilter
+    ? buildProductsUrl({ category: params.category, brand: params.brand })
+    : "/products";
+
+  return {
+    title,
+    description: "تصفح إكسسوارات ومستلزمات الموبايل المتوفرة لدى Ovi Mobile.",
+    alternates: { canonical },
+    robots: { index: !noindex, follow: true },
+  };
 }
 
 export default async function ProductsPage({ searchParams }: ProductsPageProps) {
-  const { category: categorySlug, brand: brandSlug, q: query, sort: rawSort } = await searchParams;
-  const trimmedQuery = query?.trim();
-  const sort = normalizeProductSort(rawSort);
+  const params = parseCatalogSearchParams(await searchParams);
+  const where = buildProductWhere(params);
+  const [user, totalCount] = await Promise.all([getSession(), prisma.product.count({ where })]);
+  const totalPages = Math.max(1, Math.ceil(totalCount / PRODUCTS_PAGE_SIZE));
+  const effectivePage = Math.min(params.page, totalPages);
 
-  const user = await getSession();
+  if (effectivePage !== params.page) {
+    redirect(buildProductsUrl({ ...params, page: effectivePage }));
+  }
+
   const priceMode = getPriceModeForUser(user);
   const cartEligibility = getCartEligibility(user);
-
-  const where = {
-    isActive: true,
-    ...(categorySlug ? { category: { slug: categorySlug } } : {}),
-    ...(brandSlug ? { brand: { slug: brandSlug } } : {}),
-    ...(trimmedQuery
-      ? {
-          OR: [
-            { name: { contains: trimmedQuery, mode: "insensitive" as const } },
-            { nameAr: { contains: trimmedQuery, mode: "insensitive" as const } },
-            { sku: { contains: trimmedQuery, mode: "insensitive" as const } },
-          ],
-        }
-      : {}),
-  };
+  const skip = (effectivePage - 1) * PRODUCTS_PAGE_SIZE;
 
   const [products, activeCategory, activeBrand, categories, brands] = await Promise.all([
     priceMode === "wholesale"
       ? prisma.product.findMany({
           where,
           select: MERCHANT_PRODUCT_CARD_SELECT,
-          orderBy: getOrderBy(sort, "wholesalePriceCents"),
+          orderBy: buildProductOrderBy(params.sort, "wholesalePriceCents"),
+          skip,
+          take: PRODUCTS_PAGE_SIZE,
         })
       : prisma.product.findMany({
           where,
           select: PUBLIC_PRODUCT_CARD_SELECT,
-          orderBy: getOrderBy(sort, "retailPriceCents"),
+          orderBy: buildProductOrderBy(params.sort, "retailPriceCents"),
+          skip,
+          take: PRODUCTS_PAGE_SIZE,
         }),
-    categorySlug ? prisma.category.findUnique({ where: { slug: categorySlug } }) : null,
-    brandSlug ? prisma.brand.findUnique({ where: { slug: brandSlug } }) : null,
+    params.category ? prisma.category.findUnique({ where: { slug: params.category } }) : null,
+    params.brand ? prisma.brand.findUnique({ where: { slug: params.brand } }) : null,
     getActiveCategories(),
     getActiveBrands(),
   ]);
 
-  const hasActiveFilters = Boolean(trimmedQuery || categorySlug || brandSlug);
+  const hasRestrictiveFilters = Boolean(params.q || params.category || params.brand || params.inStock || params.isNew);
+  const activeFilterCount = [params.q, params.category, params.brand, params.inStock, params.isNew, params.sort !== PRODUCT_SORT_OPTIONS.LATEST].filter(Boolean).length;
+  const firstResult = totalCount === 0 ? 0 : skip + 1;
+  const lastResult = Math.min(skip + products.length, totalCount);
+  const filterProps = {
+    categories,
+    brands,
+    query: params.q,
+    activeCategory: params.category,
+    activeBrand: params.brand,
+    sort: params.sort,
+    inStock: params.inStock,
+    isNew: params.isNew,
+  };
+  const urlFilters = {
+    q: params.q,
+    category: params.category,
+    brand: params.brand,
+    sort: params.sort,
+    inStock: params.inStock,
+    isNew: params.isNew,
+  };
 
   return (
     <div className="flex min-h-screen flex-col">
       <Header />
-
       <main className="flex-1">
         <section className="mx-auto max-w-6xl px-4 py-10">
           <PageHeader
             as="h1"
-            title={activeCategory ? activeCategory.nameAr ?? activeCategory.name : "المنتجات"}
-            subtitle={
-              trimmedQuery
-                ? `${products.length} ${products.length === 1 ? "نتيجة" : "نتائج"} لبحثك عن "${trimmedQuery}"`
-                : `${products.length} ${products.length === 1 ? "منتج" : "منتجات"} متاحة`
-            }
+            title={activeCategory ? activeCategory.nameAr ?? activeCategory.name : activeBrand ? activeBrand.name : "المنتجات"}
+            subtitle={totalCount > 0 ? `عرض ${firstResult}–${lastResult} من أصل ${totalCount} منتجًا · الصفحة ${effectivePage} من ${totalPages}` : hasRestrictiveFilters ? "لا توجد نتائج مطابقة للفلاتر الحالية" : "لا توجد منتجات متاحة حاليًا"}
           />
 
           <div className="mt-6">
-            <ProductSearchBar query={trimmedQuery} category={categorySlug} brand={brandSlug} sort={sort} />
+            <ProductSearchBar query={params.q} category={params.category} brand={params.brand} sort={params.sort} inStock={params.inStock} isNew={params.isNew} />
           </div>
 
-          <div className="mt-6 flex flex-col gap-6 rounded-card border border-navy-soft bg-navy-surface p-5">
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-              <ProductFilters
-                categories={categories}
-                brands={brands}
-                query={trimmedQuery}
-                activeCategory={categorySlug}
-                activeBrand={brandSlug}
-                sort={sort}
-              />
-              <div className="sm:w-64 sm:shrink-0">
-                <ProductSortSelect sort={sort} query={trimmedQuery} category={categorySlug} brand={brandSlug} />
+          <div className="mt-6 flex flex-col gap-5 rounded-card border border-navy-soft bg-navy-surface p-4 sm:p-5">
+            <div className="flex items-end justify-between gap-3">
+              <MobileFilterDrawer activeFilterCount={activeFilterCount}>
+                <ProductFilters {...filterProps} />
+              </MobileFilterDrawer>
+              <div className="w-full sm:w-64 sm:shrink-0 lg:ms-auto">
+                <ProductSortSelect sort={params.sort} query={params.q} category={params.category} brand={params.brand} inStock={params.inStock} isNew={params.isNew} />
               </div>
             </div>
-
+            <div className="hidden lg:block">
+              <ProductFilters {...filterProps} />
+            </div>
             <ActiveFilterChips
-              query={trimmedQuery}
-              category={activeCategory ? { slug: activeCategory.slug, label: activeCategory.nameAr ?? activeCategory.name } : undefined}
-              brand={activeBrand ? { slug: activeBrand.slug, label: activeBrand.name } : undefined}
-              sort={sort}
+              query={params.q}
+              category={params.category ? { slug: params.category, label: activeCategory ? activeCategory.nameAr ?? activeCategory.name : params.category } : undefined}
+              brand={params.brand ? { slug: params.brand, label: activeBrand?.name ?? params.brand } : undefined}
+              sort={params.sort}
+              inStock={params.inStock}
+              isNew={params.isNew}
             />
           </div>
 
           {products.length === 0 ? (
             <div className="mt-8">
               <EmptyState
-                title="لا توجد منتجات مطابقة"
-                message={
-                  hasActiveFilters
-                    ? "لم نجد منتجات تطابق معايير البحث الحالية. جرّب تعديل الفلاتر."
-                    : "لا توجد منتجات متاحة حالياً."
-                }
-                action={
-                  hasActiveFilters && (
-                    <Link href="/products">
-                      <Button variant="outline">مسح الفلاتر</Button>
-                    </Link>
-                  )
-                }
+                title={hasRestrictiveFilters ? "لا توجد منتجات مطابقة" : "لا توجد منتجات متاحة حاليًا"}
+                message={hasRestrictiveFilters ? "لم نجد منتجات تطابق البحث أو الفلاتر الحالية. جرّب تعديلها أو مسحها." : "سيتم عرض المنتجات هنا عند توفرها."}
+                action={hasRestrictiveFilters && <Link href="/products"><Button variant="outline">مسح الفلاتر</Button></Link>}
               />
             </div>
           ) : (
-            <div className="mt-8 grid animate-fade-in grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {products.map((product) => (
-                <ProductCard key={product.id} product={product} cartEligibility={cartEligibility} />
-              ))}
-            </div>
+            <>
+              <div className="mt-8 grid animate-fade-in grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                {products.map((product) => <ProductCard key={product.id} product={product} cartEligibility={cartEligibility} />)}
+              </div>
+              <Pagination currentPage={effectivePage} totalPages={totalPages} filters={urlFilters} />
+            </>
           )}
         </section>
       </main>
-
       <Footer />
     </div>
   );

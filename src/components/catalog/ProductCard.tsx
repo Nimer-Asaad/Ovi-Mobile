@@ -6,7 +6,7 @@ import { ProductThumbnail } from "@/components/catalog/ProductThumbnail";
 import { AddToCartButton } from "@/components/cart/AddToCartButton";
 import { formatCurrencyFromCents } from "@/lib/utils";
 import { isWholesalePriced, readCatalogPriceCents } from "@/lib/catalog-queries";
-import { LOW_STOCK_THRESHOLD } from "@/lib/constants";
+import { LOW_STOCK_THRESHOLD, NEW_PRODUCT_DAYS } from "@/lib/constants";
 import type { PublicProductCard, MerchantProductCard } from "@/lib/catalog-queries";
 import type { CartEligibility } from "@/lib/cart";
 
@@ -22,7 +22,6 @@ interface ProductStatusBadge {
   className: string;
 }
 
-export const NEW_PRODUCT_DAYS = 14;
 const NEW_PRODUCT_WINDOW_MS = NEW_PRODUCT_DAYS * 24 * 60 * 60 * 1000;
 
 /** One premium storefront card shared by homepage, catalog, and related products.
