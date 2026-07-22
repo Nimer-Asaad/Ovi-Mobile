@@ -12,6 +12,8 @@ export interface ProductFiltersProps {
   sort: ProductSort;
   inStock: boolean;
   isNew: boolean;
+  minPrice?: string;
+  maxPrice?: string;
 }
 
 function FilterPill({ href, active, children }: { href: string; active: boolean; children: React.ReactNode }) {
@@ -22,8 +24,8 @@ function FilterPill({ href, active, children }: { href: string; active: boolean;
   );
 }
 
-export function ProductFilters({ categories, brands, query, activeCategory, activeBrand, sort, inStock, isNew }: ProductFiltersProps) {
-  const shared = { q: query, category: activeCategory, brand: activeBrand, sort, inStock, isNew };
+export function ProductFilters({ categories, brands, query, activeCategory, activeBrand, sort, inStock, isNew, minPrice, maxPrice }: ProductFiltersProps) {
+  const shared = { q: query, category: activeCategory, brand: activeBrand, sort, inStock, isNew, minPrice, maxPrice };
 
   return (
     <div className="flex flex-col gap-5">

@@ -154,6 +154,9 @@ export const LOW_STOCK_THRESHOLD = 5;
 /** Products created within this window may truthfully be labeled as new. */
 export const NEW_PRODUCT_DAYS = 14;
 
+/** Neutral upper bound accepted by public catalog price filters (5,000,000 ILS). */
+export const MAX_CATALOG_PRICE_CENTS = 500_000_000;
+
 /** Admin dashboard sidebar navigation (skeleton — links are placeholders). */
 export const ADMIN_NAV_ITEMS = [
   { label: "Overview", labelAr: "نظرة عامة", href: "/admin" },

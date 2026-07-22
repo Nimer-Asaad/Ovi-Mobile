@@ -32,6 +32,8 @@ export interface ProductFilterParams {
   page?: number;
   inStock?: boolean;
   isNew?: boolean;
+  minPrice?: string;
+  maxPrice?: string;
 }
 
 function clean(value: string | undefined): string | undefined {
@@ -46,11 +48,15 @@ export function buildProductsUrl(params: ProductFilterParams): string {
   const query = clean(params.q);
   const category = clean(params.category);
   const brand = clean(params.brand);
+  const minPrice = clean(params.minPrice);
+  const maxPrice = clean(params.maxPrice);
   const sort = normalizeProductSort(clean(params.sort));
 
   if (query) searchParams.set("q", query);
   if (category) searchParams.set("category", category);
   if (brand) searchParams.set("brand", brand);
+  if (minPrice) searchParams.set("minPrice", minPrice);
+  if (maxPrice) searchParams.set("maxPrice", maxPrice);
   if (sort !== PRODUCT_SORT_OPTIONS.LATEST) searchParams.set("sort", sort);
   if (params.page && Number.isInteger(params.page) && params.page > 1) searchParams.set("page", String(params.page));
   if (params.inStock) searchParams.set("inStock", "1");

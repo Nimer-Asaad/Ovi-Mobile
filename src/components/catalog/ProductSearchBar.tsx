@@ -7,10 +7,12 @@ export interface ProductSearchBarProps {
   sort: ProductSort;
   inStock: boolean;
   isNew: boolean;
+  minPrice?: string;
+  maxPrice?: string;
 }
 
 /** GET search preserves intentional filters and omits page, resetting it to one. */
-export function ProductSearchBar({ query, category, brand, sort, inStock, isNew }: ProductSearchBarProps) {
+export function ProductSearchBar({ query, category, brand, sort, inStock, isNew, minPrice, maxPrice }: ProductSearchBarProps) {
   return (
     <form method="GET" action="/products" role="search" className="flex w-full items-stretch gap-2">
       {category && <input type="hidden" name="category" value={category} />}
@@ -18,6 +20,8 @@ export function ProductSearchBar({ query, category, brand, sort, inStock, isNew 
       {sort !== PRODUCT_SORT_OPTIONS.LATEST && <input type="hidden" name="sort" value={sort} />}
       {inStock && <input type="hidden" name="inStock" value="1" />}
       {isNew && <input type="hidden" name="isNew" value="1" />}
+      {minPrice && <input type="hidden" name="minPrice" value={minPrice} />}
+      {maxPrice && <input type="hidden" name="maxPrice" value={maxPrice} />}
 
       <div className="relative flex-1">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-bg/40">
