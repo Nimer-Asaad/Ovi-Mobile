@@ -10,6 +10,7 @@ import { AdminStatusBadge } from "@/components/admin/AdminStatusBadge";
 import { formatCurrencyFromCents } from "@/lib/utils";
 import { getMerchantStatusLabel, getMerchantStatusBadgeVariant } from "@/lib/merchant-labels";
 import { getOrderStatusLabel, getOrderStatusBadgeVariant, getPaymentStatusLabel, getPaymentStatusBadgeVariant } from "@/lib/order-labels";
+import { getAccountBalanceCents } from "@/lib/accounts";
 import { MerchantStatusActions } from "../MerchantStatusActions";
 
 interface AdminMerchantDetailPageProps {
@@ -39,6 +40,13 @@ export default async function AdminMerchantDetailPage({ params }: AdminMerchantD
           createdAt: true,
         },
       },
+      account: {
+        select: {
+          id: true,
+          orders: { select: { status: true, totalCents: true } },
+          payments: { select: { amountCents: true } },
+        },
+      },
     },
   });
 
@@ -49,6 +57,7 @@ export default async function AdminMerchantDetailPage({ params }: AdminMerchantD
   const totalOrders = merchant.orders.length;
   const totalValueCents = merchant.orders.reduce((sum, order) => sum + order.totalCents, 0);
   const lastOrderDate = merchant.orders[0]?.createdAt ?? null;
+  const balanceCents = merchant.account ? getAccountBalanceCents(merchant.account) : null;
 
   return (
     <div className="flex flex-col gap-6">
@@ -118,11 +127,31 @@ export default async function AdminMerchantDetailPage({ params }: AdminMerchantD
         </Card>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard label="إجمالي الطلبات" value={String(totalOrders)} />
         <StatCard label="إجمالي قيمة الطلبات" value={formatCurrencyFromCents(totalValueCents)} />
         <StatCard label="آخر طلب" value={lastOrderDate ? new Date(lastOrderDate).toLocaleDateString("ar") : "لا يوجد"} />
+        <StatCard
+          label="الرصيد المستحق"
+          value={balanceCents !== null ? formatCurrencyFromCents(Math.max(balanceCents, 0)) : "لا يوجد حساب دين"}
+          badge={
+            balanceCents !== null
+              ? balanceCents > 0
+                ? { text: "دين قائم", variant: "danger" }
+                : { text: "لا يوجد دين", variant: "success" }
+              : undefined
+          }
+        />
       </div>
+
+      {merchant.account && (
+        <Link
+          href={`/admin/accounts/${merchant.account.id}`}
+          className="self-start text-sm text-gold-champagne hover:underline"
+        >
+          عرض كشف حساب التاجر بالكامل (الطلبات والدفعات)
+        </Link>
+      )}
 
       <Card>
         <CardHeader>

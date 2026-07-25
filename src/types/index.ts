@@ -1,4 +1,5 @@
 import type {
+  ACCOUNT_PAYMENT_METHODS,
   ADMIN_AUDIT_ACTIONS,
   ADMIN_NAV_ITEMS,
   MERCHANT_STATUSES,
@@ -28,6 +29,7 @@ export type StockRequestStatus = (typeof STOCK_REQUEST_STATUSES)[keyof typeof ST
 export type StockReturnStatus = (typeof STOCK_RETURN_STATUSES)[keyof typeof STOCK_RETURN_STATUSES];
 export type PaymentMethod = (typeof PAYMENT_METHODS)[keyof typeof PAYMENT_METHODS];
 export type PaymentStatus = (typeof PAYMENT_STATUSES)[keyof typeof PAYMENT_STATUSES];
+export type AccountPaymentMethod = (typeof ACCOUNT_PAYMENT_METHODS)[keyof typeof ACCOUNT_PAYMENT_METHODS];
 export type UserActivityEventType = (typeof USER_ACTIVITY_EVENT_TYPES)[keyof typeof USER_ACTIVITY_EVENT_TYPES];
 export type AdminAuditAction = (typeof ADMIN_AUDIT_ACTIONS)[keyof typeof ADMIN_AUDIT_ACTIONS];
 export type RegistrationMethod = (typeof REGISTRATION_METHODS)[keyof typeof REGISTRATION_METHODS];

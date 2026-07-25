@@ -6,6 +6,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth/guards";
 import { getMainWarehouse } from "@/lib/inventory";
+import { getOrCreateMerchantAccount, getOrCreateCustomerAccount, recordInitialAccountPayment } from "@/lib/accounts";
 import {
   ROLES,
   MERCHANT_STATUSES,
@@ -83,6 +84,7 @@ export async function createManualOrder(
 
   const { customerMode, contactName, contactPhone, city, address, notes, discountCents, paidAmountCents } =
     parsed.data;
+  const trackAsAccountDebt = parsed.data.trackAsAccountDebt;
 
   // ---------------------------------------------------------------------
   // Resolve customer/merchant identity server-side — the client only
@@ -118,6 +120,27 @@ export async function createManualOrder(
     resolvedCustomerId = merchant.userId;
   }
   // WALK_IN: both stay null — matches the existing rep-sale pattern.
+
+  // ---------------------------------------------------------------------
+  // Resolve which debt ledger (if any) this order should count against.
+  // EXISTING_MERCHANT always tracks; EXISTING_CUSTOMER/WALK_IN only when the
+  // admin explicitly opted in via trackAsAccountDebt.
+  // ---------------------------------------------------------------------
+  let resolvedWalkInAccountId: string | null = null;
+  if (
+    customerMode === MANUAL_ORDER_CUSTOMER_MODES.WALK_IN &&
+    trackAsAccountDebt &&
+    parsed.data.walkInAccountId
+  ) {
+    const walkInAccount = await prisma.customerAccount.findUnique({
+      where: { id: parsed.data.walkInAccountId },
+      select: { id: true, merchantId: true, customerId: true, isActive: true },
+    });
+    if (!walkInAccount || walkInAccount.merchantId || walkInAccount.customerId || !walkInAccount.isActive) {
+      return { error: "حساب العميل المحدد غير صالح" };
+    }
+    resolvedWalkInAccountId = walkInAccount.id;
+  }
 
   // ---------------------------------------------------------------------
   // Resolve + validate every product line against the DB, not the client.
@@ -191,6 +214,29 @@ export async function createManualOrder(
     orderNumber = generateOrderNumber();
     try {
       await prisma.$transaction(async (tx) => {
+        let accountId: string | undefined;
+        if (customerMode === MANUAL_ORDER_CUSTOMER_MODES.EXISTING_MERCHANT && resolvedMerchantId) {
+          accountId = await getOrCreateMerchantAccount(tx, resolvedMerchantId);
+        } else if (
+          customerMode === MANUAL_ORDER_CUSTOMER_MODES.EXISTING_CUSTOMER &&
+          trackAsAccountDebt &&
+          resolvedCustomerId
+        ) {
+          accountId = await getOrCreateCustomerAccount(tx, resolvedCustomerId);
+        } else if (customerMode === MANUAL_ORDER_CUSTOMER_MODES.WALK_IN && trackAsAccountDebt) {
+          if (resolvedWalkInAccountId) {
+            accountId = resolvedWalkInAccountId;
+          } else {
+            // No existing match picked — open a brand-new walk-in account
+            // right here using the contact details already entered above.
+            const createdAccount = await tx.customerAccount.create({
+              data: { displayName: contactName, phone: contactPhone },
+              select: { id: true },
+            });
+            accountId = createdAccount.id;
+          }
+        }
+
         await tx.order.create({
           data: {
             orderNumber,
@@ -199,6 +245,7 @@ export async function createManualOrder(
             stockLocationId: warehouse.id,
             customerId: resolvedCustomerId,
             merchantId: resolvedMerchantId,
+            accountId,
             subtotalCents,
             discountCents,
             totalCents,
@@ -213,6 +260,10 @@ export async function createManualOrder(
             items: { create: orderItemsData },
           },
         });
+
+        if (accountId && paidAmountCents > 0) {
+          await recordInitialAccountPayment(tx, accountId, paidAmountCents, admin.id);
+        }
 
         // Atomic conditional decrement per line — never writes an absolute
         // quantity computed from a stale pre-transaction read. `count !==

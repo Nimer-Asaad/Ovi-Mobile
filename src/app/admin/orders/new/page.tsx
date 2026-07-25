@@ -9,7 +9,7 @@ import { ROLES, MERCHANT_STATUSES } from "@/lib/constants";
  * (demo/small-business scale) that a full preload + local filter is
  * simpler and safer than building a new search API route for this phase. */
 export default async function NewManualOrderPage() {
-  const [customers, merchants, products] = await Promise.all([
+  const [customers, merchants, products, walkInAccounts] = await Promise.all([
     prisma.user.findMany({
       where: { role: ROLES.RETAIL_CUSTOMER, isActive: true },
       select: { id: true, name: true, email: true, phone: true },
@@ -39,6 +39,14 @@ export default async function NewManualOrderPage() {
       },
       orderBy: { name: "asc" },
     }),
+    // Pure walk-in debt accounts only (no merchant/customer already covers
+    // those two identities) — offered as "use an existing account" when the
+    // admin tracks a WALK_IN sale as debt.
+    prisma.customerAccount.findMany({
+      where: { merchantId: null, customerId: null, isActive: true },
+      select: { id: true, displayName: true, phone: true },
+      orderBy: { displayName: "asc" },
+    }),
   ]);
 
   const productOptions = products.map((product) => ({
@@ -56,7 +64,12 @@ export default async function NewManualOrderPage() {
   return (
     <div className="flex flex-col gap-6">
       <PageHeader title="طلب يدوي جديد" subtitle="إنشاء طلب من داخل لوحة التحكم لعميل أو تاجر جملة أو عميل مباشر" />
-      <ManualOrderForm customers={customers} merchants={merchants} products={productOptions} />
+      <ManualOrderForm
+        customers={customers}
+        merchants={merchants}
+        products={productOptions}
+        walkInAccounts={walkInAccounts}
+      />
     </div>
   );
 }

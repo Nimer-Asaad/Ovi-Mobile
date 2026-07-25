@@ -7,6 +7,7 @@ import { requireCartEligibleUser } from "@/lib/auth/guards";
 import { getCurrentUserCart, getAvailableStock } from "@/lib/cart";
 import { getPriceModeForUser, readCatalogPriceCents } from "@/lib/catalog-queries";
 import { getMainWarehouse } from "@/lib/inventory";
+import { getOrCreateMerchantAccount } from "@/lib/accounts";
 import { checkoutSchema } from "@/lib/validation/checkout";
 import { ORDER_SOURCES, ORDER_STATUSES, PAYMENT_METHODS, PAYMENT_STATUSES, STOCK_MOVEMENT_TYPES } from "@/lib/constants";
 import type { z } from "zod";
@@ -126,7 +127,10 @@ export async function placeOrder(_prevState: CheckoutState, formData: FormData):
     orderNumber = generateOrderNumber();
     try {
       const order = await prisma.$transaction(async (tx) => {
-        const created = await tx.order.create({ data: { ...orderData, orderNumber } });
+        // Wholesale orders always roll up into the merchant's debt ledger
+        // account (lazily created on first need) — see src/lib/accounts.ts.
+        const accountId = merchantId ? await getOrCreateMerchantAccount(tx, merchantId) : undefined;
+        const created = await tx.order.create({ data: { ...orderData, accountId, orderNumber } });
 
         // Decrement Main Warehouse stock atomically, one line at a time —
         // `quantity: { gte: item.quantity }` in the `where` makes this a

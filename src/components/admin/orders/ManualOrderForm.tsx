@@ -26,6 +26,12 @@ export interface ManualOrderMerchantOption {
   user: ManualOrderCustomerOption;
 }
 
+export interface ManualOrderWalkInAccountOption {
+  id: string;
+  displayName: string;
+  phone: string | null;
+}
+
 export interface ManualOrderProductOption {
   id: string;
   sku: string;
@@ -51,6 +57,7 @@ export interface ManualOrderFormProps {
   customers: ManualOrderCustomerOption[];
   merchants: ManualOrderMerchantOption[];
   products: ManualOrderProductOption[];
+  walkInAccounts: ManualOrderWalkInAccountOption[];
 }
 
 const MODE_TABS = [
@@ -61,7 +68,7 @@ const MODE_TABS = [
 
 const initialState: ManualOrderState = {};
 
-export function ManualOrderForm({ customers, merchants, products }: ManualOrderFormProps) {
+export function ManualOrderForm({ customers, merchants, products, walkInAccounts }: ManualOrderFormProps) {
   const [state, formAction, isPending] = useActionState(createManualOrder, initialState);
 
   const [customerMode, setCustomerMode] = useState<string>(MANUAL_ORDER_CUSTOMER_MODES.WALK_IN);
@@ -75,8 +82,13 @@ export function ManualOrderForm({ customers, merchants, products }: ManualOrderF
   const [lines, setLines] = useState<ManualOrderLine[]>([]);
   const [discountInput, setDiscountInput] = useState("0");
   const [paidInput, setPaidInput] = useState("0");
+  const [trackAsAccountDebt, setTrackAsAccountDebt] = useState(false);
+  const [walkInAccountId, setWalkInAccountId] = useState("");
 
   const priceMode = customerMode === MANUAL_ORDER_CUSTOMER_MODES.EXISTING_MERCHANT ? "wholesale" : "retail";
+  const isMerchantMode = customerMode === MANUAL_ORDER_CUSTOMER_MODES.EXISTING_MERCHANT;
+  const isWalkInMode = customerMode === MANUAL_ORDER_CUSTOMER_MODES.WALK_IN;
+  const debtTrackingActive = isMerchantMode || trackAsAccountDebt;
 
   function handleModeChange(mode: string) {
     setCustomerMode(mode);
@@ -84,6 +96,8 @@ export function ManualOrderForm({ customers, merchants, products }: ManualOrderF
     setSelectedMerchantId("");
     setContactName("");
     setContactPhone("");
+    setTrackAsAccountDebt(false);
+    setWalkInAccountId("");
   }
 
   function handleSelectCustomer(id: string) {
@@ -154,6 +168,8 @@ export function ManualOrderForm({ customers, merchants, products }: ManualOrderF
     <form action={formAction} className="grid grid-cols-1 gap-6 lg:grid-cols-3">
       <input type="hidden" name="customerMode" value={customerMode} />
       <input type="hidden" name="items" value={itemsJson} />
+      <input type="hidden" name="trackAsAccountDebt" value={debtTrackingActive ? "on" : ""} />
+      <input type="hidden" name="walkInAccountId" value={walkInAccountId} />
 
       <div className="flex flex-col gap-6 lg:col-span-2">
         <Card>
@@ -234,6 +250,44 @@ export function ManualOrderForm({ customers, merchants, products }: ManualOrderF
                 onChange={(event) => setAddress(event.target.value)}
               />
             </div>
+
+            {isMerchantMode && (
+              <p className="text-xs text-neutral-bg/60">
+                يُسجَّل هذا الطلب تلقائياً على حساب التاجر — كل تجار الجملة متابَعون بالدين والدفعات.
+              </p>
+            )}
+
+            {(isWalkInMode || customerMode === MANUAL_ORDER_CUSTOMER_MODES.EXISTING_CUSTOMER) && (
+              <div className="flex flex-col gap-3 rounded-card border border-navy-soft p-3">
+                <label className="flex items-center gap-2 text-sm text-neutral-bg">
+                  <input
+                    type="checkbox"
+                    checked={trackAsAccountDebt}
+                    onChange={(event) => {
+                      setTrackAsAccountDebt(event.target.checked);
+                      if (!event.target.checked) setWalkInAccountId("");
+                    }}
+                  />
+                  تسجيل هذا الطلب كدين على حساب العميل
+                </label>
+
+                {isWalkInMode && trackAsAccountDebt && (
+                  <Select
+                    name="_walkInAccountSelect"
+                    label="حساب موجود (اختياري — اتركه فارغاً لإنشاء حساب جديد بهذا الاسم والهاتف)"
+                    value={walkInAccountId}
+                    onChange={(event) => setWalkInAccountId(event.target.value)}
+                  >
+                    <option value="">— إنشاء حساب جديد —</option>
+                    {walkInAccounts.map((account) => (
+                      <option key={account.id} value={account.id}>
+                        {account.displayName} {account.phone ? `— ${account.phone}` : ""}
+                      </option>
+                    ))}
+                  </Select>
+                )}
+              </div>
+            )}
           </CardContent>
         </Card>
 

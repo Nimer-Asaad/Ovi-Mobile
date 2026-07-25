@@ -31,6 +31,16 @@ export const manualOrderSchema = z.object({
   ),
   customerId: z.string().optional(),
   merchantId: z.string().optional(),
+  /** Only meaningful for EXISTING_CUSTOMER/WALK_IN — EXISTING_MERCHANT
+   * always tracks regardless of this flag (see actions.ts). Sent as a
+   * literal "on"/"" checkbox value, coerced to boolean. */
+  trackAsAccountDebt: z
+    .string()
+    .optional()
+    .transform((v) => v === "on" || v === "true"),
+  /** Set when the admin picked an existing walk-in CustomerAccount from the
+   * phone-search match list instead of creating a brand-new one. */
+  walkInAccountId: z.string().optional(),
   contactName: z.string().min(2, "اسم العميل مطلوب"),
   contactPhone: z.string().min(7, "رقم الهاتف مطلوب"),
   city: z.string().optional(),

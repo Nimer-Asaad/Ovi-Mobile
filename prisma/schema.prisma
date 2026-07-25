@@ -58,16 +58,18 @@ model User {
   merchantProfile            Merchant?
   salesRepresentativeProfile SalesRepresentative?
 
-  ordersPlaced       Order[]                      @relation("OrderCustomer")
-  stockMovements     StockMovement[]              @relation("StockMovementCreatedBy")
-  sessions           Session[]
-  cart               Cart?
-  wishlistItems      WishlistItem[]
-  orderStatusChanges OrderStatusHistory[]         @relation("OrderStatusChangedBy")
-  orderCompensations OrderInventoryCompensation[] @relation("OrderCompensationCreatedBy")
-  activityEvents     UserActivityEvent[]
-  auditLogsAsAdmin   AdminAuditLog[]              @relation("AuditLogAdmin")
-  auditLogsAsTarget  AdminAuditLog[]              @relation("AuditLogTarget")
+  ordersPlaced            Order[]                      @relation("OrderCustomer")
+  stockMovements          StockMovement[]              @relation("StockMovementCreatedBy")
+  sessions                Session[]
+  cart                    Cart?
+  wishlistItems           WishlistItem[]
+  orderStatusChanges      OrderStatusHistory[]         @relation("OrderStatusChangedBy")
+  orderCompensations      OrderInventoryCompensation[] @relation("OrderCompensationCreatedBy")
+  activityEvents          UserActivityEvent[]
+  auditLogsAsAdmin        AdminAuditLog[]              @relation("AuditLogAdmin")
+  auditLogsAsTarget       AdminAuditLog[]              @relation("AuditLogTarget")
+  accountAsCustomer       CustomerAccount?             @relation("AccountCustomer")
+  accountPaymentsRecorded AccountPayment[]             @relation("AccountPaymentCreatedBy")
 
   @@map("users")
 }
@@ -87,7 +89,8 @@ model Merchant {
   createdAt     DateTime             @default(now())
   updatedAt     DateTime             @updatedAt
 
-  orders Order[] @relation("OrderMerchant")
+  orders  Order[]          @relation("OrderMerchant")
+  account CustomerAccount?
 
   @@map("merchants")
 }
@@ -443,6 +446,13 @@ model Order {
   stockLocation       StockLocation? @relation(fields: [stockLocationId], references: [id])
   inventoryRestoredAt DateTime?
 
+  /// Set when this order should count against a merchant/customer/walk-in
+  /// debt ledger (src/lib/accounts.ts). Null means an ordinary sale that
+  /// isn't tracked — the default for most orders, unchanged from before this
+  /// field existed.
+  accountId String?
+  account   CustomerAccount? @relation(fields: [accountId], references: [id])
+
   currency      String @default("ILS")
   subtotalCents Int
   discountCents Int    @default(0)
@@ -520,6 +530,65 @@ model OrderInventoryCompensation {
   @@index([stockLocationId])
   @@index([createdById])
   @@map("order_inventory_compensations")
+}
+
+// ---------------------------------------------------------------------------
+// Accounts (merchant / walk-in debt ledger)
+// ---------------------------------------------------------------------------
+
+/// A ledger party for tracking running debt: exactly one of merchantId/
+/// customerId is set, or neither (a pure walk-in office customer with no app
+/// login) — this invariant is enforced only in application code
+/// (getOrCreate* helpers in src/lib/accounts.ts), never constructed
+/// elsewhere, the same convention already used for OrderSource/OrderStatus
+/// enforcement in src/lib/order-lifecycle.ts. Merchant/customer accounts are
+/// created lazily on first need; walk-in accounts are created explicitly by
+/// an admin (searchable by phone first, to avoid duplicates).
+///
+/// Balance due is always computed live — sum of linked non-cancelled/
+/// non-returned orders' totalCents minus sum of payments.amountCents — never
+/// stored, matching the existing Order.paidAmountCents "never stored"
+/// convention.
+model CustomerAccount {
+  id          String    @id @default(cuid())
+  displayName String
+  phone       String?
+  merchantId  String?   @unique
+  merchant    Merchant? @relation(fields: [merchantId], references: [id])
+  customerId  String?   @unique
+  customer    User?     @relation("AccountCustomer", fields: [customerId], references: [id])
+  notes       String?
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  orders   Order[]
+  payments AccountPayment[]
+
+  @@index([phone])
+  @@map("customer_accounts")
+}
+
+/// AccountPaymentMethod values: "CASH" | "BANK_TRANSFER" | "CHEQUE" | "OTHER"
+/// See src/lib/constants.ts -> ACCOUNT_PAYMENT_METHODS
+///
+/// Append-only ledger entry — never edited or deleted, only inserted. Records
+/// money received against an account's overall balance (not necessarily tied
+/// to one specific order, since a merchant's payment often settles a running
+/// balance rather than one exact invoice).
+model AccountPayment {
+  id          String          @id @default(cuid())
+  accountId   String
+  account     CustomerAccount @relation(fields: [accountId], references: [id])
+  amountCents Int
+  method      String
+  note        String?
+  createdById String
+  createdBy   User            @relation("AccountPaymentCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime        @default(now())
+
+  @@index([accountId, createdAt])
+  @@map("account_payments")
 }
 
 // ---------------------------------------------------------------------------

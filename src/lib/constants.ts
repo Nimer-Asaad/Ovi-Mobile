@@ -147,6 +147,16 @@ export const PAYMENT_STATUSES = {
   REFUNDED: "REFUNDED",
 } as const;
 
+/** How a debt installment against a CustomerAccount was settled — a
+ * separate concern from PAYMENT_METHODS above, which describes how a *sale*
+ * was paid at order time, not how a running balance was later paid down. */
+export const ACCOUNT_PAYMENT_METHODS = {
+  CASH: "CASH",
+  BANK_TRANSFER: "BANK_TRANSFER",
+  CHEQUE: "CHEQUE",
+  OTHER: "OTHER",
+} as const;
+
 /** Active products with total on-hand quantity below this are "low stock"
  * on the admin dashboard. */
 export const LOW_STOCK_THRESHOLD = 5;
@@ -170,4 +180,5 @@ export const ADMIN_NAV_ITEMS = [
   { label: "Merchants", labelAr: "التجار", href: "/admin/merchants" },
   { label: "Sales Reps", labelAr: "المندوبون", href: "/admin/reps" },
   { label: "Car Stock Requests", labelAr: "طلبات السيارة", href: "/admin/rep-requests" },
+  { label: "Accounts", labelAr: "الحسابات", href: "/admin/accounts" },
 ] as const;
