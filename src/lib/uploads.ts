@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import { mkdir, writeFile } from "fs/promises";
+import { mkdir, unlink, writeFile } from "fs/promises";
 import path from "path";
 import sharp from "sharp";
 import convertHeic from "heic-convert";
@@ -116,4 +116,39 @@ export async function saveUploadedProductFile(
     });
     return { ok: false, error: GENERIC_IMAGE_FAILURE_MESSAGE };
   }
+}
+
+/**
+ * Removes only server-generated files inside public/uploads/products.
+ * External URLs and any path that does not resolve to one direct child of
+ * UPLOAD_DIR are ignored. Callers must first prove the URL is not referenced
+ * by another ProductImage row.
+ */
+export async function deleteUnreferencedUploadedProductFiles(urls: string[]): Promise<number> {
+  let failures = 0;
+
+  for (const url of urls) {
+    if (!url.startsWith(`${PUBLIC_PATH_PREFIX}/`)) continue;
+
+    const filename = url.slice(PUBLIC_PATH_PREFIX.length + 1);
+    if (!filename || filename !== path.basename(filename)) continue;
+
+    const target = path.resolve(UPLOAD_DIR, filename);
+    if (path.dirname(target) !== path.resolve(UPLOAD_DIR)) continue;
+
+    try {
+      await unlink(target);
+    } catch (error) {
+      const code = error instanceof Error && "code" in error ? String(error.code) : "";
+      if (code !== "ENOENT") {
+        failures += 1;
+        console.error("[product-removal] uploaded media cleanup failed", {
+          operation: "unlink-product-media",
+          filename,
+        });
+      }
+    }
+  }
+
+  return failures;
 }

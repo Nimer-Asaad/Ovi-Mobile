@@ -10,7 +10,9 @@ import { ActiveToggleForm } from "@/components/admin/ActiveToggleForm";
 import { HighlightedText } from "@/components/admin/HighlightedText";
 import { ProductImagePlaceholder } from "@/components/catalog/ProductImagePlaceholder";
 import { ProductThumbnail } from "@/components/catalog/ProductThumbnail";
+import { ProductRemovalControl } from "@/components/admin/products/ProductRemovalControl";
 import { formatCurrencyFromCents } from "@/lib/utils";
+import type { ProductRemovalResult } from "@/app/admin/products/actions";
 
 export interface AdminProductRow {
   id: string;
@@ -27,6 +29,9 @@ export interface AdminProductRow {
   wholesalePriceCents: number;
   thumbnail: { url: string; altText: string | null } | null;
   toggleAction: () => Promise<void>;
+  removalMode: "archive" | "delete" | "blocked";
+  blockingInventoryQuantity: number;
+  removeAction: () => Promise<ProductRemovalResult>;
 }
 
 interface AdminProductsSearchProps {
@@ -131,6 +136,12 @@ export function AdminProductsSearch({ products }: AdminProductsSearchProps) {
                     تعديل
                   </Link>
                   <ActiveToggleForm isActive={product.isActive} action={product.toggleAction} />
+                  <ProductRemovalControl
+                    productName={product.nameAr ?? product.name}
+                    mode={product.removalMode}
+                    blockingInventoryQuantity={product.blockingInventoryQuantity}
+                    action={product.removeAction}
+                  />
                 </div>
               </td>
             </tr>

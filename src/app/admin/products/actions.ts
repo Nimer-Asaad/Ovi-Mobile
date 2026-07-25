@@ -8,13 +8,18 @@ import { requireRole } from "@/lib/auth/guards";
 import { ROLES } from "@/lib/constants";
 import { productSchema } from "@/lib/validation/catalog";
 import { validateMediaBuffer, inferMediaTypeFromUrl, type MediaType } from "@/lib/validation/productMedia";
-import { saveUploadedProductFile } from "@/lib/uploads";
+import { deleteUnreferencedUploadedProductFiles, saveUploadedProductFile } from "@/lib/uploads";
+import { productRemovalSchema } from "@/lib/validation/productRemoval";
 import type { z } from "zod";
 
 export interface ProductFormState {
   error?: string;
   fieldErrors?: Record<string, string>;
 }
+
+export type ProductRemovalResult =
+  | { ok: true; mode: "archived" | "deleted"; message: string }
+  | { ok: false; message: string };
 
 const DUPLICATE_SKU_MESSAGE = "رمز المنتج (SKU) مستخدم بالفعل";
 const DUPLICATE_MEDIA_MESSAGE = "لا يمكن استخدام نفس رابط الوسائط أكثر من مرة";
@@ -278,4 +283,152 @@ export async function toggleProductActive(id: string): Promise<void> {
   revalidatePath("/admin/products");
   revalidatePath("/admin");
   revalidatePath("/products");
+}
+
+function revalidateProductRemovalPaths(): void {
+  revalidatePath("/admin/products");
+  revalidatePath("/admin");
+  revalidatePath("/products");
+  revalidatePath("/");
+}
+
+export async function removeProduct(productId: string): Promise<ProductRemovalResult> {
+  await requireRole([ROLES.ADMIN]);
+
+  const parsed = productRemovalSchema.safeParse({ productId });
+  if (!parsed.success) {
+    return { ok: false, message: "معرّف المنتج غير صالح" };
+  }
+
+  try {
+    const result = await prisma.$transaction(
+      async (tx) => {
+        const product = await tx.product.findUnique({
+          where: { id: parsed.data.productId },
+          select: {
+            id: true,
+            isActive: true,
+            images: { select: { url: true } },
+            inventoryItems: { select: { quantity: true } },
+            _count: {
+              select: {
+                orderItems: true,
+                stockMovements: true,
+                stockRequestItems: true,
+                stockReturnItems: true,
+              },
+            },
+          },
+        });
+
+        if (!product) {
+          return { kind: "error" as const, message: "المنتج غير موجود أو تم حذفه مسبقًا" };
+        }
+
+        const hasHistoricalRecords =
+          product._count.orderItems > 0 ||
+          product._count.stockMovements > 0 ||
+          product._count.stockRequestItems > 0 ||
+          product._count.stockReturnItems > 0;
+
+        if (hasHistoricalRecords) {
+          if (product.isActive) {
+            await tx.product.update({
+              where: { id: product.id },
+              data: { isActive: false, isFeatured: false },
+            });
+          }
+          return { kind: "archived" as const };
+        }
+
+        const positiveStock = product.inventoryItems.reduce(
+          (sum, item) => sum + Math.max(0, item.quantity),
+          0,
+        );
+        if (positiveStock > 0) {
+          return {
+            kind: "error" as const,
+            message: `لا يمكن حذف المنتج لأن لديه مخزونًا أكبر من صفر (${positiveStock}) في أحد مواقع المخزون`,
+          };
+        }
+
+        const hasNegativeStock = product.inventoryItems.some((item) => item.quantity < 0);
+        if (hasNegativeStock) {
+          return {
+            kind: "error" as const,
+            message: "لا يمكن حذف المنتج قبل معالجة كميات المخزون السالبة",
+          };
+        }
+
+        const candidateUrls = product.images
+          .map((image) => image.url)
+          .filter((url) => url.startsWith("/uploads/products/"));
+        const sharedUrls =
+          candidateUrls.length > 0
+            ? await tx.productImage.findMany({
+                where: { productId: { not: product.id }, url: { in: candidateUrls } },
+                select: { url: true },
+              })
+            : [];
+        const sharedUrlSet = new Set(sharedUrls.map((image) => image.url));
+        const removableUrls = candidateUrls.filter((url) => !sharedUrlSet.has(url));
+
+        await tx.cartItem.deleteMany({ where: { productId: product.id } });
+        await tx.wishlistItem.deleteMany({ where: { productId: product.id } });
+        await tx.inventoryItem.deleteMany({
+          where: { productId: product.id, quantity: 0 },
+        });
+        await tx.product.delete({ where: { id: product.id } });
+
+        return { kind: "deleted" as const, removableUrls };
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
+
+    if (result.kind === "error") return { ok: false, message: result.message };
+
+    revalidateProductRemovalPaths();
+
+    if (result.kind === "archived") {
+      return {
+        ok: true,
+        mode: "archived",
+        message: "تم إخفاء المنتج وأرشفته مع الحفاظ على سجلاته السابقة",
+      };
+    }
+
+    const newlySharedUrls =
+      result.removableUrls.length > 0
+        ? await prisma.productImage.findMany({
+            where: { url: { in: result.removableUrls } },
+            select: { url: true },
+          })
+        : [];
+    const newlySharedUrlSet = new Set(newlySharedUrls.map((image) => image.url));
+    const stillUnreferencedUrls = result.removableUrls.filter(
+      (url) => !newlySharedUrlSet.has(url),
+    );
+    const cleanupFailures =
+      await deleteUnreferencedUploadedProductFiles(stillUnreferencedUrls);
+    return {
+      ok: true,
+      mode: "deleted",
+      message:
+        cleanupFailures === 0
+          ? "تم حذف المنتج نهائيًا بنجاح"
+          : "تم حذف المنتج، لكن تعذر تنظيف بعض ملفات الوسائط من الخادم",
+    };
+  } catch (error) {
+    console.error("[admin/products] safe removal failed", {
+      route: "/admin/products",
+      operation: "remove-product",
+      error:
+        error instanceof Prisma.PrismaClientKnownRequestError
+          ? { name: error.name, code: error.code }
+          : error instanceof Error
+            ? { name: error.name }
+            : { name: "UnknownError" },
+    });
+    return { ok: false, message: "تعذر حذف أو أرشفة المنتج، حاول مرة أخرى" };
+  }
 }
