@@ -85,6 +85,7 @@ async function resolveConcurrentCompensation(
 export async function transitionOrderStatus(
   input: TransitionOrderStatusInput,
 ): Promise<OrderLifecycleResult> {
+  let initialStatus: string | null = null;
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
       return await prisma.$transaction(
@@ -99,6 +100,15 @@ export async function transitionOrderStatus(
 
           if (order.status === input.requestedStatus) {
             return { ok: true, noOp: true, orderNumber: order.orderNumber } as const;
+          }
+
+          if (initialStatus === null) {
+            initialStatus = order.status;
+          } else if (order.status !== initialStatus) {
+            throw new LifecycleDomainError(
+              "CONCURRENT_UPDATE",
+              "تغيرت حالة الطلب بالتزامن، حدّث الصفحة وحاول مجددًا",
+            );
           }
 
           const validNextStatuses = getValidNextOrderStatuses(order.status, order.source);

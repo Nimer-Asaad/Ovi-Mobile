@@ -1,5 +1,35 @@
 # Deployment Guide
 
+> Current production note: Ovi Mobile is live on a VPS behind Nginx + PM2.
+> Vercel sections below are retained as historical context and are not the
+> active production deployment procedure.
+
+## Phase 19A pre-deploy verification
+
+Before applying the order-lifecycle schema to production, run its destructive
+verification harness only against a disposable localhost PostgreSQL database:
+
+```powershell
+$env:DATABASE_URL='postgresql://<local-user>:<local-password>@127.0.0.1:<port>/ovi_verify?schema=public'
+$env:DIRECT_URL=$env:DATABASE_URL
+npx prisma db push
+$env:ORDER_LIFECYCLE_VERIFY_DATABASE_URL=$env:DATABASE_URL
+npm run verify:order-lifecycle
+```
+
+The hostname must be localhost and the database name must contain `verify`;
+the script refuses any other target. Success prints PASS for cancellation
+idempotency, simultaneous cancellation, conflicting transitions,
+representative-car restoration, multi-item rollback, legacy handling, and
+ledger reconciliation, followed by:
+
+```
+All order lifecycle verification checks passed
+```
+
+The harness creates uniquely prefixed fixtures and removes them before exit.
+Never point it at production or a shared development database.
+
 This document is a checklist for the future, real deployment of Ovi Mobile.
 **The app has not been deployed to Vercel yet.** As of Phase 29, the
 database has moved from local SQLite to online PostgreSQL (Supabase
@@ -283,21 +313,24 @@ no session-signing secret to configure — sessions are DB-backed opaque rows,
 not JWTs. Do not add speculative variables ahead of an actual feature that
 needs them.
 
-## Migration history checklist (for the future production hardening)
+## Migration history checklist and one-time production baseline
 
-This is intentionally not being done now — listed here so it isn't
-forgotten or done carelessly later. The database itself is already
-PostgreSQL (Phase 29); what's still missing is a real migration history in
-place of `db push`.
-
-- [ ] In a dedicated reviewed change, run
-      `npx prisma migrate dev --name init` locally against the PostgreSQL
-      database to generate and apply the first migration
-- [ ] Commit the generated `prisma/migrations/` directory
-- [ ] Verify the app still runs correctly locally against PostgreSQL before
-      deploying
-- [ ] In production, apply migrations with `npx prisma migrate deploy` —
-      never `db push` against a production database
+- [x] Generate `20260725081512_init` on a disposable empty PostgreSQL
+      database with `npx prisma migrate dev --name init`.
+- [x] Verify the generated migration applies cleanly to empty PostgreSQL.
+- [x] Add `prisma/migrations/` to version control.
+- [ ] Take and verify a production database backup immediately before the
+      Phase 19A schema change.
+- [ ] Inspect the production schema read-only and confirm it matches the
+      pre-Phase-19A application schema.
+- [ ] Apply the reviewed additive Phase 19A schema once with
+      `npx prisma db push`. This is the final production `db push`; it must
+      be manual and must not run in the build or PM2 restart.
+- [ ] After the schema matches the committed baseline, mark the migration
+      as already applied without executing its CREATE statements:
+      `npx prisma migrate resolve --applied 20260725081512_init`.
+- [ ] Confirm `npx prisma migrate status` reports the database up to date.
+- [ ] Use only `npx prisma migrate deploy` for later committed migrations.
 - [ ] Decide separately whether to promote string-based statuses to native
       Postgres `enum` columns — optional, not required for correctness
 

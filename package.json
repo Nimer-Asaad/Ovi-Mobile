@@ -11,6 +11,7 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
+    "verify:order-lifecycle": "node --conditions=react-server --import tsx prisma/verify-order-lifecycle.ts",
     "postinstall": "prisma generate",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
@@ -29,6 +30,7 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "recharts": "^3.9.2",
+    "server-only": "^0.0.1",
     "sharp": "^0.34.5",
     "tailwind-merge": "^2.6.0",
     "zod": "^4.4.3"

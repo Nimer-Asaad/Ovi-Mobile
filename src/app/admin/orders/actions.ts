@@ -44,10 +44,11 @@ export async function updateOrderStatus(
       actorUserId: admin.id,
     });
     if (!result.ok) return { error: result.message };
-  } catch {
+  } catch (error) {
     console.error("[admin/orders] lifecycle transition failed", {
       route: "/admin/orders/[orderNumber]",
       operation: "transition-status",
+      error,
     });
     return { error: "تعذر تحديث حالة الطلب، حاول مرة أخرى" };
   }
