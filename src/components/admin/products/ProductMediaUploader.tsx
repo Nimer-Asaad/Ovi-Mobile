@@ -9,6 +9,7 @@ export interface ExistingProductMedia {
   url: string;
   mediaType: string;
   altText: string | null;
+  cloudinaryPublicId: string | null;
 }
 
 interface MediaSlot {
@@ -16,6 +17,7 @@ interface MediaSlot {
   kind: "existing" | "new";
   existingUrl?: string;
   existingMediaType?: string;
+  existingCloudinaryPublicId?: string | null;
   file?: File;
   filePreviewUrl?: string;
   urlInput: string;
@@ -75,6 +77,7 @@ export function ProductMediaUploader({ existingMedia = [], error }: ProductMedia
         kind: "existing" as const,
         existingUrl: media.url,
         existingMediaType: media.mediaType,
+        existingCloudinaryPublicId: media.cloudinaryPublicId,
         urlInput: "",
       }));
     }
@@ -190,6 +193,11 @@ export function ProductMediaUploader({ existingMedia = [], error }: ProductMedia
                 <>
                   <input type="hidden" name={`media_${index}_url`} value={slot.existingUrl} />
                   <input type="hidden" name={`media_${index}_mediaType`} value={slot.existingMediaType} />
+                  <input
+                    type="hidden"
+                    name={`media_${index}_cloudinaryPublicId`}
+                    value={slot.existingCloudinaryPublicId ?? ""}
+                  />
                   <p className="truncate text-xs text-neutral-bg/50">{slot.existingUrl}</p>
                 </>
               )}

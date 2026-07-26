@@ -335,16 +335,21 @@ model WishlistItem {
 /// "IMAGE" (enforced server-side in admin/products/actions.ts) so every
 /// call site that reads images[0].url as a static image stays safe.
 model ProductImage {
-  id        String   @id @default(cuid())
-  productId String
-  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
-  url       String
-  mediaType String   @default("IMAGE")
-  altText   String?
-  isMain    Boolean  @default(false)
-  sortOrder Int      @default(0)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id                 String   @id @default(cuid())
+  productId          String
+  product            Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  url                String
+  mediaType          String   @default("IMAGE")
+  altText            String?
+  isMain             Boolean  @default(false)
+  sortOrder          Int      @default(0)
+  /// Cloudinary's public_id for media uploaded through the admin panel
+  /// (src/lib/uploads.ts) — needed to delete the asset later. Null for
+  /// admin-pasted external URLs (never uploaded anywhere by us) and for
+  /// legacy rows saved before this app used Cloudinary.
+  cloudinaryPublicId String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 
   @@index([productId])
   @@map("product_images")

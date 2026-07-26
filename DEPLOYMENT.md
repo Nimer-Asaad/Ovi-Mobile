@@ -245,42 +245,36 @@ runtime connection strings don't have to be the same value, only
       unset, "تسجيل الدخول بواسطة Google" safely no-ops (existing fallback
       behavior, unchanged) instead of erroring.
 
-### E) Known limitation: product media uploads
+### E) Product media uploads — now on Cloudinary
 
-Product image/video uploads (Phase 28) are saved via `fs.writeFile` to
-`public/uploads/products/` on the local filesystem
-(`src/lib/uploads.ts`). **Vercel's serverless functions run on a read-only
-filesystem outside of `/tmp`** — attempting a product media upload on a
-deployed Vercel instance will very likely fail outright (not just "not
-durable," an actual runtime error), not silently degrade.
+**Resolved.** Product image/video uploads were originally saved via
+`fs.writeFile` to `public/uploads/products/` on the local filesystem — this
+had exactly the problems flagged below (Vercel's read-only filesystem,
+`next start` not discovering files written after boot) and, worse, an
+accidental `git clean -fdx` run in production during an incident wiped
+every file in that directory permanently (it was gitignored/untracked, no
+backup existed). `src/lib/uploads.ts` now uploads to **Cloudinary**
+(`src/lib/cloudinary.ts`) instead of writing to disk — the validation/HEIC
+decode/resize/WebP pipeline is unchanged, only the storage destination is.
+`ProductImage.cloudinaryPublicId` stores Cloudinary's asset ID so removal
+can clean it up later; rows saved before this migration (or referencing an
+admin-pasted external URL) have `cloudinaryPublicId = null` and are simply
+skipped by cleanup, not touched.
 
-This is a known, accepted limitation of this phase, not something Phase 30
-fixes. A future phase (Phase 31) should move product media uploads to
-object storage — Supabase Storage, Vercel Blob, S3, or Cloudinary are all
-viable — before uploads are relied on in a deployed environment. Until
-then: uploads keep working locally in dev exactly as before; just don't
-expect them to work once this app is actually deployed to Vercel.
+**Required environment variables** (see the table below): `CLOUDINARY_CLOUD_NAME`,
+`CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET` — from the Cloudinary
+dashboard (Settings → API Keys). Without them, any product media upload
+will fail with a clean error; nothing else in the app depends on Cloudinary.
 
-**Update — actual production deployment is a VPS, not Vercel.** The app is
-live behind Nginx + PM2 on a VPS, so the read-only-filesystem limitation
-above does not apply there. However, Next.js's `next start` only discovers
-files present in `public/` at process boot, so a file written to
-`public/uploads/` while the server is already running previously 404'd
-until the next PM2 restart. This is now fixed at the Nginx layer: `/uploads/`
-is served directly via an `alias` location block in
-`/etc/nginx/sites-available/ovimobile.net` (added outside this repo, on the
-server), bypassing Next.js entirely for that path — uploads are available
-immediately, no PM2 restart required.
-
-Production notes:
-- Uploads live at `/var/www/ovi-mobile/public/uploads/` on the VPS —
-  Nginx serves them directly from the public `/uploads/` URL prefix.
-- **Never run `git clean -fdx` in production** — `public/uploads/` is
-  gitignored and untracked, so a clean wipes every uploaded file with no
-  git history to recover from.
-- Back up this directory separately from the database (see the backup
-  recommendation the object-storage migration above should eventually
-  replace).
+**Historical note, kept for context:** any `ProductImage` row still
+pointing at a `/uploads/products/...` URL predates this migration and its
+underlying file no longer exists on the VPS (permanently lost in the
+incident above) — it will keep 404ing until an admin re-uploads a fresh
+photo for that product through `/admin/products`, at which point it lands
+on Cloudinary like everything else going forward. `git clean -fdx` should
+still never be run in production regardless — it remains a generally
+destructive command — but it can no longer take product images down with
+it.
 
 ### F) First deployment checks (once actually deployed — not done yet)
 
@@ -305,10 +299,14 @@ Production notes:
 | `GOOGLE_CLIENT_ID` | No — optional | Enables the "تسجيل الدخول بواسطة Google" button on `/login`. If unset, that flow safely redirects to a login error instead of working — the rest of the app is unaffected. |
 | `GOOGLE_CLIENT_SECRET` | No — optional | Paired with `GOOGLE_CLIENT_ID`. Never expose client-side. |
 | `GOOGLE_REDIRECT_URI` | No — optional | Must exactly match an "Authorized redirect URI" configured on the Google Cloud Console OAuth client. Set to `https://<your-vercel-domain>/auth/google/callback` in Vercel's production environment — not `localhost`. See "Vercel deployment checklist" → D above. |
+| `CLOUDINARY_CLOUD_NAME` | Yes (for product media uploads) | From the Cloudinary dashboard's account settings. See "E) Product media uploads — now on Cloudinary" above. |
+| `CLOUDINARY_API_KEY` | Yes (for product media uploads) | Paired with `CLOUDINARY_CLOUD_NAME`/`CLOUDINARY_API_SECRET`, from Settings → API Keys. |
+| `CLOUDINARY_API_SECRET` | Yes (for product media uploads) | Never expose client-side — only read server-side in `src/lib/cloudinary.ts`. |
 
 No other environment variables are read anywhere in the codebase today
 (confirmed by inspection — only `DATABASE_URL`, `DIRECT_URL`, `NODE_ENV`,
-and the three optional `GOOGLE_*` variables above are referenced). There is
+the three optional `GOOGLE_*` variables, and the three `CLOUDINARY_*`
+variables above are referenced). There is
 no session-signing secret to configure — sessions are DB-backed opaque rows,
 not JWTs. Do not add speculative variables ahead of an actual feature that
 needs them.

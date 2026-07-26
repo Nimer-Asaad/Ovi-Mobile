@@ -52,9 +52,12 @@ function fieldErrorsFrom(error: z.ZodError) {
 interface MediaEntry {
   url: string;
   mediaType: MediaType;
+  cloudinaryPublicId: string | null;
 }
 
-type CollectMediaResult = { ok: true; entries: { url: string; mediaType: MediaType; isMain: boolean }[] } | { ok: false; error: string };
+type CollectMediaResult =
+  | { ok: true; entries: { url: string; mediaType: MediaType; cloudinaryPublicId: string | null; isMain: boolean }[] }
+  | { ok: false; error: string };
 
 /**
  * Reads the dynamic media_<i>_* fields written by ProductMediaUploader.
@@ -77,8 +80,9 @@ async function collectProductMedia(formData: FormData): Promise<CollectMediaResu
     if (kind === "existing") {
       const url = formData.get(`media_${i}_url`)?.toString();
       const mediaType = formData.get(`media_${i}_mediaType`)?.toString();
+      const cloudinaryPublicId = formData.get(`media_${i}_cloudinaryPublicId`)?.toString() || null;
       if (url && (mediaType === "IMAGE" || mediaType === "VIDEO")) {
-        slotEntries.push({ url, mediaType });
+        slotEntries.push({ url, mediaType, cloudinaryPublicId });
       } else {
         slotEntries.push(null);
       }
@@ -97,7 +101,7 @@ async function collectProductMedia(formData: FormData): Promise<CollectMediaResu
         if (!saved.ok) {
           return { ok: false, error: saved.error };
         }
-        slotEntries.push({ url: saved.url, mediaType: validation.mediaType });
+        slotEntries.push({ url: saved.url, mediaType: validation.mediaType, cloudinaryPublicId: saved.cloudinaryPublicId });
         continue;
       }
 
@@ -106,7 +110,7 @@ async function collectProductMedia(formData: FormData): Promise<CollectMediaResu
         if (!/^https?:\/\//.test(url)) {
           return { ok: false, error: INVALID_MEDIA_URL_MESSAGE };
         }
-        slotEntries.push({ url, mediaType: inferMediaTypeFromUrl(url) });
+        slotEntries.push({ url, mediaType: inferMediaTypeFromUrl(url), cloudinaryPublicId: null });
       } else {
         slotEntries.push(null);
       }
@@ -136,7 +140,7 @@ async function collectProductMedia(formData: FormData): Promise<CollectMediaResu
 
 async function replaceProductImages(
   productId: string,
-  entries: { url: string; mediaType: MediaType; isMain: boolean }[],
+  entries: { url: string; mediaType: MediaType; cloudinaryPublicId: string | null; isMain: boolean }[],
   productName: string,
 ): Promise<void> {
   await prisma.$transaction([
@@ -148,6 +152,7 @@ async function replaceProductImages(
               productId,
               url: entry.url,
               mediaType: entry.mediaType,
+              cloudinaryPublicId: entry.cloudinaryPublicId,
               altText: productName,
               isMain: entry.isMain,
               sortOrder: index,
@@ -308,7 +313,7 @@ export async function removeProduct(productId: string): Promise<ProductRemovalRe
           select: {
             id: true,
             isActive: true,
-            images: { select: { url: true } },
+            images: { select: { cloudinaryPublicId: true, mediaType: true } },
             inventoryItems: { select: { quantity: true } },
             _count: {
               select: {
@@ -360,18 +365,19 @@ export async function removeProduct(productId: string): Promise<ProductRemovalRe
           };
         }
 
-        const candidateUrls = product.images
-          .map((image) => image.url)
-          .filter((url) => url.startsWith("/uploads/products/"));
-        const sharedUrls =
-          candidateUrls.length > 0
+        const candidateMedia = product.images.filter(
+          (image): image is { cloudinaryPublicId: string; mediaType: string } => image.cloudinaryPublicId !== null,
+        );
+        const candidateIds = candidateMedia.map((image) => image.cloudinaryPublicId);
+        const sharedMedia =
+          candidateIds.length > 0
             ? await tx.productImage.findMany({
-                where: { productId: { not: product.id }, url: { in: candidateUrls } },
-                select: { url: true },
+                where: { productId: { not: product.id }, cloudinaryPublicId: { in: candidateIds } },
+                select: { cloudinaryPublicId: true },
               })
             : [];
-        const sharedUrlSet = new Set(sharedUrls.map((image) => image.url));
-        const removableUrls = candidateUrls.filter((url) => !sharedUrlSet.has(url));
+        const sharedIdSet = new Set(sharedMedia.map((image) => image.cloudinaryPublicId));
+        const removableMedia = candidateMedia.filter((image) => !sharedIdSet.has(image.cloudinaryPublicId));
 
         await tx.cartItem.deleteMany({ where: { productId: product.id } });
         await tx.wishlistItem.deleteMany({ where: { productId: product.id } });
@@ -380,7 +386,7 @@ export async function removeProduct(productId: string): Promise<ProductRemovalRe
         });
         await tx.product.delete({ where: { id: product.id } });
 
-        return { kind: "deleted" as const, removableUrls };
+        return { kind: "deleted" as const, removableMedia };
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
@@ -397,19 +403,23 @@ export async function removeProduct(productId: string): Promise<ProductRemovalRe
       };
     }
 
-    const newlySharedUrls =
-      result.removableUrls.length > 0
+    const newlySharedMedia =
+      result.removableMedia.length > 0
         ? await prisma.productImage.findMany({
-            where: { url: { in: result.removableUrls } },
-            select: { url: true },
+            where: { cloudinaryPublicId: { in: result.removableMedia.map((media) => media.cloudinaryPublicId) } },
+            select: { cloudinaryPublicId: true },
           })
         : [];
-    const newlySharedUrlSet = new Set(newlySharedUrls.map((image) => image.url));
-    const stillUnreferencedUrls = result.removableUrls.filter(
-      (url) => !newlySharedUrlSet.has(url),
+    const newlySharedIdSet = new Set(newlySharedMedia.map((image) => image.cloudinaryPublicId));
+    const stillUnreferencedMedia = result.removableMedia.filter(
+      (media) => !newlySharedIdSet.has(media.cloudinaryPublicId),
     );
-    const cleanupFailures =
-      await deleteUnreferencedUploadedProductFiles(stillUnreferencedUrls);
+    const cleanupFailures = await deleteUnreferencedUploadedProductFiles(
+      stillUnreferencedMedia.map((media) => ({
+        cloudinaryPublicId: media.cloudinaryPublicId,
+        mediaType: media.mediaType as MediaType,
+      })),
+    );
     return {
       ok: true,
       mode: "deleted",

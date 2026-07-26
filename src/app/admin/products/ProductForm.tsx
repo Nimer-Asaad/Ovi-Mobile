@@ -148,6 +148,7 @@ export function ProductForm({
             url: image.url,
             mediaType: image.mediaType,
             altText: image.altText,
+            cloudinaryPublicId: image.cloudinaryPublicId,
           }))}
           error={state.fieldErrors?.media}
         />
