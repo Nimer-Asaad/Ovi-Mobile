@@ -31,7 +31,16 @@ export function uploadBufferToCloudinary(
       },
       (error: unknown, result?: UploadApiResponse) => {
         if (error || !result) {
-          reject(error instanceof Error ? error : new Error("Cloudinary upload failed"));
+          // Cloudinary's SDK rejects with a plain { message, name, http_code }
+          // object, not a real Error instance — extract .message explicitly
+          // instead of losing it behind a generic string.
+          const message =
+            error && typeof error === "object" && "message" in error
+              ? String((error as { message: unknown }).message)
+              : error
+                ? String(error)
+                : "Cloudinary upload returned no result";
+          reject(new Error(message));
           return;
         }
         resolve({ url: result.secure_url, publicId: result.public_id });
