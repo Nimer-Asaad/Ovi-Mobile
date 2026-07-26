@@ -74,6 +74,22 @@ export async function getOrCreateCustomerAccount(tx: Tx, customerId: string): Pr
   }
 }
 
+/** Read-only counterpart to getOrCreateCustomerAccount — attaches an order
+ * to a customer's account if one already exists, but never creates one.
+ * Used by checkout (src/app/checkout/actions.ts) for every authenticated
+ * order, not just wholesale: most ordinary retail customers have no
+ * account and should stay that way, but a customer the admin has
+ * explicitly set up with an account (e.g. via the walk-in "create a login
+ * too" flow) should have every purchase — app or office — roll into the
+ * same ledger, not just the ones placed manually by an admin. */
+export async function getExistingCustomerAccountId(tx: Tx, customerId: string): Promise<string | undefined> {
+  const existing = await tx.customerAccount.findUnique({
+    where: { customerId },
+    select: { id: true },
+  });
+  return existing?.id;
+}
+
 /** Mirrors an order's up-front paidAmountCents into the ledger as the
  * account's first payment entry — without this, a tracked order that was
  * partially or fully paid at creation time would overstate the account's

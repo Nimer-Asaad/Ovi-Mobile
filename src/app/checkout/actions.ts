@@ -7,7 +7,7 @@ import { requireCartEligibleUser } from "@/lib/auth/guards";
 import { getCurrentUserCart, getAvailableStock } from "@/lib/cart";
 import { getPriceModeForUser, readCatalogPriceCents } from "@/lib/catalog-queries";
 import { getMainWarehouse } from "@/lib/inventory";
-import { getOrCreateMerchantAccount } from "@/lib/accounts";
+import { getOrCreateMerchantAccount, getExistingCustomerAccountId } from "@/lib/accounts";
 import { checkoutSchema } from "@/lib/validation/checkout";
 import { ORDER_SOURCES, ORDER_STATUSES, PAYMENT_METHODS, PAYMENT_STATUSES, STOCK_MOVEMENT_TYPES } from "@/lib/constants";
 import type { z } from "zod";
@@ -128,8 +128,16 @@ export async function placeOrder(_prevState: CheckoutState, formData: FormData):
     try {
       const order = await prisma.$transaction(async (tx) => {
         // Wholesale orders always roll up into the merchant's debt ledger
-        // account (lazily created on first need) — see src/lib/accounts.ts.
-        const accountId = merchantId ? await getOrCreateMerchantAccount(tx, merchantId) : undefined;
+        // account (lazily created on first need). Ordinary retail orders
+        // only attach if this customer already has an account — most retail
+        // customers don't, and this must never create one on their behalf —
+        // but if the admin already set one up for them (e.g. the walk-in
+        // "create a login too" flow), every purchase they make themselves
+        // through the storefront should count against it too, not just the
+        // ones an admin enters manually. See src/lib/accounts.ts.
+        const accountId = merchantId
+          ? await getOrCreateMerchantAccount(tx, merchantId)
+          : await getExistingCustomerAccountId(tx, user.id);
         const created = await tx.order.create({ data: { ...orderData, accountId, orderNumber } });
 
         // Decrement Main Warehouse stock atomically, one line at a time —
