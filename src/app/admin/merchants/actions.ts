@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth/guards";
 import { ROLES, MERCHANT_STATUSES, ADMIN_AUDIT_ACTIONS } from "@/lib/constants";
 import { merchantStatusSchema } from "@/lib/validation/merchant";
+import { getOrCreateMerchantAccount } from "@/lib/accounts";
 
 const AUDIT_ACTION_BY_STATUS: Record<string, string> = {
   [MERCHANT_STATUSES.APPROVED]: ADMIN_AUDIT_ACTIONS.MERCHANT_APPROVED,
@@ -73,6 +74,14 @@ export async function updateMerchantStatus(
       },
     }),
   ]);
+
+  // Every approved merchant gets a debt-ledger account up front (not just
+  // lazily on their first order), so /admin/accounts always reflects the
+  // full merchant roster — getOrCreateMerchantAccount is a no-op if one
+  // already exists (e.g. re-approving after a suspension).
+  if (parsed.data === MERCHANT_STATUSES.APPROVED) {
+    await getOrCreateMerchantAccount(prisma, merchantId);
+  }
 
   revalidateMerchantPaths(merchantId);
 

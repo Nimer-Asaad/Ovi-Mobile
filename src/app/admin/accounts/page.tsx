@@ -100,8 +100,8 @@ export default async function AdminAccountsPage({ searchParams }: AdminAccountsP
               </td>
               <td className="px-4 py-3">
                 <div className="flex items-center gap-3">
-                  <Link href={account.newOrderHref} className="text-sm text-gold-champagne hover:underline">
-                    طلبية جديدة
+                  <Link href={account.newOrderHref}>
+                    <Button size="sm">طلبية جديدة</Button>
                   </Link>
                   <Link href={`/admin/accounts/${account.id}`} className="text-sm text-gold-champagne hover:underline">
                     التفاصيل

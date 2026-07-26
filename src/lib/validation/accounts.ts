@@ -17,8 +17,31 @@ export const createWalkInAccountSchema = z
     displayName: z.string().trim().min(2, "الاسم مطلوب").max(120),
     phone: z.string().trim().min(7, "رقم الهاتف مطلوب").max(30),
     notes: z.string().trim().max(500, "الملاحظات طويلة جداً").optional(),
+    /** Optional — creates a real User login (RETAIL_CUSTOMER) alongside the
+     * ledger account, with a system-generated password shown once to the
+     * admin (never emailed automatically). */
+    createLogin: z
+      .string()
+      .optional()
+      .transform((v) => v === "on" || v === "true"),
+    email: z
+      .string()
+      .trim()
+      .toLowerCase()
+      .optional()
+      .or(z.literal("")),
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => {
+    if (!value.createLogin) return;
+    if (!value.email) {
+      ctx.addIssue({ code: "custom", path: ["email"], message: "البريد الإلكتروني مطلوب لإنشاء حساب دخول" });
+      return;
+    }
+    if (!z.string().email().safeParse(value.email).success) {
+      ctx.addIssue({ code: "custom", path: ["email"], message: "صيغة البريد الإلكتروني غير صحيحة" });
+    }
+  });
 
 export const recordAccountPaymentSchema = z
   .object({
