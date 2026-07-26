@@ -8,7 +8,17 @@ import { ROLES, MERCHANT_STATUSES } from "@/lib/constants";
  * arrays passed into the Client Component. The dataset is small enough
  * (demo/small-business scale) that a full preload + local filter is
  * simpler and safer than building a new search API route for this phase. */
-export default async function NewManualOrderPage() {
+interface NewManualOrderPageProps {
+  searchParams: Promise<{
+    mode?: string;
+    merchantId?: string;
+    customerId?: string;
+    walkInAccountId?: string;
+  }>;
+}
+
+export default async function NewManualOrderPage({ searchParams }: NewManualOrderPageProps) {
+  const { mode, merchantId, customerId, walkInAccountId } = await searchParams;
   const [customers, merchants, products, walkInAccounts] = await Promise.all([
     prisma.user.findMany({
       where: { role: ROLES.RETAIL_CUSTOMER, isActive: true },
@@ -69,6 +79,10 @@ export default async function NewManualOrderPage() {
         merchants={merchants}
         products={productOptions}
         walkInAccounts={walkInAccounts}
+        initialMode={mode}
+        initialMerchantId={merchantId}
+        initialCustomerId={customerId}
+        initialWalkInAccountId={walkInAccountId}
       />
     </div>
   );

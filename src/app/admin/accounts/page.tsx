@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/Badge";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { AdminTable, AdminTableHead, AdminTableBody, AdminEmptyRow } from "@/components/admin/AdminTable";
 import { formatCurrencyFromCents } from "@/lib/utils";
-import { getAccountBalanceCents } from "@/lib/accounts";
+import { getAccountBalanceCents, getNewOrderHrefForAccount } from "@/lib/accounts";
 
 interface AdminAccountsPageProps {
   searchParams: Promise<{ q?: string }>;
@@ -36,8 +36,8 @@ export default async function AdminAccountsPage({ searchParams }: AdminAccountsP
       id: true,
       displayName: true,
       phone: true,
-      merchant: { select: { businessName: true } },
-      customer: { select: { name: true } },
+      merchant: { select: { id: true, businessName: true } },
+      customer: { select: { id: true, name: true } },
       orders: { select: { status: true, totalCents: true } },
       payments: { select: { amountCents: true } },
     },
@@ -49,6 +49,10 @@ export default async function AdminAccountsPage({ searchParams }: AdminAccountsP
     phone: account.phone,
     kindLabel: account.merchant ? "تاجر جملة" : account.customer ? "عميل مسجّل" : "عميل مباشر",
     balanceCents: getAccountBalanceCents(account),
+    newOrderHref: getNewOrderHrefForAccount(account.id, {
+      merchantId: account.merchant?.id ?? null,
+      customerId: account.customer?.id ?? null,
+    }),
   }));
 
   return (
@@ -95,9 +99,14 @@ export default async function AdminAccountsPage({ searchParams }: AdminAccountsP
                 </span>
               </td>
               <td className="px-4 py-3">
-                <Link href={`/admin/accounts/${account.id}`} className="text-sm text-gold-champagne hover:underline">
-                  التفاصيل
-                </Link>
+                <div className="flex items-center gap-3">
+                  <Link href={account.newOrderHref} className="text-sm text-gold-champagne hover:underline">
+                    طلبية جديدة
+                  </Link>
+                  <Link href={`/admin/accounts/${account.id}`} className="text-sm text-gold-champagne hover:underline">
+                    التفاصيل
+                  </Link>
+                </div>
               </td>
             </tr>
           ))}

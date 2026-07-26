@@ -58,6 +58,12 @@ export interface ManualOrderFormProps {
   merchants: ManualOrderMerchantOption[];
   products: ManualOrderProductOption[];
   walkInAccounts: ManualOrderWalkInAccountOption[];
+  /** Pre-selection from an /admin/accounts "طلبية جديدة" link — validated
+   * against the preloaded option lists below, never trusted as-is. */
+  initialMode?: string;
+  initialMerchantId?: string;
+  initialCustomerId?: string;
+  initialWalkInAccountId?: string;
 }
 
 const MODE_TABS = [
@@ -68,22 +74,57 @@ const MODE_TABS = [
 
 const initialState: ManualOrderState = {};
 
-export function ManualOrderForm({ customers, merchants, products, walkInAccounts }: ManualOrderFormProps) {
+export function ManualOrderForm({
+  customers,
+  merchants,
+  products,
+  walkInAccounts,
+  initialMode,
+  initialMerchantId,
+  initialCustomerId,
+  initialWalkInAccountId,
+}: ManualOrderFormProps) {
   const [state, formAction, isPending] = useActionState(createManualOrder, initialState);
 
-  const [customerMode, setCustomerMode] = useState<string>(MANUAL_ORDER_CUSTOMER_MODES.WALK_IN);
-  const [selectedCustomerId, setSelectedCustomerId] = useState("");
-  const [selectedMerchantId, setSelectedMerchantId] = useState("");
-  const [contactName, setContactName] = useState("");
-  const [contactPhone, setContactPhone] = useState("");
+  // Resolve a "طلبية جديدة" deep link against the preloaded option lists —
+  // an unknown/stale id (e.g. a merchant removed since the link was made)
+  // just falls back to an empty walk-in start, same as visiting this page
+  // directly.
+  const initialMerchant = initialMerchantId ? merchants.find((m) => m.id === initialMerchantId) : undefined;
+  const initialCustomer = initialCustomerId ? customers.find((c) => c.id === initialCustomerId) : undefined;
+  const initialWalkIn = initialWalkInAccountId
+    ? walkInAccounts.find((a) => a.id === initialWalkInAccountId)
+    : undefined;
+  const resolvedInitialMode =
+    initialMode && (Object.values(MANUAL_ORDER_CUSTOMER_MODES) as string[]).includes(initialMode)
+      ? initialMode
+      : initialMerchant
+        ? MANUAL_ORDER_CUSTOMER_MODES.EXISTING_MERCHANT
+        : initialCustomer
+          ? MANUAL_ORDER_CUSTOMER_MODES.EXISTING_CUSTOMER
+          : initialWalkIn
+            ? MANUAL_ORDER_CUSTOMER_MODES.WALK_IN
+            : MANUAL_ORDER_CUSTOMER_MODES.WALK_IN;
+
+  const [customerMode, setCustomerMode] = useState<string>(resolvedInitialMode);
+  const [selectedCustomerId, setSelectedCustomerId] = useState(initialCustomer?.id ?? "");
+  const [selectedMerchantId, setSelectedMerchantId] = useState(initialMerchant?.id ?? "");
+  const [contactName, setContactName] = useState(
+    initialMerchant?.user.name ?? initialCustomer?.name ?? initialWalkIn?.displayName ?? "",
+  );
+  const [contactPhone, setContactPhone] = useState(
+    initialMerchant?.user.phone ?? initialCustomer?.phone ?? initialWalkIn?.phone ?? "",
+  );
   const [city, setCity] = useState("");
   const [address, setAddress] = useState("");
   const [notes, setNotes] = useState("");
   const [lines, setLines] = useState<ManualOrderLine[]>([]);
   const [discountInput, setDiscountInput] = useState("0");
   const [paidInput, setPaidInput] = useState("0");
-  const [trackAsAccountDebt, setTrackAsAccountDebt] = useState(false);
-  const [walkInAccountId, setWalkInAccountId] = useState("");
+  const [trackAsAccountDebt, setTrackAsAccountDebt] = useState(
+    Boolean(initialWalkIn || initialCustomer),
+  );
+  const [walkInAccountId, setWalkInAccountId] = useState(initialWalkIn?.id ?? "");
 
   const priceMode = customerMode === MANUAL_ORDER_CUSTOMER_MODES.EXISTING_MERCHANT ? "wholesale" : "retail";
   const isMerchantMode = customerMode === MANUAL_ORDER_CUSTOMER_MODES.EXISTING_MERCHANT;

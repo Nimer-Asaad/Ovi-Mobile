@@ -96,6 +96,23 @@ export async function recordInitialAccountPayment(
   });
 }
 
+/** Builds the /admin/orders/new deep link that pre-selects this account's
+ * underlying identity (merchant / registered customer / walk-in), so
+ * starting a new sale for an account never requires re-picking it from
+ * scratch in the manual-order form. */
+export function getNewOrderHrefForAccount(
+  accountId: string,
+  identity: { merchantId: string | null; customerId: string | null },
+): string {
+  if (identity.merchantId) {
+    return `/admin/orders/new?mode=EXISTING_MERCHANT&merchantId=${identity.merchantId}`;
+  }
+  if (identity.customerId) {
+    return `/admin/orders/new?mode=EXISTING_CUSTOMER&customerId=${identity.customerId}`;
+  }
+  return `/admin/orders/new?mode=WALK_IN&walkInAccountId=${accountId}`;
+}
+
 export interface AccountBalanceInput {
   orders: { status: string; totalCents: number }[];
   payments: { amountCents: number }[];

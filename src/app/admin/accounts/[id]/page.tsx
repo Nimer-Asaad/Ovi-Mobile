@@ -10,7 +10,7 @@ import { AdminTable, AdminTableHead, AdminTableBody, AdminEmptyRow } from "@/com
 import { formatCurrencyFromCents } from "@/lib/utils";
 import { getOrderStatusLabel, getOrderStatusBadgeVariant, getOrderSourceLabel } from "@/lib/order-labels";
 import { getAccountPaymentMethodLabel } from "@/lib/account-labels";
-import { getAccountBalanceCents } from "@/lib/accounts";
+import { getAccountBalanceCents, getNewOrderHrefForAccount } from "@/lib/accounts";
 import { RecordAccountPaymentForm } from "@/components/admin/accounts/RecordAccountPaymentForm";
 
 interface AdminAccountDetailPageProps {
@@ -55,6 +55,10 @@ export default async function AdminAccountDetailPage({ params }: AdminAccountDet
   const balanceCents = getAccountBalanceCents(account);
   const totalPaidCents = account.payments.reduce((sum, payment) => sum + payment.amountCents, 0);
   const kindLabel = account.merchant ? "تاجر جملة" : account.customer ? "عميل مسجّل" : "عميل مباشر";
+  const newOrderHref = getNewOrderHrefForAccount(account.id, {
+    merchantId: account.merchant?.id ?? null,
+    customerId: account.customer?.id ?? null,
+  });
 
   return (
     <div className="flex flex-col gap-6">
@@ -64,6 +68,9 @@ export default async function AdminAccountDetailPage({ params }: AdminAccountDet
         actions={
           <div className="flex items-center gap-2">
             <Badge variant="neutral">{kindLabel}</Badge>
+            <Link href={newOrderHref}>
+              <Button size="sm">طلبية جديدة</Button>
+            </Link>
             <Link href={`/admin/accounts/${account.id}/statement`}>
               <Button variant="outline" size="sm">
                 طباعة كشف حساب
