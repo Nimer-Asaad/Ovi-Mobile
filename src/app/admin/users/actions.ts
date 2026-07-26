@@ -1,14 +1,25 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { randomBytes } from "crypto";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth/guards";
+import { hashPassword } from "@/lib/auth/password";
 import { ROLES, ADMIN_AUDIT_ACTIONS } from "@/lib/constants";
 import { changeableRoleSchema } from "@/lib/validation/user";
 
 export interface UserActionState {
   error?: string;
   success?: string;
+}
+
+export interface ResetPasswordState {
+  error?: string;
+  /** Present only on success — the admin must copy this now, it's never
+   * shown again and never emailed automatically (no email-sending
+   * infrastructure exists in this app; the admin relays it themselves,
+   * same convention as the walk-in account login-creation flow). */
+  generatedPassword?: string;
 }
 
 function revalidateUserPaths(userId: string): void {
@@ -139,4 +150,54 @@ export async function toggleUserActive(
   revalidateUserPaths(targetUserId);
 
   return { success: willDisable ? "تم إيقاف الحساب" : "تم تفعيل الحساب" };
+}
+
+/** Generates a new random password server-side, hashes it, and replaces
+ * the target user's passwordHash — the admin sees it exactly once in the
+ * response and relays it to the user themselves (e.g. by phone/WhatsApp).
+ * Works regardless of the user's current registration method: a
+ * Google-only account (no prior passwordHash) simply gains an email/
+ * password login alongside Google, it doesn't disable Google sign-in.
+ * Every existing session is killed immediately, same as account
+ * disable — an old session shouldn't outlive a password reset. */
+export async function resetUserPassword(
+  targetUserId: string,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- useActionState requires this signature
+  _prevState: ResetPasswordState,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- no form fields needed, target comes from the bound arg
+  _formData: FormData,
+): Promise<ResetPasswordState> {
+  const admin = await requireRole([ROLES.ADMIN]);
+
+  const target = await prisma.user.findUnique({
+    where: { id: targetUserId },
+    select: { id: true },
+  });
+  if (!target) {
+    return { error: "المستخدم غير موجود" };
+  }
+
+  const generatedPassword = randomBytes(9).toString("base64url");
+  const passwordHash = hashPassword(generatedPassword);
+
+  await prisma.$transaction([
+    prisma.user.update({ where: { id: targetUserId }, data: { passwordHash } }),
+    prisma.adminAuditLog.create({
+      data: {
+        adminUserId: admin.id,
+        targetUserId,
+        action: ADMIN_AUDIT_ACTIONS.PASSWORD_RESET,
+        // Never store the password itself in the audit log, only that a
+        // reset happened and by whom — matches the existing convention of
+        // this table (oldValue/newValue store state, never secrets).
+        oldValue: {},
+        newValue: {},
+      },
+    }),
+    prisma.session.deleteMany({ where: { userId: targetUserId } }),
+  ]);
+
+  revalidateUserPaths(targetUserId);
+
+  return { generatedPassword };
 }

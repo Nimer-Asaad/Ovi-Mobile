@@ -21,6 +21,7 @@ import { getMerchantStatusLabel, getMerchantStatusBadgeVariant } from "@/lib/mer
 import { getOrderStatusLabel, getOrderStatusBadgeVariant, getPaymentStatusLabel, getPaymentStatusBadgeVariant } from "@/lib/order-labels";
 import { RoleChangeForm } from "./RoleChangeForm";
 import { AccountStatusToggle } from "./AccountStatusToggle";
+import { ResetPasswordControl } from "./ResetPasswordControl";
 
 interface AdminUserDetailPageProps {
   params: Promise<{ id: string }>;
@@ -227,6 +228,10 @@ export default async function AdminUserDetailPage({ params }: AdminUserDetailPag
             <div>
               <p className="mb-2 text-xs font-medium uppercase tracking-wide text-neutral-bg/50">حالة الحساب</p>
               <AccountStatusToggle userId={user.id} isActive={user.isActive} />
+            </div>
+            <div>
+              <p className="mb-2 text-xs font-medium uppercase tracking-wide text-neutral-bg/50">كلمة المرور</p>
+              <ResetPasswordControl userId={user.id} userName={user.name} />
             </div>
             {user.merchantProfile && (
               <div>

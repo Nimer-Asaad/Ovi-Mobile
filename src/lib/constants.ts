@@ -118,6 +118,7 @@ export const ADMIN_AUDIT_ACTIONS = {
   MERCHANT_REJECTED: "MERCHANT_REJECTED",
   MERCHANT_SUSPENDED: "MERCHANT_SUSPENDED",
   MERCHANT_STATUS_RESET: "MERCHANT_STATUS_RESET",
+  PASSWORD_RESET: "PASSWORD_RESET",
 } as const;
 
 /** Derived from User.passwordHash: Google-authenticated accounts are always
