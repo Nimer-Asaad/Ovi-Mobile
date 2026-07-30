@@ -105,6 +105,8 @@ export function ProductQuickPicker<T extends PickableProduct>({
   const filteredProducts = useMemo(() => {
     const query = search.trim().toLowerCase();
     if (!query) return [];
+    // No cap — every match is shown (the results box scrolls), so a query
+    // like "كفر" surfaces all matching products, not just the first N.
     return products
       .filter((product) => !excludeIds.has(product.id))
       .filter(
@@ -112,8 +114,7 @@ export function ProductQuickPicker<T extends PickableProduct>({
           product.sku.toLowerCase().includes(query) ||
           product.name.toLowerCase().includes(query) ||
           (product.nameAr ?? "").toLowerCase().includes(query),
-      )
-      .slice(0, 20);
+      );
   }, [search, products, excludeIds]);
 
   function handlePick(product: T) {
