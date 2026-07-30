@@ -3,8 +3,8 @@ import { ROLES } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { AdminTable, AdminTableHead, AdminTableBody, AdminEmptyRow } from "@/components/admin/AdminTable";
-import { LogoutButton } from "@/components/auth/LogoutButton";
 import { getMovementTypeLabel, getMovementTypeBadgeVariant } from "@/lib/inventory-labels";
 
 export default async function RepMovementsPage() {
@@ -37,14 +37,8 @@ export default async function RepMovementsPage() {
     : [];
 
   return (
-    <div className="mx-auto flex max-w-5xl flex-col gap-6 px-4 py-10">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold text-neutral-bg">سجل حركات مخزوني</h1>
-          <p className="mt-1 text-sm text-neutral-bg/60">جميع الحركات المتعلقة بمخزونك — للقراءة فقط</p>
-        </div>
-        <LogoutButton />
-      </div>
+    <div className="mx-auto flex max-w-5xl flex-col gap-6">
+      <PageHeader title="سجل حركات مخزوني" subtitle="جميع الحركات المتعلقة بمخزونك — للقراءة فقط" />
 
       <Card>
         <CardHeader>

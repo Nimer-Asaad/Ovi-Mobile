@@ -183,3 +183,19 @@ export const ADMIN_NAV_ITEMS = [
   { label: "Car Stock Requests", labelAr: "طلبات السيارة", href: "/admin/rep-requests" },
   { label: "Accounts", labelAr: "الحسابات", href: "/admin/accounts" },
 ] as const;
+
+/** Rep dashboard sidebar/topbar navigation — same shape as ADMIN_NAV_ITEMS,
+ * consumed by RepSidebar/RepTopbar. "تصفح المنتجات" deliberately points at
+ * the public storefront catalog, not a /rep/** route — a rep browses
+ * products the same way a customer does. */
+export const REP_NAV_ITEMS = [
+  { label: "Overview", labelAr: "نظرة عامة", href: "/rep" },
+  { label: "New Sale", labelAr: "بيع جديد", href: "/rep/sales/new" },
+  { label: "My Sales", labelAr: "مبيعاتي", href: "/rep/sales" },
+  { label: "Merchants", labelAr: "التجار", href: "/rep/merchants" },
+  { label: "New Stock Request", labelAr: "طلب تزويد مخزون", href: "/rep/requests/new" },
+  { label: "My Requests", labelAr: "طلباتي", href: "/rep/requests" },
+  { label: "Car Stock", labelAr: "مخزون السيارة", href: "/rep/stock" },
+  { label: "Movement Log", labelAr: "سجل الحركات", href: "/rep/movements" },
+  { label: "Browse Products", labelAr: "تصفح المنتجات", href: "/products" },
+] as const;

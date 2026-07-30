@@ -4,6 +4,7 @@ import { ROLES } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { ProductImagePlaceholder } from "@/components/catalog/ProductImagePlaceholder";
 import { formatCurrencyFromCents } from "@/lib/utils";
 import {
@@ -77,16 +78,12 @@ export default async function RepSaleDetailPage({ params }: RepSaleDetailPagePro
   });
 
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-6 px-4 py-10">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold text-neutral-bg">طلب {order.orderNumber}</h1>
-          <p className="mt-1 text-sm text-neutral-bg/60">
-            أُنشئ في {new Date(order.createdAt).toLocaleDateString("ar")}
-          </p>
-        </div>
-        <Badge variant={getOrderStatusBadgeVariant(order.status)}>{getOrderStatusLabel(order.status)}</Badge>
-      </div>
+    <div className="mx-auto flex max-w-3xl flex-col gap-6">
+      <PageHeader
+        title={`طلب ${order.orderNumber}`}
+        subtitle={`أُنشئ في ${new Date(order.createdAt).toLocaleDateString("ar")}`}
+        actions={<Badge variant={getOrderStatusBadgeVariant(order.status)}>{getOrderStatusLabel(order.status)}</Badge>}
+      />
 
       <Card>
         <CardHeader>

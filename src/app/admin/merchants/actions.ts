@@ -87,3 +87,50 @@ export async function updateMerchantStatus(
 
   return { success: STATUS_SUCCESS_MESSAGES[parsed.data] };
 }
+
+export interface MerchantAssignmentState {
+  error?: string;
+  success?: string;
+}
+
+/** Sets which sales rep "owns" a merchant (Merchant.assignedRepId) and the
+ * merchant's free-form territory label (Merchant.region) — both fields were
+ * modeled in the schema from the start but had no UI writing them until the
+ * rep-facing /rep/merchants section needed a way to know which merchants
+ * belong to which rep. */
+export async function updateMerchantAssignment(
+  merchantId: string,
+  _prevState: MerchantAssignmentState,
+  formData: FormData,
+): Promise<MerchantAssignmentState> {
+  await requireRole([ROLES.ADMIN]);
+
+  const regionRaw = formData.get("region");
+  const region = typeof regionRaw === "string" && regionRaw.trim().length > 0 ? regionRaw.trim() : null;
+
+  const assignedRepIdRaw = formData.get("assignedRepId");
+  const assignedRepId =
+    typeof assignedRepIdRaw === "string" && assignedRepIdRaw.trim().length > 0 ? assignedRepIdRaw.trim() : null;
+
+  const merchant = await prisma.merchant.findUnique({ where: { id: merchantId }, select: { id: true } });
+  if (!merchant) {
+    return { error: "التاجر غير موجود" };
+  }
+
+  if (assignedRepId) {
+    const rep = await prisma.salesRepresentative.findUnique({ where: { id: assignedRepId }, select: { id: true } });
+    if (!rep) {
+      return { error: "المندوب المحدد غير موجود" };
+    }
+  }
+
+  await prisma.merchant.update({
+    where: { id: merchantId },
+    data: { region, assignedRepId },
+  });
+
+  revalidateMerchantPaths(merchantId);
+  revalidatePath("/rep/merchants");
+
+  return { success: "تم حفظ المنطقة والمندوب المسؤول" };
+}

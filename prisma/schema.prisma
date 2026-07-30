@@ -82,6 +82,10 @@ model Merchant {
   user          User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
   businessName  String
   taxId         String?
+  /// Free-form territory label (e.g. city/area name) used to filter which
+  /// merchants a sales rep sees under /rep/merchants — not a separate model
+  /// since no geography/hierarchy is needed, just a display + filter value.
+  region        String?
   status        String               @default("PENDING")
   approvedAt    DateTime?
   assignedRepId String?

@@ -12,6 +12,7 @@ import { getMerchantStatusLabel, getMerchantStatusBadgeVariant } from "@/lib/mer
 import { getOrderStatusLabel, getOrderStatusBadgeVariant, getPaymentStatusLabel, getPaymentStatusBadgeVariant } from "@/lib/order-labels";
 import { getAccountBalanceCents } from "@/lib/accounts";
 import { MerchantStatusActions } from "../MerchantStatusActions";
+import { MerchantAssignmentForm } from "../MerchantAssignmentForm";
 
 interface AdminMerchantDetailPageProps {
   params: Promise<{ id: string }>;
@@ -20,12 +21,15 @@ interface AdminMerchantDetailPageProps {
 export default async function AdminMerchantDetailPage({ params }: AdminMerchantDetailPageProps) {
   const { id } = await params;
 
-  const merchant = await prisma.merchant.findUnique({
+  const [merchant, reps] = await Promise.all([
+    prisma.merchant.findUnique({
     where: { id },
     select: {
       id: true,
       businessName: true,
       taxId: true,
+      region: true,
+      assignedRepId: true,
       status: true,
       approvedAt: true,
       createdAt: true,
@@ -48,11 +52,19 @@ export default async function AdminMerchantDetailPage({ params }: AdminMerchantD
         },
       },
     },
-  });
+    }),
+    prisma.salesRepresentative.findMany({
+      where: { isActive: true },
+      orderBy: { user: { name: "asc" } },
+      select: { id: true, employeeCode: true, user: { select: { name: true } } },
+    }),
+  ]);
 
   if (!merchant) {
     notFound();
   }
+
+  const repOptions = reps.map((rep) => ({ id: rep.id, label: `${rep.user.name} (${rep.employeeCode})` }));
 
   const totalOrders = merchant.orders.length;
   const totalValueCents = merchant.orders.reduce((sum, order) => sum + order.totalCents, 0);
@@ -88,6 +100,10 @@ export default async function AdminMerchantDetailPage({ params }: AdminMerchantD
                   <dd className="text-neutral-bg">{merchant.taxId}</dd>
                 </div>
               )}
+              <div>
+                <dt className="text-neutral-bg/50">المنطقة</dt>
+                <dd className="text-neutral-bg">{merchant.region ?? "—"}</dd>
+              </div>
               {merchant.approvedAt && (
                 <div>
                   <dt className="text-neutral-bg/50">تاريخ الاعتماد</dt>
@@ -152,6 +168,20 @@ export default async function AdminMerchantDetailPage({ params }: AdminMerchantD
           عرض كشف حساب التاجر بالكامل (الطلبات والدفعات)
         </Link>
       )}
+
+      <Card>
+        <CardHeader>
+          <CardTitle>المنطقة والمندوب المسؤول</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <MerchantAssignmentForm
+            merchantId={merchant.id}
+            currentRegion={merchant.region}
+            currentAssignedRepId={merchant.assignedRepId}
+            reps={repOptions}
+          />
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

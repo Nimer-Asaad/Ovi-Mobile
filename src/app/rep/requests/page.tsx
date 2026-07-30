@@ -4,7 +4,7 @@ import { ROLES } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
-import { LogoutButton } from "@/components/auth/LogoutButton";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { RepStockRequestStatusBadge } from "@/components/reps/RepStockRequestStatusBadge";
 
 export default async function RepStockRequestsPage() {
@@ -30,20 +30,16 @@ export default async function RepStockRequestsPage() {
     : [];
 
   return (
-    <div className="mx-auto flex max-w-4xl flex-col gap-6 px-4 py-10">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold text-neutral-bg">طلباتي</h1>
-          <p className="mt-1 text-sm text-neutral-bg/60">طلبات تزويد مخزون السيارة التي أرسلتها</p>
-        </div>
-        <LogoutButton />
-      </div>
-
-      <div>
-        <Link href="/rep/requests/new">
-          <Button>طلب تزويد جديد</Button>
-        </Link>
-      </div>
+    <div className="mx-auto flex max-w-4xl flex-col gap-6">
+      <PageHeader
+        title="طلباتي"
+        subtitle="طلبات تزويد مخزون السيارة التي أرسلتها"
+        actions={
+          <Link href="/rep/requests/new">
+            <Button>طلب تزويد جديد</Button>
+          </Link>
+        }
+      />
 
       <Card>
         <CardHeader>

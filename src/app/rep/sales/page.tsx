@@ -5,8 +5,8 @@ import { prisma } from "@/lib/prisma";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { AdminTable, AdminTableHead, AdminTableBody, AdminEmptyRow } from "@/components/admin/AdminTable";
-import { LogoutButton } from "@/components/auth/LogoutButton";
 import { formatCurrencyFromCents } from "@/lib/utils";
 import {
   getOrderStatusLabel,
@@ -40,19 +40,16 @@ export default async function RepSalesPage() {
     : [];
 
   return (
-    <div className="mx-auto flex max-w-5xl flex-col gap-6 px-4 py-10">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold text-neutral-bg">مبيعاتي المباشرة</h1>
-          <p className="mt-1 text-sm text-neutral-bg/60">سجل المبيعات التي قمت بها من مخزونك</p>
-        </div>
-        <div className="flex items-center gap-3">
+    <div className="mx-auto flex max-w-5xl flex-col gap-6">
+      <PageHeader
+        title="مبيعاتي المباشرة"
+        subtitle="سجل المبيعات التي قمت بها من مخزونك"
+        actions={
           <Link href="/rep/sales/new">
             <Button>بيع جديد</Button>
           </Link>
-          <LogoutButton />
-        </div>
-      </div>
+        }
+      />
 
       <Card>
         <CardHeader>

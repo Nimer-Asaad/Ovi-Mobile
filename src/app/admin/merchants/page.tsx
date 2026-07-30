@@ -11,37 +11,49 @@ import { MERCHANT_STATUSES } from "@/lib/constants";
 import { getMerchantStatusLabel, getMerchantStatusBadgeVariant } from "@/lib/merchant-labels";
 
 interface AdminMerchantsPageProps {
-  searchParams: Promise<{ q?: string; status?: string }>;
+  searchParams: Promise<{ q?: string; status?: string; region?: string }>;
 }
 
 export default async function AdminMerchantsPage({ searchParams }: AdminMerchantsPageProps) {
-  const { q, status } = await searchParams;
+  const { q, status, region } = await searchParams;
   const trimmedQuery = q?.trim();
 
-  const merchants = await prisma.merchant.findMany({
-    where: {
-      ...(status ? { status } : {}),
-      ...(trimmedQuery
-        ? {
-            OR: [
-              { businessName: { contains: trimmedQuery, mode: "insensitive" as const } },
-              { user: { name: { contains: trimmedQuery, mode: "insensitive" as const } } },
-              { user: { email: { contains: trimmedQuery, mode: "insensitive" as const } } },
-              { user: { phone: { contains: trimmedQuery, mode: "insensitive" as const } } },
-            ],
-          }
-        : {}),
-    },
-    orderBy: { createdAt: "desc" },
-    select: {
-      id: true,
-      businessName: true,
-      status: true,
-      createdAt: true,
-      user: { select: { name: true, email: true, phone: true } },
-      orders: { select: { totalCents: true } },
-    },
-  });
+  const [merchants, regionRows] = await Promise.all([
+    prisma.merchant.findMany({
+      where: {
+        ...(status ? { status } : {}),
+        ...(region ? { region } : {}),
+        ...(trimmedQuery
+          ? {
+              OR: [
+                { businessName: { contains: trimmedQuery, mode: "insensitive" as const } },
+                { user: { name: { contains: trimmedQuery, mode: "insensitive" as const } } },
+                { user: { email: { contains: trimmedQuery, mode: "insensitive" as const } } },
+                { user: { phone: { contains: trimmedQuery, mode: "insensitive" as const } } },
+              ],
+            }
+          : {}),
+      },
+      orderBy: { createdAt: "desc" },
+      select: {
+        id: true,
+        businessName: true,
+        region: true,
+        status: true,
+        createdAt: true,
+        user: { select: { name: true, email: true, phone: true } },
+        orders: { select: { totalCents: true } },
+      },
+    }),
+    prisma.merchant.findMany({
+      where: { region: { not: null } },
+      select: { region: true },
+      distinct: ["region"],
+      orderBy: { region: "asc" },
+    }),
+  ]);
+
+  const regions = regionRows.map((row) => row.region).filter((value): value is string => Boolean(value));
 
   const rows = merchants.map((merchant) => ({
     ...merchant,
@@ -68,6 +80,15 @@ export default async function AdminMerchantsPage({ searchParams }: AdminMerchant
           <option value={MERCHANT_STATUSES.REJECTED}>{getMerchantStatusLabel(MERCHANT_STATUSES.REJECTED)}</option>
         </Select>
 
+        <Select name="region" label="المنطقة" defaultValue={region ?? ""}>
+          <option value="">كل المناطق</option>
+          {regions.map((value) => (
+            <option key={value} value={value}>
+              {value}
+            </option>
+          ))}
+        </Select>
+
         <div className="flex items-end lg:col-span-4">
           <Button type="submit">تصفية</Button>
         </div>
@@ -79,6 +100,7 @@ export default async function AdminMerchantsPage({ searchParams }: AdminMerchant
           <th className="px-4 py-3 text-start">المالك</th>
           <th className="px-4 py-3 text-start">البريد الإلكتروني</th>
           <th className="px-4 py-3 text-start">الهاتف</th>
+          <th className="px-4 py-3 text-start">المنطقة</th>
           <th className="px-4 py-3 text-start">الحالة</th>
           <th className="px-4 py-3 text-start">إجمالي الطلبات</th>
           <th className="px-4 py-3 text-start">إجمالي قيمة الطلبات</th>
@@ -92,6 +114,7 @@ export default async function AdminMerchantsPage({ searchParams }: AdminMerchant
               <td className="px-4 py-3 text-neutral-bg/70">{merchant.user.name}</td>
               <td className="px-4 py-3 text-neutral-bg/70">{merchant.user.email}</td>
               <td className="px-4 py-3 text-neutral-bg/70">{merchant.user.phone ?? "—"}</td>
+              <td className="px-4 py-3 text-neutral-bg/70">{merchant.region ?? "—"}</td>
               <td className="px-4 py-3">
                 <Badge variant={getMerchantStatusBadgeVariant(merchant.status)}>
                   {getMerchantStatusLabel(merchant.status)}
@@ -112,7 +135,7 @@ export default async function AdminMerchantsPage({ searchParams }: AdminMerchant
               </td>
             </tr>
           ))}
-          {rows.length === 0 && <AdminEmptyRow colSpan={9} message="لا يوجد تجار مطابقون" />}
+          {rows.length === 0 && <AdminEmptyRow colSpan={10} message="لا يوجد تجار مطابقون" />}
         </AdminTableBody>
       </AdminTable>
     </div>

@@ -1,6 +1,7 @@
 import { requireRole } from "@/lib/auth/guards";
 import { ROLES } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { NewSaleForm } from "../NewSaleForm";
 
 export default async function RepNewSalePage() {
@@ -38,11 +39,8 @@ export default async function RepNewSalePage() {
     }));
 
   return (
-    <div className="mx-auto flex max-w-2xl flex-col gap-6 px-4 py-10">
-      <div>
-        <h1 className="text-xl font-semibold text-neutral-bg">بيع مباشر جديد</h1>
-        <p className="mt-1 text-sm text-neutral-bg/60">تسجيل عملية بيع من مخزونك الحالي</p>
-      </div>
+    <div className="mx-auto flex max-w-2xl flex-col gap-6">
+      <PageHeader title="بيع مباشر جديد" subtitle="تسجيل عملية بيع من مخزونك الحالي" />
       <NewSaleForm products={options} />
     </div>
   );
