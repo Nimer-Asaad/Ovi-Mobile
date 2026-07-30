@@ -39,13 +39,22 @@ function revalidateRepSalePaths(orderNumber: string): void {
   revalidatePath("/admin");
 }
 
+/** Creates a single Order with one OrderItem per line — same multi-line
+ * shape as createStockRequest (src/app/rep/requests/new/actions.ts), lines
+ * are serialized to a hidden JSON "items" input since native FormData can't
+ * carry a dynamic array of objects. */
 export async function createRepSale(_prevState: RepSaleState, formData: FormData): Promise<RepSaleState> {
   const user = await requireRole([ROLES.SALES_REPRESENTATIVE]);
 
+  let items: unknown;
+  try {
+    items = JSON.parse(formData.get("items")?.toString() ?? "[]");
+  } catch {
+    return { error: PARSE_ERROR_MESSAGE };
+  }
+
   const parsed = repSaleSchema.safeParse({
-    productId: formData.get("productId")?.toString() ?? "",
-    quantity: formData.get("quantity")?.toString() ?? "",
-    unitPriceCents: formData.get("unitPriceCents")?.toString() ?? "",
+    items,
     customerName: formData.get("customerName")?.toString().trim() ?? "",
     customerPhone: formData.get("customerPhone")?.toString().trim() ?? "",
     city: formData.get("city")?.toString().trim() || undefined,
@@ -54,10 +63,10 @@ export async function createRepSale(_prevState: RepSaleState, formData: FormData
   });
 
   if (!parsed.success) {
-    return { error: PARSE_ERROR_MESSAGE };
+    return { error: parsed.error.issues[0]?.message ?? PARSE_ERROR_MESSAGE };
   }
 
-  const { productId, quantity, unitPriceCents, customerName, customerPhone, city, address, notes } = parsed.data;
+  const { items: saleItems, customerName, customerPhone, city, address, notes } = parsed.data;
 
   const rep = await prisma.salesRepresentative.findUnique({
     where: { userId: user.id },
@@ -67,37 +76,42 @@ export async function createRepSale(_prevState: RepSaleState, formData: FormData
     return { error: "لم يتم العثور على ملف المندوب" };
   }
 
-  const product = await prisma.product.findUnique({
-    where: { id: productId },
-    select: { id: true, isActive: true },
-  });
-  if (!product) {
-    return { error: "المنتج غير موجود" };
-  }
-  if (!product.isActive) {
-    return { error: "لا يمكن بيع منتج غير مفعل" };
-  }
-
   const locationId = rep.carStockLocation?.id ?? null;
-  const repItem = locationId
-    ? await prisma.inventoryItem.findUnique({
-        where: { productId_locationId: { productId, locationId } },
-        select: { quantity: true },
-      })
-    : null;
-  const previousQuantity = repItem?.quantity ?? 0;
-
-  if (previousQuantity <= 0) {
-    return { error: "هذا المنتج غير موجود في مخزونك" };
-  }
-  if (quantity > previousQuantity) {
-    return { error: "الكمية المطلوبة أكبر من مخزونك الحالي" };
-  }
   if (!locationId) {
     return { error: "لم يتم العثور على موقع مخزون المندوب" };
   }
 
-  const totalCents = unitPriceCents * quantity;
+  const productIds = saleItems.map((item) => item.productId);
+  const products = await prisma.product.findMany({
+    where: { id: { in: productIds } },
+    select: { id: true, isActive: true, name: true, nameAr: true },
+  });
+  const productById = new Map(products.map((product) => [product.id, product]));
+
+  const inventoryItems = await prisma.inventoryItem.findMany({
+    where: { locationId, productId: { in: productIds } },
+    select: { productId: true, quantity: true },
+  });
+  const stockByProductId = new Map(inventoryItems.map((item) => [item.productId, item.quantity]));
+
+  for (const item of saleItems) {
+    const product = productById.get(item.productId);
+    if (!product) {
+      return { error: "أحد المنتجات المحددة غير موجود" };
+    }
+    if (!product.isActive) {
+      return { error: `المنتج "${product.nameAr ?? product.name}" غير مفعّل ولا يمكن بيعه` };
+    }
+    const available = stockByProductId.get(item.productId) ?? 0;
+    if (available <= 0) {
+      return { error: `المنتج "${product.nameAr ?? product.name}" غير موجود في مخزونك` };
+    }
+    if (item.quantity > available) {
+      return { error: `الكمية المطلوبة لـ "${product.nameAr ?? product.name}" أكبر من مخزونك الحالي` };
+    }
+  }
+
+  const totalCents = saleItems.reduce((sum, item) => sum + item.unitPriceCents * item.quantity, 0);
 
   let orderNumber = "";
   let succeeded = false;
@@ -125,47 +139,54 @@ export async function createRepSale(_prevState: RepSaleState, formData: FormData
             paymentStatus: PAYMENT_STATUSES.PAID,
             paidAmountCents: totalCents,
             items: {
-              create: [{ productId, quantity, unitPriceCents, totalCents }],
+              create: saleItems.map((item) => ({
+                productId: item.productId,
+                quantity: item.quantity,
+                unitPriceCents: item.unitPriceCents,
+                totalCents: item.unitPriceCents * item.quantity,
+              })),
             },
           },
         });
 
-        // Atomic conditional decrement — never a stale read-then-write. If
-        // the rep's car stock is no longer sufficient (e.g. a concurrent
-        // sale of the same item), `count !== 1` and the whole sale rolls
-        // back instead of driving stock negative.
-        const decremented = await tx.inventoryItem.updateMany({
-          where: { productId, locationId, quantity: { gte: quantity } },
-          data: { quantity: { decrement: quantity } },
-        });
-        if (decremented.count !== 1) {
-          throw new InsufficientStockError("INSUFFICIENT_STOCK");
+        // Per line: atomic conditional decrement — never a stale
+        // read-then-write. If the rep's car stock is no longer sufficient
+        // (e.g. a concurrent sale of the same item), `count !== 1` and the
+        // whole sale rolls back instead of driving stock negative.
+        for (const item of saleItems) {
+          const decremented = await tx.inventoryItem.updateMany({
+            where: { productId: item.productId, locationId, quantity: { gte: item.quantity } },
+            data: { quantity: { decrement: item.quantity } },
+          });
+          if (decremented.count !== 1) {
+            throw new InsufficientStockError("INSUFFICIENT_STOCK");
+          }
+
+          const current = await tx.inventoryItem.findUniqueOrThrow({
+            where: { productId_locationId: { productId: item.productId, locationId } },
+            select: { quantity: true },
+          });
+
+          await tx.stockMovement.create({
+            data: {
+              type: STOCK_MOVEMENT_TYPES.SALE_OUT,
+              productId: item.productId,
+              fromLocationId: locationId,
+              toLocationId: null,
+              quantity: item.quantity,
+              previousQuantity: current.quantity + item.quantity,
+              newQuantity: current.quantity,
+              note: `بيع مباشر — طلب ${orderNumber}`,
+              createdById: user.id,
+            },
+          });
         }
-
-        const current = await tx.inventoryItem.findUniqueOrThrow({
-          where: { productId_locationId: { productId, locationId } },
-          select: { quantity: true },
-        });
-
-        await tx.stockMovement.create({
-          data: {
-            type: STOCK_MOVEMENT_TYPES.SALE_OUT,
-            productId,
-            fromLocationId: locationId,
-            toLocationId: null,
-            quantity,
-            previousQuantity: current.quantity + quantity,
-            newQuantity: current.quantity,
-            note: `بيع مباشر — طلب ${orderNumber}`,
-            createdById: user.id,
-          },
-        });
       });
       succeeded = true;
       break;
     } catch (err) {
       if (err instanceof InsufficientStockError) {
-        return { error: "الكمية المطلوبة أكبر من مخزونك الحالي" };
+        return { error: "الكمية المطلوبة أكبر من مخزونك الحالي لأحد المنتجات، حاول مرة أخرى" };
       }
       const isDuplicateOrderNumber =
         err instanceof Prisma.PrismaClientKnownRequestError &&

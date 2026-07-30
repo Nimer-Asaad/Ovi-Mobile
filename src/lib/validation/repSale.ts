@@ -1,27 +1,21 @@
 import { z } from "zod";
 
-const positiveIntString = z
-  .string()
-  .min(1, "الكمية مطلوبة")
-  .refine((v) => Number.isInteger(Number(v)) && Number(v) > 0, {
-    message: "الكمية يجب أن تكون رقماً صحيحاً أكبر من صفر",
-  })
-  .transform((v) => Number(v));
-
-/** Admin types a plain NIS amount (e.g. "89.90"); this converts to integer
- * agorot cents for storage, matching the Int-cents money convention. */
-const positiveMoneyString = z
-  .string()
-  .min(1, "سعر البيع مطلوب")
-  .refine((v) => Number.isFinite(Number(v)) && Number(v) > 0, {
-    message: "سعر البيع يجب أن يكون رقماً أكبر من صفر",
-  })
-  .transform((v) => Math.round(Number(v) * 100));
+const saleItemSchema = z.object({
+  productId: z.string().min(1, "المنتج مطلوب"),
+  quantity: z.number().int("الكمية يجب أن تكون رقماً صحيحاً").positive("الكمية يجب أن تكون أكبر من صفر"),
+  /** Already converted to integer agorot cents client-side, same convention
+   * as every other money field. */
+  unitPriceCents: z.number().int().positive("سعر البيع يجب أن يكون أكبر من صفر"),
+});
 
 export const repSaleSchema = z.object({
-  productId: z.string().min(1, "المنتج مطلوب"),
-  quantity: positiveIntString,
-  unitPriceCents: positiveMoneyString,
+  items: z
+    .array(saleItemSchema)
+    .min(1, "يجب إضافة منتج واحد على الأقل")
+    .max(50, "عدد كبير جداً من المنتجات في عملية بيع واحدة")
+    .refine((items) => new Set(items.map((item) => item.productId)).size === items.length, {
+      message: "لا يمكن تكرار نفس المنتج أكثر من مرة — عدّل الكمية بدلاً من ذلك",
+    }),
   customerName: z.string().min(2, "اسم العميل مطلوب"),
   customerPhone: z.string().min(7, "رقم هاتف العميل مطلوب"),
   city: z.string().optional(),
