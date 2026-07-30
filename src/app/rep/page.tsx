@@ -4,7 +4,6 @@ import { ROLES } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
-import { Button } from "@/components/ui/Button";
 import { StatCard } from "@/components/ui/StatCard";
 import { getRepStockStats } from "@/lib/reps";
 import { getMovementTypeLabel, getMovementTypeBadgeVariant } from "@/lib/inventory-labels";
@@ -16,15 +15,11 @@ import { RepStockRequestStatusBadge } from "@/components/reps/RepStockRequestSta
 import { getActiveRequestCountForRep, getLatestRequestsForRep } from "@/lib/rep-stock-requests";
 import { getRepMerchantsFleetSummary } from "@/lib/rep-merchants";
 
-/** Section heading + optional action buttons, used to group the dashboard
- * into المبيعات / المخزون / التجار والدفعات instead of one flat stat grid. */
-function SectionHeader({ title, actions }: { title: string; actions?: React.ReactNode }) {
-  return (
-    <div className="flex flex-wrap items-center justify-between gap-3">
-      <h2 className="text-lg font-semibold text-neutral-bg">{title}</h2>
-      {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
-    </div>
-  );
+/** Section heading used to group the dashboard into المبيعات / المخزون /
+ * التجار والدفعات instead of one flat stat grid — the actions those buttons
+ * used to duplicate now live only in the sidebar nav (RepSidebar). */
+function SectionHeader({ title }: { title: string }) {
+  return <h2 className="text-lg font-semibold text-neutral-bg">{title}</h2>;
 }
 
 export default async function RepDashboardPage() {
@@ -95,21 +90,7 @@ export default async function RepDashboardPage() {
       <RepHero repName={user.name} />
 
       <section className="flex flex-col gap-4">
-        <SectionHeader
-          title="المبيعات"
-          actions={
-            <>
-              <Link href="/rep/sales/new">
-                <Button size="sm">بيع جديد</Button>
-              </Link>
-              <Link href="/rep/sales">
-                <Button size="sm" variant="outline">
-                  مبيعاتي
-                </Button>
-              </Link>
-            </>
-          }
-        />
+        <SectionHeader title="المبيعات" />
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <StatCard label="مبيعات اليوم" value={String(todaySalesCount)} />
           <StatCard label="إجمالي مبيعات اليوم" value={formatCurrencyFromCents(todaySalesAgg._sum.totalCents ?? 0)} />
@@ -119,33 +100,7 @@ export default async function RepDashboardPage() {
       </section>
 
       <section className="flex flex-col gap-4">
-        <SectionHeader
-          title="المخزون"
-          actions={
-            <>
-              <Link href="/rep/requests/new">
-                <Button size="sm" variant="outline">
-                  طلب تزويد مخزون
-                </Button>
-              </Link>
-              <Link href="/rep/requests">
-                <Button size="sm" variant="outline">
-                  طلباتي
-                </Button>
-              </Link>
-              <Link href="/rep/stock">
-                <Button size="sm" variant="outline">
-                  عرض مخزون السيارة
-                </Button>
-              </Link>
-              <Link href="/rep/movements">
-                <Button size="sm" variant="outline">
-                  سجل الحركات الكامل
-                </Button>
-              </Link>
-            </>
-          }
-        />
+        <SectionHeader title="المخزون" />
 
         <RepCarHero subtitle="هذه سيارتك — كل ما تم تحميله لك من المستودع الرئيسي تجده هنا" />
 
@@ -224,16 +179,7 @@ export default async function RepDashboardPage() {
       </section>
 
       <section className="flex flex-col gap-4">
-        <SectionHeader
-          title="التجار والدفعات"
-          actions={
-            <Link href="/rep/merchants">
-              <Button size="sm" variant="outline">
-                عرض كل التجار
-              </Button>
-            </Link>
-          }
-        />
+        <SectionHeader title="التجار والدفعات" />
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <StatCard label="عدد التجار المعينين لك" value={String(merchantsSummary.merchantCount)} />
           <StatCard
