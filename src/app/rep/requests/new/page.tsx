@@ -17,6 +17,11 @@ export default async function NewRepStockRequestPage() {
       nameAr: true,
       category: { select: { name: true, nameAr: true } },
       brand: { select: { name: true } },
+      images: {
+        select: { url: true, altText: true },
+        orderBy: [{ isMain: "desc" }, { sortOrder: "asc" }],
+        take: 1,
+      },
     },
   });
 
@@ -27,6 +32,8 @@ export default async function NewRepStockRequestPage() {
     nameAr: product.nameAr,
     categoryLabel: product.category?.nameAr ?? product.category?.name ?? null,
     brandLabel: product.brand?.name ?? null,
+    thumbnailUrl: product.images[0]?.url ?? null,
+    thumbnailAlt: product.images[0]?.altText ?? null,
   }));
 
   return (
