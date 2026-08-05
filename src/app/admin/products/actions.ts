@@ -138,6 +138,30 @@ async function collectProductMedia(formData: FormData): Promise<CollectMediaResu
   };
 }
 
+function collectColorIds(formData: FormData): string[] {
+  return formData.getAll("colorIds").map((value) => value.toString());
+}
+
+/** Delete-then-recreate the product's offered-colors list. Safe regardless
+ * of existing inventory/order history: InventoryItem/OrderItem/
+ * StockMovement/StockRequestItem/StockReturnItem all reference Color
+ * directly (not ProductColorOption), so removing a color as a *currently
+ * offered* option never touches historical rows — see the Color model doc
+ * comment in prisma/schema.prisma. */
+async function replaceProductColorOptions(productId: string, colorIds: string[]): Promise<void> {
+  const uniqueColorIds = [...new Set(colorIds)];
+  await prisma.$transaction([
+    prisma.productColorOption.deleteMany({ where: { productId } }),
+    ...(uniqueColorIds.length > 0
+      ? [
+          prisma.productColorOption.createMany({
+            data: uniqueColorIds.map((colorId, index) => ({ productId, colorId, sortOrder: index })),
+          }),
+        ]
+      : []),
+  ]);
+}
+
 async function replaceProductImages(
   productId: string,
   entries: { url: string; mediaType: MediaType; cloudinaryPublicId: string | null; isMain: boolean }[],
@@ -179,6 +203,14 @@ export async function createProduct(
     return { fieldErrors: { media: media.error } };
   }
 
+  const colorIds = collectColorIds(formData);
+  if (colorIds.length > 0) {
+    const validColorCount = await prisma.color.count({ where: { id: { in: colorIds } } });
+    if (validColorCount !== new Set(colorIds).size) {
+      return { error: "أحد الألوان المحددة غير موجود" };
+    }
+  }
+
   const existingSku = await prisma.product.findUnique({ where: { sku: parsed.data.sku } });
   if (existingSku) {
     return { error: DUPLICATE_SKU_MESSAGE };
@@ -214,6 +246,7 @@ export async function createProduct(
   if (media.entries.length > 0) {
     await replaceProductImages(productId, media.entries, parsed.data.name);
   }
+  await replaceProductColorOptions(productId, colorIds);
 
   revalidatePath("/admin/products");
   revalidatePath("/admin");
@@ -236,6 +269,14 @@ export async function updateProduct(
   const media = await collectProductMedia(formData);
   if (!media.ok) {
     return { fieldErrors: { media: media.error } };
+  }
+
+  const colorIds = collectColorIds(formData);
+  if (colorIds.length > 0) {
+    const validColorCount = await prisma.color.count({ where: { id: { in: colorIds } } });
+    if (validColorCount !== new Set(colorIds).size) {
+      return { error: "أحد الألوان المحددة غير موجود" };
+    }
   }
 
   const existingSku = await prisma.product.findFirst({
@@ -272,6 +313,7 @@ export async function updateProduct(
   }
 
   await replaceProductImages(id, media.entries, parsed.data.name);
+  await replaceProductColorOptions(id, colorIds);
 
   revalidatePath("/admin/products");
   revalidatePath("/admin");

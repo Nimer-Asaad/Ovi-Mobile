@@ -3,21 +3,25 @@
 import { useMemo, useState } from "react";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
-import { formatCurrencyFromCents } from "@/lib/utils";
+import { formatCurrencyFromCents, cn } from "@/lib/utils";
 import type { ManualOrderProductOption } from "./ManualOrderForm";
 
 export interface ManualOrderProductPickerProps {
   products: ManualOrderProductOption[];
   priceMode: "retail" | "wholesale";
-  addedProductIds: string[];
-  onAdd: (product: ManualOrderProductOption) => void;
+  /** `${productId}:${colorId ?? ""}` for every line already added. */
+  addedLineKeys: Set<string>;
+  onAdd: (product: ManualOrderProductOption, colorId: string | null) => void;
 }
 
 /** Local search over the fully-preloaded product list — the catalog is
  * small enough (demo/small-business scale) that filtering client-side is
- * simpler and safer than a new search API route for this phase. */
-export function ManualOrderProductPicker({ products, priceMode, addedProductIds, onAdd }: ManualOrderProductPickerProps) {
+ * simpler and safer than a new search API route for this phase. Products
+ * with color options expand into an inline color-choice row instead of
+ * adding immediately. */
+export function ManualOrderProductPicker({ products, priceMode, addedLineKeys, onAdd }: ManualOrderProductPickerProps) {
   const [query, setQuery] = useState("");
+  const [colorPickProductId, setColorPickProductId] = useState<string | null>(null);
 
   const filtered = useMemo(() => {
     const trimmed = query.trim().toLowerCase();
@@ -44,30 +48,70 @@ export function ManualOrderProductPicker({ products, priceMode, addedProductIds,
           <p className="py-4 text-center text-sm text-neutral-bg/50">لا توجد منتجات مطابقة</p>
         )}
         {filtered.map((product) => {
-          const alreadyAdded = addedProductIds.includes(product.id);
-          const outOfStock = product.stock <= 0;
+          const hasColors = (product.colorOptions?.length ?? 0) > 0;
+          const allColorsAdded =
+            hasColors && product.colorOptions!.every((color) => addedLineKeys.has(`${product.id}:${color.id}`));
+          const alreadyAdded = hasColors ? allColorsAdded : addedLineKeys.has(`${product.id}:`);
+          const outOfStock = !hasColors && product.stock <= 0;
           const priceCents = priceMode === "wholesale" ? product.wholesalePriceCents : product.retailPriceCents;
 
           return (
             <div
               key={product.id}
-              className="flex items-center justify-between gap-3 rounded-card border border-navy-soft bg-navy-deep px-3 py-2"
+              className="flex flex-col gap-2 rounded-card border border-navy-soft bg-navy-deep px-3 py-2"
             >
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-neutral-bg">{product.nameAr ?? product.name}</p>
-                <p className="text-xs text-neutral-bg/50">
-                  {product.sku} · متوفر: {product.stock} · {formatCurrencyFromCents(priceCents)}
-                </p>
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-neutral-bg">{product.nameAr ?? product.name}</p>
+                  <p className="text-xs text-neutral-bg/50">
+                    {product.sku} · متوفر: {hasColors ? "حسب اللون" : product.stock} · {formatCurrencyFromCents(priceCents)}
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={alreadyAdded || outOfStock}
+                  onClick={() =>
+                    hasColors ? setColorPickProductId(product.id === colorPickProductId ? null : product.id) : onAdd(product, null)
+                  }
+                >
+                  {alreadyAdded ? "أُضيف" : outOfStock ? "نفد المخزون" : hasColors ? "اختر اللون" : "إضافة"}
+                </Button>
               </div>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={alreadyAdded || outOfStock}
-                onClick={() => onAdd(product)}
-              >
-                {alreadyAdded ? "أُضيف" : outOfStock ? "نفد المخزون" : "إضافة"}
-              </Button>
+
+              {colorPickProductId === product.id && hasColors && (
+                <div className="flex flex-wrap gap-2 border-t border-navy-soft pt-2">
+                  {product.colorOptions!.map((color) => {
+                    const used = addedLineKeys.has(`${product.id}:${color.id}`);
+                    const oos = color.stock <= 0;
+                    return (
+                      <button
+                        key={color.id}
+                        type="button"
+                        disabled={used || oos}
+                        onClick={() => {
+                          onAdd(product, color.id);
+                          setColorPickProductId(null);
+                        }}
+                        className={cn(
+                          "flex items-center gap-1.5 rounded-full border border-navy-soft px-2.5 py-1 text-xs text-neutral-bg/80 transition-colors hover:border-gold-champagne/40",
+                          (used || oos) && "cursor-not-allowed opacity-40",
+                        )}
+                      >
+                        {color.hexCode && (
+                          <span
+                            aria-hidden="true"
+                            className="h-3 w-3 shrink-0 rounded-full border border-navy-soft"
+                            style={{ backgroundColor: color.hexCode }}
+                          />
+                        )}
+                        {color.nameAr ?? color.name} {used ? "(أُضيف)" : oos ? "(نفذ)" : `(${color.stock})`}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           );
         })}

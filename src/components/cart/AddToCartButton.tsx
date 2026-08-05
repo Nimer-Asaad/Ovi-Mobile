@@ -10,6 +10,9 @@ const initialState: CartActionState = {};
 
 interface AddToCartButtonProps {
   productId: string;
+  /** Chosen color, when the product has color options — null for a
+   * colorless product, or before the shopper has picked one yet. */
+  colorId?: string | null;
   maxQuantity?: number;
   showQuantityInput?: boolean;
   /** Optional display data for the post-add success drawer. All optional —
@@ -25,6 +28,7 @@ interface AddToCartButtonProps {
 
 export function AddToCartButton({
   productId,
+  colorId = null,
   maxQuantity,
   showQuantityInput = false,
   productName,
@@ -32,7 +36,7 @@ export function AddToCartButton({
   productImageUrl,
   unitPriceCents,
 }: AddToCartButtonProps) {
-  const action = addToCart.bind(null, productId);
+  const action = addToCart.bind(null, productId, colorId);
   const [state, formAction, isPending] = useActionState(action, initialState);
   const [quantity, setQuantity] = useState(1);
   const [drawerOpen, setDrawerOpen] = useState(false);

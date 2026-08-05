@@ -10,6 +10,9 @@ const positiveIntString = z
 
 export const repStockTransferSchema = z.object({
   productId: z.string().min(1, "المنتج مطلوب"),
+  /** Empty string (no color picked) normalizes to undefined — a colorless
+   * transfer. */
+  colorId: z.string().min(1).optional(),
   quantity: positiveIntString,
   notes: z.string().max(500, "الملاحظات طويلة جداً").optional(),
 });

@@ -32,6 +32,14 @@ export interface ManualOrderWalkInAccountOption {
   phone: string | null;
 }
 
+export interface ManualOrderColorOption {
+  id: string;
+  name: string;
+  nameAr: string | null;
+  hexCode: string | null;
+  stock: number;
+}
+
 export interface ManualOrderProductOption {
   id: string;
   sku: string;
@@ -42,15 +50,23 @@ export interface ManualOrderProductOption {
   categoryLabel: string | null;
   brandLabel: string | null;
   stock: number;
+  /** Empty/omitted for a colorless product. */
+  colorOptions?: ManualOrderColorOption[];
 }
 
 interface ManualOrderLine {
   productId: string;
+  colorId: string | null;
+  colorLabel: string | null;
   sku: string;
   label: string;
   unitPriceCents: number;
   quantity: number;
   stock: number;
+}
+
+function lineKey(productId: string, colorId: string | null): string {
+  return `${productId}:${colorId ?? ""}`;
 }
 
 export interface ManualOrderFormProps {
@@ -159,33 +175,46 @@ export function ManualOrderForm({
     }
   }
 
-  function handleAddProduct(product: ManualOrderProductOption) {
+  const addedLineKeys = useMemo(() => new Set(lines.map((line) => lineKey(line.productId, line.colorId))), [lines]);
+
+  function handleAddProduct(product: ManualOrderProductOption, colorId: string | null) {
     const unitPriceCents = priceMode === "wholesale" ? product.wholesalePriceCents : product.retailPriceCents;
+    const color = product.colorOptions?.find((option) => option.id === colorId) ?? null;
     setLines((prev) => [
       ...prev,
       {
         productId: product.id,
+        colorId,
+        colorLabel: color ? (color.nameAr ?? color.name) : null,
         sku: product.sku,
         label: product.nameAr ?? product.name,
         unitPriceCents,
         quantity: 1,
-        stock: product.stock,
+        stock: color ? color.stock : product.stock,
       },
     ]);
   }
 
-  function handleRemoveLine(productId: string) {
-    setLines((prev) => prev.filter((line) => line.productId !== productId));
+  function handleRemoveLine(productId: string, colorId: string | null) {
+    setLines((prev) => prev.filter((line) => lineKey(line.productId, line.colorId) !== lineKey(productId, colorId)));
   }
 
-  function handleQuantityChange(productId: string, value: string) {
+  function handleQuantityChange(productId: string, colorId: string | null, value: string) {
     const quantity = Math.max(1, Math.floor(Number(value) || 1));
-    setLines((prev) => prev.map((line) => (line.productId === productId ? { ...line, quantity } : line)));
+    setLines((prev) =>
+      prev.map((line) =>
+        lineKey(line.productId, line.colorId) === lineKey(productId, colorId) ? { ...line, quantity } : line,
+      ),
+    );
   }
 
-  function handleUnitPriceChange(productId: string, value: string) {
+  function handleUnitPriceChange(productId: string, colorId: string | null, value: string) {
     const unitPriceCents = Math.max(0, Math.round((Number(value) || 0) * 100));
-    setLines((prev) => prev.map((line) => (line.productId === productId ? { ...line, unitPriceCents } : line)));
+    setLines((prev) =>
+      prev.map((line) =>
+        lineKey(line.productId, line.colorId) === lineKey(productId, colorId) ? { ...line, unitPriceCents } : line,
+      ),
+    );
   }
 
   const subtotalCents = useMemo(
@@ -198,6 +227,7 @@ export function ManualOrderForm({
       JSON.stringify(
         lines.map((line) => ({
           productId: line.productId,
+          colorId: line.colorId,
           quantity: line.quantity,
           unitPriceCents: line.unitPriceCents,
         })),
@@ -340,7 +370,7 @@ export function ManualOrderForm({
             <ManualOrderProductPicker
               products={products}
               priceMode={priceMode}
-              addedProductIds={lines.map((line) => line.productId)}
+              addedLineKeys={addedLineKeys}
               onAdd={handleAddProduct}
             />
           </CardContent>
@@ -356,9 +386,15 @@ export function ManualOrderForm({
             ) : (
               <div className="flex flex-col divide-y divide-navy-soft">
                 {lines.map((line) => (
-                  <div key={line.productId} className="flex flex-wrap items-center gap-3 py-3 first:pt-0 last:pb-0">
+                  <div
+                    key={lineKey(line.productId, line.colorId)}
+                    className="flex flex-wrap items-center gap-3 py-3 first:pt-0 last:pb-0"
+                  >
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium text-neutral-bg">{line.label}</p>
+                      <p className="truncate text-sm font-medium text-neutral-bg">
+                        {line.label}
+                        {line.colorLabel && <span> — {line.colorLabel}</span>}
+                      </p>
                       <p className="text-xs text-neutral-bg/50">{line.sku} · متوفر: {line.stock}</p>
                     </div>
                     <div className="w-20">
@@ -367,7 +403,7 @@ export function ManualOrderForm({
                         min={1}
                         max={line.stock}
                         value={line.quantity}
-                        onChange={(event) => handleQuantityChange(line.productId, event.target.value)}
+                        onChange={(event) => handleQuantityChange(line.productId, line.colorId, event.target.value)}
                         aria-label="الكمية"
                       />
                     </div>
@@ -377,14 +413,19 @@ export function ManualOrderForm({
                         min={0}
                         step="0.01"
                         value={line.unitPriceCents / 100}
-                        onChange={(event) => handleUnitPriceChange(line.productId, event.target.value)}
+                        onChange={(event) => handleUnitPriceChange(line.productId, line.colorId, event.target.value)}
                         aria-label="سعر الوحدة"
                       />
                     </div>
                     <div className="w-24 text-end text-sm font-semibold text-neutral-bg">
                       {formatCurrencyFromCents(line.unitPriceCents * line.quantity)}
                     </div>
-                    <Button type="button" variant="ghost" size="sm" onClick={() => handleRemoveLine(line.productId)}>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleRemoveLine(line.productId, line.colorId)}
+                    >
                       حذف
                     </Button>
                   </div>

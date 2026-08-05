@@ -10,7 +10,7 @@ import { ProductInfoTabs } from "@/components/catalog/ProductInfoTabs";
 import { ProductViewTracker } from "@/components/catalog/ProductViewTracker";
 import { WishlistButton } from "@/components/wishlist/WishlistButton";
 import { getSession } from "@/lib/auth/session";
-import { getCartEligibility } from "@/lib/cart";
+import { getCartEligibility, getAvailableStock } from "@/lib/cart";
 import { isProductWishlisted } from "@/lib/wishlist";
 import {
   getPriceModeForUser,
@@ -64,6 +64,13 @@ export default async function ProductDetailPage({ params }: ProductDetailPagePro
   if (!product) notFound();
 
   const totalStock = product.inventoryItems.reduce((sum, item) => sum + item.quantity, 0);
+  const colorOptions = product.colorOptions.map((option) => ({
+    id: option.color.id,
+    name: option.color.name,
+    nameAr: option.color.nameAr,
+    hexCode: option.color.hexCode,
+    stock: getAvailableStock(product, option.color.id),
+  }));
   // Main is always enforced IMAGE on save, but this stays defensive since
   // the gallery's images list here is unfiltered (it also carries videos).
   const mainImageUrl = product.images.find((image) => image.mediaType === "IMAGE")?.url ?? null;
@@ -116,6 +123,7 @@ export default async function ProductDetailPage({ params }: ProductDetailPagePro
                 isWholesale={isWholesale}
                 isFeatured={product.isFeatured}
                 totalStock={totalStock}
+                colorOptions={colorOptions}
                 cartEligibility={cartEligibility}
                 imageUrl={mainImageUrl}
               />

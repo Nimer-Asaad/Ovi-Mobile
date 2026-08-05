@@ -26,14 +26,24 @@ export const STOCK_CHECK_PRODUCT_SELECT = {
   name: true,
   isActive: true,
   /* Only Main Warehouse stock counts toward cart/checkout availability —
-   * stock assigned to a sales rep isn't purchasable through the cart. */
-  inventoryItems: { where: { location: { isDefault: true } }, select: { quantity: true } },
+   * stock assigned to a sales rep isn't purchasable through the cart.
+   * colorId is included so getAvailableStock can resolve per-color stock
+   * for products with color options, not just the product-wide total. */
+  inventoryItems: { where: { location: { isDefault: true } }, select: { quantity: true, colorId: true } },
 } satisfies Prisma.ProductSelect;
 
 export type StockCheckProduct = Prisma.ProductGetPayload<{ select: typeof STOCK_CHECK_PRODUCT_SELECT }>;
 
-export function getAvailableStock(product: { inventoryItems: { quantity: number }[] }): number {
-  return product.inventoryItems.reduce((sum, item) => sum + item.quantity, 0);
+/** Stock available for this product — filtered to a specific color when
+ * `colorId` is given (colorless products keep working with the default
+ * `null`, which matches their InventoryItem rows' colorId). */
+export function getAvailableStock(
+  product: { inventoryItems: { quantity: number; colorId: string | null }[] },
+  colorId: string | null = null,
+): number {
+  return product.inventoryItems
+    .filter((item) => item.colorId === colorId)
+    .reduce((sum, item) => sum + item.quantity, 0);
 }
 
 const CART_PRODUCT_RETAIL_SELECT = {
@@ -50,7 +60,7 @@ const CART_PRODUCT_RETAIL_SELECT = {
   },
   /* Only Main Warehouse stock counts toward cart/checkout availability —
    * stock assigned to a sales rep isn't purchasable through the cart. */
-  inventoryItems: { where: { location: { isDefault: true } }, select: { quantity: true } },
+  inventoryItems: { where: { location: { isDefault: true } }, select: { quantity: true, colorId: true } },
 } satisfies Prisma.ProductSelect;
 
 const CART_PRODUCT_WHOLESALE_SELECT = {
@@ -67,15 +77,19 @@ const CART_PRODUCT_WHOLESALE_SELECT = {
   },
   /* Only Main Warehouse stock counts toward cart/checkout availability —
    * stock assigned to a sales rep isn't purchasable through the cart. */
-  inventoryItems: { where: { location: { isDefault: true } }, select: { quantity: true } },
+  inventoryItems: { where: { location: { isDefault: true } }, select: { quantity: true, colorId: true } },
 } satisfies Prisma.ProductSelect;
 
 export type CartProductRetail = Prisma.ProductGetPayload<{ select: typeof CART_PRODUCT_RETAIL_SELECT }>;
 export type CartProductWholesale = Prisma.ProductGetPayload<{ select: typeof CART_PRODUCT_WHOLESALE_SELECT }>;
 
+const CART_ITEM_COLOR_SELECT = { id: true, name: true, nameAr: true } satisfies Prisma.ColorSelect;
+
 interface CartItemWithProduct<TProduct> {
   id: string;
   quantity: number;
+  colorId: string | null;
+  color: Prisma.ColorGetPayload<{ select: typeof CART_ITEM_COLOR_SELECT }> | null;
   product: TProduct;
 }
 
@@ -94,7 +108,10 @@ export async function getCurrentUserCart(user: SessionUser): Promise<CartWithIte
       where: { userId: user.id },
       include: {
         items: {
-          include: { product: { select: CART_PRODUCT_WHOLESALE_SELECT } },
+          include: {
+            product: { select: CART_PRODUCT_WHOLESALE_SELECT },
+            color: { select: CART_ITEM_COLOR_SELECT },
+          },
           orderBy: { createdAt: "asc" },
         },
       },
@@ -105,7 +122,10 @@ export async function getCurrentUserCart(user: SessionUser): Promise<CartWithIte
     where: { userId: user.id },
     include: {
       items: {
-        include: { product: { select: CART_PRODUCT_RETAIL_SELECT } },
+        include: {
+          product: { select: CART_PRODUCT_RETAIL_SELECT },
+          color: { select: CART_ITEM_COLOR_SELECT },
+        },
         orderBy: { createdAt: "asc" },
       },
     },

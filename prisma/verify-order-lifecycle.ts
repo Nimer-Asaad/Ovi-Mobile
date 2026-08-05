@@ -124,8 +124,8 @@ async function createOrder(input: {
         data: { quantity: { decrement: line.quantity } },
       });
       assert(changed.count === 1, "fixture stock decrement failed");
-      const inventory = await tx.inventoryItem.findUniqueOrThrow({
-        where: { productId_locationId: { productId: line.productId, locationId: input.locationId } },
+      const inventory = await tx.inventoryItem.findFirstOrThrow({
+        where: { productId: line.productId, locationId: input.locationId, colorId: null },
       });
       await tx.stockMovement.create({
         data: {
@@ -159,7 +159,7 @@ try {
     const order = await createOrder({ source: ORDER_SOURCES.RETAIL, status: ORDER_STATUSES.PENDING, locationId: warehouse.id, lines: [{ productId: product.id, quantity: 2 }] });
     const first = await transitionOrderStatus({ orderNumber: order.orderNumber, requestedStatus: ORDER_STATUSES.CANCELLED, reason: "verification cancellation", actorUserId: admin.id });
     assert(first.ok && !first.noOp, "first cancellation must apply");
-    const inventory = await prisma.inventoryItem.findUniqueOrThrow({ where: { productId_locationId: { productId: product.id, locationId: warehouse.id } } });
+    const inventory = await prisma.inventoryItem.findFirstOrThrow({ where: { productId: product.id, locationId: warehouse.id, colorId: null } });
     const afterFirst = await counts(order.id);
     assert(inventory.quantity === 100 && afterFirst.history === 1 && afterFirst.compensation === 1 && afterFirst.order.inventoryRestoredAt, "single cancellation invariant failed");
     const second = await transitionOrderStatus({ orderNumber: order.orderNumber, requestedStatus: ORDER_STATUSES.CANCELLED, actorUserId: admin.id });
@@ -174,7 +174,7 @@ try {
       transitionOrderStatus({ orderNumber: order.orderNumber, requestedStatus: ORDER_STATUSES.CANCELLED, reason: "concurrent cancellation A", actorUserId: admin.id }),
       transitionOrderStatus({ orderNumber: order.orderNumber, requestedStatus: ORDER_STATUSES.CANCELLED, reason: "concurrent cancellation B", actorUserId: admin.id }),
     ]);
-    const inventory = await prisma.inventoryItem.findUniqueOrThrow({ where: { productId_locationId: { productId: product.id, locationId: warehouse.id } } });
+    const inventory = await prisma.inventoryItem.findFirstOrThrow({ where: { productId: product.id, locationId: warehouse.id, colorId: null } });
     const state = await counts(order.id);
     assert(results.every((result) => result.ok) && inventory.quantity === 100 && state.history === 1 && state.compensation === 1, "concurrent cancellation duplicated effects");
   });
@@ -195,8 +195,8 @@ try {
     const product = await createProduct(repCar.id);
     const order = await createOrder({ source: ORDER_SOURCES.REP_SALE, status: ORDER_STATUSES.DELIVERED, locationId: repCar.id, lines: [{ productId: product.id, quantity: 4 }] });
     const result = await transitionOrderStatus({ orderNumber: order.orderNumber, requestedStatus: ORDER_STATUSES.RETURNED, reason: "verification return", actorUserId: admin.id });
-    const carInventory = await prisma.inventoryItem.findUniqueOrThrow({ where: { productId_locationId: { productId: product.id, locationId: repCar.id } } });
-    const warehouseInventory = await prisma.inventoryItem.findUnique({ where: { productId_locationId: { productId: product.id, locationId: warehouse.id } } });
+    const carInventory = await prisma.inventoryItem.findFirstOrThrow({ where: { productId: product.id, locationId: repCar.id, colorId: null } });
+    const warehouseInventory = await prisma.inventoryItem.findFirst({ where: { productId: product.id, locationId: warehouse.id, colorId: null } });
     assert(result.ok && carInventory.quantity === 100 && warehouseInventory === null, "representative return used wrong location");
     for (const status of Object.values(ORDER_STATUSES).filter((status) => status !== ORDER_STATUSES.RETURNED)) {
       const rejected = await transitionOrderStatus({ orderNumber: order.orderNumber, requestedStatus: status, actorUserId: admin.id });
@@ -208,10 +208,10 @@ try {
     const first = await createProduct(warehouse.id);
     const second = await createProduct(warehouse.id);
     const order = await createOrder({ source: ORDER_SOURCES.ADMIN_MANUAL, status: ORDER_STATUSES.CONFIRMED, locationId: warehouse.id, lines: [{ productId: first.id, quantity: 2 }, { productId: second.id, quantity: 3 }] });
-    await prisma.inventoryItem.delete({ where: { productId_locationId: { productId: second.id, locationId: warehouse.id } } });
-    const before = await prisma.inventoryItem.findUniqueOrThrow({ where: { productId_locationId: { productId: first.id, locationId: warehouse.id } } });
+    await prisma.inventoryItem.deleteMany({ where: { productId: second.id, locationId: warehouse.id, colorId: null } });
+    const before = await prisma.inventoryItem.findFirstOrThrow({ where: { productId: first.id, locationId: warehouse.id, colorId: null } });
     const result = await transitionOrderStatus({ orderNumber: order.orderNumber, requestedStatus: ORDER_STATUSES.CANCELLED, reason: "missing inventory fixture", actorUserId: admin.id });
-    const after = await prisma.inventoryItem.findUniqueOrThrow({ where: { productId_locationId: { productId: first.id, locationId: warehouse.id } } });
+    const after = await prisma.inventoryItem.findFirstOrThrow({ where: { productId: first.id, locationId: warehouse.id, colorId: null } });
     const state = await counts(order.id);
     assert(!result.ok && result.code === "MISSING_INVENTORY" && before.quantity === after.quantity && state.history === 0 && state.compensation === 0, "multi-item rollback was partial");
   });
@@ -230,7 +230,7 @@ try {
   await check("ledger reconciles for intact fixture pairs", async () => {
     for (const pair of touchedPairs) {
       const [productId, locationId] = pair.split(":") as [string, string];
-      const inventory = await prisma.inventoryItem.findUnique({ where: { productId_locationId: { productId, locationId } } });
+      const inventory = await prisma.inventoryItem.findFirst({ where: { productId, locationId, colorId: null } });
       if (!inventory) continue;
       const movements = await prisma.stockMovement.findMany({
         where: { productId, OR: [{ fromLocationId: locationId }, { toLocationId: locationId }], note: { contains: runId } },

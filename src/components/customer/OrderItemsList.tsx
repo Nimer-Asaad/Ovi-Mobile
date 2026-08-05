@@ -6,6 +6,7 @@ export interface OrderItemRow {
   quantity: number;
   unitPriceCents: number;
   totalCents: number;
+  color: { name: string; nameAr: string | null } | null;
   product: {
     sku: string;
     name: string;
@@ -47,7 +48,10 @@ export function OrderItemsList({ items, isWholesaleOrder = false }: OrderItemsLi
             </div>
             <div className="flex-1">
               <p className="text-sm font-medium text-neutral-bg">{item.product.nameAr ?? item.product.name}</p>
-              <p className="text-xs text-neutral-bg/50">{item.product.sku}</p>
+              <p className="text-xs text-neutral-bg/50">
+                {item.product.sku}
+                {item.color && <span> — {item.color.nameAr ?? item.color.name}</span>}
+              </p>
               <p className="text-xs text-neutral-bg/60">
                 {formatCurrencyFromCents(item.unitPriceCents)}
                 {isWholesaleOrder && " (سعر الجملة)"} × {item.quantity}

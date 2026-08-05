@@ -79,8 +79,14 @@ export const PUBLIC_PRODUCT_DETAIL_SELECT = {
     orderBy: [{ isMain: "desc" }, { sortOrder: "asc" }],
   },
   /* Only Main Warehouse stock is shown/purchasable here — rep-assigned
-   * stock is tracked separately and isn't part of public availability. */
-  inventoryItems: { where: { location: { isDefault: true } }, select: { quantity: true } },
+   * stock is tracked separately and isn't part of public availability.
+   * colorId is included so per-color stock can be resolved (see
+   * getAvailableStock in src/lib/cart.ts). */
+  inventoryItems: { where: { location: { isDefault: true } }, select: { quantity: true, colorId: true } },
+  colorOptions: {
+    select: { color: { select: { id: true, name: true, nameAr: true, hexCode: true } } },
+    orderBy: { sortOrder: "asc" },
+  },
 } satisfies Prisma.ProductSelect;
 
 export type PublicProductDetail = Prisma.ProductGetPayload<{ select: typeof PUBLIC_PRODUCT_DETAIL_SELECT }>;
@@ -102,8 +108,14 @@ export const MERCHANT_PRODUCT_DETAIL_SELECT = {
     orderBy: [{ isMain: "desc" }, { sortOrder: "asc" }],
   },
   /* Only Main Warehouse stock is shown/purchasable here — rep-assigned
-   * stock is tracked separately and isn't part of public availability. */
-  inventoryItems: { where: { location: { isDefault: true } }, select: { quantity: true } },
+   * stock is tracked separately and isn't part of public availability.
+   * colorId is included so per-color stock can be resolved (see
+   * getAvailableStock in src/lib/cart.ts). */
+  inventoryItems: { where: { location: { isDefault: true } }, select: { quantity: true, colorId: true } },
+  colorOptions: {
+    select: { color: { select: { id: true, name: true, nameAr: true, hexCode: true } } },
+    orderBy: { sortOrder: "asc" },
+  },
 } satisfies Prisma.ProductSelect;
 
 export type MerchantProductDetail = Prisma.ProductGetPayload<{ select: typeof MERCHANT_PRODUCT_DETAIL_SELECT }>;

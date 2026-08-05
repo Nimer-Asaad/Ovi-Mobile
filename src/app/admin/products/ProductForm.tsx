@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
-import type { Brand, Category, Product, ProductImage, Supplier } from "@prisma/client";
+import type { Brand, Category, Color, Product, ProductImage, Supplier } from "@prisma/client";
 import { createProduct, updateProduct, type ProductFormState } from "./actions";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
@@ -13,9 +13,11 @@ interface ProductFormProps {
   categories: Category[];
   brands: Brand[];
   suppliers: Supplier[];
+  colors: Color[];
   product?: Product;
   currentStock?: number;
   images?: ProductImage[];
+  selectedColorIds?: string[];
 }
 
 const initialState: ProductFormState = {};
@@ -37,9 +39,11 @@ export function ProductForm({
   categories,
   brands,
   suppliers,
+  colors,
   product,
   currentStock,
   images = [],
+  selectedColorIds = [],
 }: ProductFormProps) {
   const action = product ? updateProduct.bind(null, product.id) : createProduct;
   const [state, formAction, isPending] = useActionState(action, initialState);
@@ -152,6 +156,46 @@ export function ProductForm({
           }))}
           error={state.fieldErrors?.media}
         />
+      </FormSection>
+
+      <FormSection title="الألوان المتاحة">
+        {colors.length === 0 ? (
+          <p className="text-sm text-neutral-bg/60">
+            لا توجد ألوان بعد — أضِف ألواناً من صفحة{" "}
+            <a href="/admin/colors" className="text-gold-champagne hover:underline">
+              الألوان
+            </a>{" "}
+            ثم عد إلى هنا لربطها بهذا المنتج.
+          </p>
+        ) : (
+          <>
+            <p className="text-sm text-neutral-bg/60">
+              اختر الألوان التي يتوفر بها هذا المنتج تحديداً — لا داعي لتحديد كل الألوان، فقط ما هو متاح فعلاً.
+              اترك الكل بدون تحديد إن كان المنتج بلون واحد فقط.
+            </p>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+              {colors.map((color) => (
+                <label key={color.id} className="flex items-center gap-2 text-sm text-neutral-bg/80">
+                  <input
+                    type="checkbox"
+                    name="colorIds"
+                    value={color.id}
+                    defaultChecked={selectedColorIds.includes(color.id)}
+                    className="h-4 w-4 rounded border-navy-soft bg-navy-deep text-gold-champagne focus-visible:ring-gold-champagne"
+                  />
+                  {color.hexCode && (
+                    <span
+                      aria-hidden="true"
+                      className="h-4 w-4 shrink-0 rounded-full border border-navy-soft"
+                      style={{ backgroundColor: color.hexCode }}
+                    />
+                  )}
+                  {color.nameAr ?? color.name}
+                </label>
+              ))}
+            </div>
+          </>
+        )}
       </FormSection>
 
       <FormSection title="الحالة">

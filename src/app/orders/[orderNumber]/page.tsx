@@ -57,6 +57,7 @@ export default async function OrderDetailPage({ params }: OrderDetailPageProps) 
           quantity: true,
           unitPriceCents: true,
           totalCents: true,
+          color: { select: { name: true, nameAr: true } },
           product: {
             select: {
               sku: true,

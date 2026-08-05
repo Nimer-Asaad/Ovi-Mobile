@@ -64,7 +64,7 @@ export default async function CartPage() {
         {items.map((item) => {
           const unitPriceCents = readCatalogPriceCents(item.product);
           const isWholesale = isWholesalePriced(item.product);
-          const availableStock = getAvailableStock(item.product);
+          const availableStock = getAvailableStock(item.product, item.colorId);
           const thumbnail = item.product.images[0];
 
           return (
@@ -90,7 +90,10 @@ export default async function CartPage() {
                 >
                   {item.product.nameAr ?? item.product.name}
                 </Link>
-                <p className="text-xs text-neutral-bg/50">{item.product.sku}</p>
+                <p className="text-xs text-neutral-bg/50">
+                  {item.product.sku}
+                  {item.color && <span> — {item.color.nameAr ?? item.color.name}</span>}
+                </p>
                 <div className="mt-1 flex items-center gap-2">
                   <span className="text-sm text-gold-champagne">{formatCurrencyFromCents(unitPriceCents)}</span>
                   {isWholesale && <Badge variant="gold">سعر الجملة</Badge>}

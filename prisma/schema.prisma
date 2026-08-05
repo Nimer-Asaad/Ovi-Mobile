@@ -250,6 +250,48 @@ model Supplier {
   @@map("suppliers")
 }
 
+/// Global color master list (mirrors Category/Brand) — a color only becomes
+/// buyable/trackable for a specific product once a ProductColorOption row
+/// links the two. InventoryItem/CartItem/OrderItem/StockMovement/
+/// StockRequestItem/StockReturnItem reference Color directly (not
+/// ProductColorOption) so historical rows survive a product no longer
+/// offering that color.
+model Color {
+  id        String   @id @default(cuid())
+  name      String
+  nameAr    String?
+  hexCode   String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  productOptions    ProductColorOption[]
+  inventoryItems    InventoryItem[]
+  cartItems         CartItem[]
+  orderItems        OrderItem[]
+  stockMovements    StockMovement[]
+  stockRequestItems StockRequestItem[]
+  stockReturnItems  StockReturnItem[]
+
+  @@map("colors")
+}
+
+/// Declares which colors a specific product currently offers — separate
+/// from InventoryItem (which tracks quantity). A color can be "offered"
+/// with zero current stock (sold out) without disappearing as an option.
+model ProductColorOption {
+  id        String   @id @default(cuid())
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  colorId   String
+  color     Color    @relation(fields: [colorId], references: [id])
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@unique([productId, colorId])
+  @@map("product_color_options")
+}
+
 model Product {
   id            String    @id @default(cuid())
   sku           String    @unique
@@ -284,6 +326,7 @@ model Product {
   images            ProductImage[]
   cartItems         CartItem[]
   wishlistItems     WishlistItem[]
+  colorOptions      ProductColorOption[]
 
   @@map("products")
 }
@@ -312,11 +355,14 @@ model CartItem {
   cart      Cart     @relation(fields: [cartId], references: [id], onDelete: Cascade)
   productId String
   product   Product  @relation(fields: [productId], references: [id])
+  /// Null for colorless products — see Color model doc comment.
+  colorId   String?
+  color     Color?   @relation(fields: [colorId], references: [id])
   quantity  Int
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([cartId, productId])
+  @@unique([cartId, productId, colorId])
   @@map("cart_items")
 }
 
@@ -393,10 +439,13 @@ model InventoryItem {
   product    Product       @relation(fields: [productId], references: [id])
   locationId String
   location   StockLocation @relation(fields: [locationId], references: [id])
+  /// Null for colorless products — see Color model doc comment.
+  colorId    String?
+  color      Color?        @relation(fields: [colorId], references: [id])
   quantity   Int           @default(0)
   updatedAt  DateTime      @updatedAt
 
-  @@unique([productId, locationId])
+  @@unique([productId, locationId, colorId])
   @@map("inventory_items")
 }
 
@@ -412,6 +461,9 @@ model StockMovement {
   type             String
   productId        String
   product          Product        @relation(fields: [productId], references: [id])
+  /// Null for colorless products — see Color model doc comment.
+  colorId          String?
+  color            Color?         @relation(fields: [colorId], references: [id])
   fromLocationId   String?
   fromLocation     StockLocation? @relation("MovementFromLocation", fields: [fromLocationId], references: [id])
   toLocationId     String?
@@ -502,6 +554,11 @@ model OrderItem {
   order          Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
   productId      String
   product        Product @relation(fields: [productId], references: [id])
+  /// Null for colorless products — see Color model doc comment. Deliberately
+  /// no color-name snapshot, matching OrderItem's existing convention of
+  /// never snapshotting product name/SKU and always joining live.
+  colorId        String?
+  color          Color?  @relation(fields: [colorId], references: [id])
   quantity       Int
   unitPriceCents Int
   totalCents     Int
@@ -639,6 +696,9 @@ model StockRequestItem {
   stockRequest      StockRequest @relation(fields: [stockRequestId], references: [id], onDelete: Cascade)
   productId         String
   product           Product      @relation(fields: [productId], references: [id])
+  /// Null for colorless products — see Color model doc comment.
+  colorId           String?
+  color             Color?       @relation(fields: [colorId], references: [id])
   requestedQuantity Int
   /// Set by admin during review. null = not yet reviewed; 0 = rejected/removed line.
   approvedQuantity  Int?
@@ -667,6 +727,9 @@ model StockReturnItem {
   stockReturn   StockReturn @relation(fields: [stockReturnId], references: [id], onDelete: Cascade)
   productId     String
   product       Product     @relation(fields: [productId], references: [id])
+  /// Null for colorless products — see Color model doc comment.
+  colorId       String?
+  color         Color?      @relation(fields: [colorId], references: [id])
   quantity      Int
 
   @@map("stock_return_items")

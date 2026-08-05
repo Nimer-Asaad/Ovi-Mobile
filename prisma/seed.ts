@@ -367,11 +367,20 @@ async function main() {
       },
     });
 
-    await prisma.inventoryItem.upsert({
-      where: { productId_locationId: { productId: product.id, locationId: mainWarehouse.id } },
-      update: { quantity: def.stock },
-      create: { productId: product.id, locationId: mainWarehouse.id, quantity: def.stock },
+    // Not the productId_locationId_colorId compound-key shorthand — these
+    // seed products are colorless (colorId: null), and Prisma's generated
+    // type for that shorthand disallows null on a nullable compound field.
+    const existingInventoryItem = await prisma.inventoryItem.findFirst({
+      where: { productId: product.id, locationId: mainWarehouse.id, colorId: null },
+      select: { id: true },
     });
+    if (existingInventoryItem) {
+      await prisma.inventoryItem.update({ where: { id: existingInventoryItem.id }, data: { quantity: def.stock } });
+    } else {
+      await prisma.inventoryItem.create({
+        data: { productId: product.id, locationId: mainWarehouse.id, quantity: def.stock },
+      });
+    }
 
     // Idempotent: delete-then-recreate rather than append, so re-running
     // db:seed never duplicates images.

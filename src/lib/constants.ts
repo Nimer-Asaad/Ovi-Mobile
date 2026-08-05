@@ -174,6 +174,7 @@ export const ADMIN_NAV_ITEMS = [
   { label: "Products", labelAr: "المنتجات", href: "/admin/products" },
   { label: "Categories", labelAr: "الأقسام", href: "/admin/categories" },
   { label: "Brands", labelAr: "العلامات التجارية", href: "/admin/brands" },
+  { label: "Colors", labelAr: "الألوان", href: "/admin/colors" },
   { label: "Suppliers", labelAr: "الموردون", href: "/admin/suppliers" },
   { label: "Inventory", labelAr: "المخزون", href: "/admin/inventory" },
   { label: "Orders", labelAr: "الطلبات", href: "/admin/orders" },

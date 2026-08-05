@@ -1,50 +1,77 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import { returnStockFromRep, type RepStockTransferState } from "./actions";
-import { Select } from "@/components/ui/Select";
 import { Input } from "@/components/ui/Input";
 import { Textarea } from "@/components/ui/Textarea";
 import { Button } from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Spinner";
+import { ProductThumb, ProductQuickPicker, type PickableProduct } from "@/components/reps/ProductQuickPicker";
 
-interface ProductOption {
-  id: string;
-  sku: string;
-  name: string;
-  nameAr: string | null;
+export interface ReturnStockProductOption extends PickableProduct {
+  /** Colorless rep-car stock — a colored product's stock lives per-color
+   * on `colorOptions[].stock` instead. */
   repStock: number;
 }
 
 interface ReturnStockFormProps {
   repId: string;
-  products: ProductOption[];
+  products: ReturnStockProductOption[];
 }
 
 const initialState: RepStockTransferState = {};
 
+/** Single-transfer form (rep car → warehouse) — reuses the same
+ * search/thumbnail/color picker as the rep-facing stock-request and sale
+ * forms, replacing the previous plain product `<select>`. */
 export function ReturnStockForm({ repId, products }: ReturnStockFormProps) {
   const action = returnStockFromRep.bind(null, repId);
   const [state, formAction, isPending] = useActionState(action, initialState);
+  const [selected, setSelected] = useState<{ product: ReturnStockProductOption; colorId: string | null } | null>(
+    null,
+  );
 
   if (products.length === 0) {
     return <p className="text-sm text-neutral-bg/60">لا يملك هذا المندوب أي مخزون قابل للإرجاع حالياً.</p>;
   }
 
+  function handlePick(product: ReturnStockProductOption, colorId: string | null) {
+    setSelected({ product, colorId });
+  }
+
+  const selectedColor = selected?.colorId
+    ? (selected.product.colorOptions?.find((color) => color.id === selected.colorId) ?? null)
+    : null;
+  const availableStock = selectedColor ? (selectedColor.stock ?? 0) : (selected?.product.repStock ?? 0);
+
   return (
     <form action={formAction} className="flex max-w-xl flex-col gap-4">
-      <Select name="productId" label="المنتج" defaultValue="" required>
-        <option value="" disabled>
-          اختر منتجاً
-        </option>
-        {products.map((product) => (
-          <option key={product.id} value={product.id}>
-            {product.sku} — {product.nameAr ?? product.name} (مخزون المندوب الحالي: {product.repStock})
-          </option>
-        ))}
-      </Select>
+      <input type="hidden" name="productId" value={selected?.product.id ?? ""} />
+      <input type="hidden" name="colorId" value={selected?.colorId ?? ""} />
 
-      <Input name="quantity" type="number" min={1} step={1} label="الكمية" required />
+      {!selected ? (
+        <ProductQuickPicker products={products} excludeIds={new Set()} onPick={handlePick} placeholder="ابحث عن منتج لإرجاعه..." />
+      ) : (
+        <div className="flex items-center justify-between gap-3 rounded-card border border-navy-soft bg-navy-deep px-3 py-2">
+          <div className="flex items-center gap-3">
+            <ProductThumb product={selected.product} className="h-10 w-10" />
+            <div>
+              <p className="text-sm text-neutral-bg">
+                {selected.product.nameAr ?? selected.product.name}
+                {selectedColor && <span> — {selectedColor.nameAr ?? selectedColor.name}</span>}
+              </p>
+              <p className="text-xs text-neutral-bg/50">
+                {selected.product.sku} — مخزون المندوب الحالي: {availableStock}
+              </p>
+            </div>
+          </div>
+          <Button type="button" variant="ghost" size="sm" onClick={() => setSelected(null)}>
+            تغيير
+          </Button>
+        </div>
+      )}
+
+      <Input name="quantity" type="number" min={1} step={1} label="الكمية" required disabled={!selected} />
 
       <Textarea name="notes" label="ملاحظات / السبب (اختياري)" rows={3} />
 
@@ -54,7 +81,7 @@ export function ReturnStockForm({ repId, products }: ReturnStockFormProps) {
         </p>
       )}
 
-      <Button type="submit" variant="outline" disabled={isPending}>
+      <Button type="submit" variant="outline" disabled={isPending || !selected}>
         {isPending && <Spinner />}
         {isPending ? "جارٍ الحفظ..." : "إرجاع المخزون"}
       </Button>

@@ -60,6 +60,8 @@ export default async function AdminRepDetailPage({ params }: AdminRepDetailPageP
           orderBy: { updatedAt: "desc" },
           select: {
             quantity: true,
+            colorId: true,
+            color: { select: { name: true, nameAr: true } },
             product: {
               select: {
                 id: true,
@@ -108,6 +110,8 @@ export default async function AdminRepDetailPage({ params }: AdminRepDetailPageP
 
   const gridItems = stockItems.map((item) => ({
     productId: item.product.id,
+    colorId: item.colorId,
+    colorLabel: item.color ? (item.color.nameAr ?? item.color.name) : null,
     sku: item.product.sku,
     name: item.product.name,
     nameAr: item.product.nameAr,

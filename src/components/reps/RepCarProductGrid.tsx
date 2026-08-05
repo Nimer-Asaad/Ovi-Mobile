@@ -5,6 +5,9 @@ import { isLowStock } from "@/lib/inventory";
 
 export interface RepCarProductGridItem {
   productId: string;
+  /** Null for colorless products — one card per productId+colorId. */
+  colorId: string | null;
+  colorLabel: string | null;
   sku: string;
   name: string;
   nameAr: string | null;
@@ -44,7 +47,7 @@ export function RepCarProductGrid({
               const lowStock = isLowStock(item.quantity);
               return (
                 <div
-                  key={item.productId}
+                  key={`${item.productId}:${item.colorId ?? ""}`}
                   className="flex flex-col overflow-hidden rounded-card border border-navy-soft bg-navy-deep"
                 >
                   <div className="relative aspect-square w-full overflow-hidden bg-navy-soft">
@@ -67,7 +70,10 @@ export function RepCarProductGrid({
                     <p className="line-clamp-2 text-xs font-medium text-neutral-bg">
                       {item.nameAr ?? item.name}
                     </p>
-                    <p className="text-[11px] text-neutral-bg/50">{item.sku}</p>
+                    <p className="text-[11px] text-neutral-bg/50">
+                      {item.sku}
+                      {item.colorLabel && <span> — {item.colorLabel}</span>}
+                    </p>
                     {lowStock && (
                       <Badge variant="warning" className="mt-auto self-start">
                         مخزون منخفض

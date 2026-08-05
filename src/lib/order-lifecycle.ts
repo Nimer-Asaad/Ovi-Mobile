@@ -7,6 +7,7 @@ import {
   getValidNextOrderStatuses,
   transitionRestoresInventory,
 } from "@/lib/order-lifecycle-rules";
+import { incrementInventoryExisting, recordStockMovement, MissingInventoryError } from "@/lib/inventory-transactions";
 
 export {
   getValidNextOrderStatuses,
@@ -50,7 +51,7 @@ const ORDER_SELECT = {
   source: true,
   stockLocationId: true,
   inventoryRestoredAt: true,
-  items: { select: { productId: true, quantity: true } },
+  items: { select: { productId: true, colorId: true, quantity: true } },
   inventoryCompensation: { select: { id: true, type: true } },
 } satisfies Prisma.OrderSelect;
 
@@ -147,39 +148,34 @@ export async function transitionOrderStatus(
             });
 
             for (const item of order.items) {
-              const incremented = await tx.inventoryItem.updateMany({
-                where: { productId: item.productId, locationId: order.stockLocationId },
-                data: { quantity: { increment: item.quantity } },
-              });
-              if (incremented.count !== 1) {
-                throw new LifecycleDomainError(
-                  "MISSING_INVENTORY",
-                  "تعذر العثور على سجل المخزون الأصلي لأحد منتجات الطلب",
+              let change;
+              try {
+                change = await incrementInventoryExisting(
+                  tx,
+                  { productId: item.productId, colorId: item.colorId, locationId: order.stockLocationId },
+                  item.quantity,
                 );
+              } catch (err) {
+                if (err instanceof MissingInventoryError) {
+                  throw new LifecycleDomainError(
+                    "MISSING_INVENTORY",
+                    "تعذر العثور على سجل المخزون الأصلي لأحد منتجات الطلب",
+                  );
+                }
+                throw err;
               }
 
-              const current = await tx.inventoryItem.findUniqueOrThrow({
-                where: {
-                  productId_locationId: {
-                    productId: item.productId,
-                    locationId: order.stockLocationId,
-                  },
-                },
-                select: { quantity: true },
-              });
-
-              await tx.stockMovement.create({
-                data: {
-                  type: movementType,
-                  productId: item.productId,
-                  fromLocationId: null,
-                  toLocationId: order.stockLocationId,
-                  quantity: item.quantity,
-                  previousQuantity: current.quantity - item.quantity,
-                  newQuantity: current.quantity,
-                  note: `معالجة مخزون الطلب ${order.orderNumber}`,
-                  createdById: input.actorUserId,
-                },
+              await recordStockMovement(tx, {
+                type: movementType,
+                productId: item.productId,
+                colorId: item.colorId,
+                fromLocationId: null,
+                toLocationId: order.stockLocationId,
+                quantity: item.quantity,
+                previousQuantity: change.previousQuantity,
+                newQuantity: change.newQuantity,
+                note: `معالجة مخزون الطلب ${order.orderNumber}`,
+                createdById: input.actorUserId,
               });
             }
           }

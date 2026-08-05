@@ -60,6 +60,7 @@ export default async function AdminOrderDetailPage({ params }: AdminOrderDetailP
           quantity: true,
           unitPriceCents: true,
           totalCents: true,
+          color: { select: { name: true, nameAr: true } },
           product: {
             select: {
               sku: true,
@@ -136,7 +137,10 @@ export default async function AdminOrderDetailPage({ params }: AdminOrderDetailP
                     <p className="text-sm font-medium text-neutral-bg">
                       {item.product.nameAr ?? item.product.name}
                     </p>
-                    <p className="text-xs text-neutral-bg/50">{item.product.sku}</p>
+                    <p className="text-xs text-neutral-bg/50">
+                      {item.product.sku}
+                      {item.color && <span> — {item.color.nameAr ?? item.color.name}</span>}
+                    </p>
                     <p className="text-xs text-neutral-bg/60">
                       {formatCurrencyFromCents(item.unitPriceCents)}
                       {isWholesaleOrder && " (سعر الجملة)"} × {item.quantity}

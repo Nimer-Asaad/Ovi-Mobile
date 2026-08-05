@@ -2,6 +2,8 @@ import { z } from "zod";
 
 const saleItemSchema = z.object({
   productId: z.string().min(1, "المنتج مطلوب"),
+  /** Null for a colorless product/line. */
+  colorId: z.string().nullable().optional(),
   quantity: z.number().int("الكمية يجب أن تكون رقماً صحيحاً").positive("الكمية يجب أن تكون أكبر من صفر"),
   /** Already converted to integer agorot cents client-side, same convention
    * as every other money field. */
@@ -13,9 +15,10 @@ export const repSaleSchema = z.object({
     .array(saleItemSchema)
     .min(1, "يجب إضافة منتج واحد على الأقل")
     .max(50, "عدد كبير جداً من المنتجات في عملية بيع واحدة")
-    .refine((items) => new Set(items.map((item) => item.productId)).size === items.length, {
-      message: "لا يمكن تكرار نفس المنتج أكثر من مرة — عدّل الكمية بدلاً من ذلك",
-    }),
+    .refine(
+      (items) => new Set(items.map((item) => `${item.productId}:${item.colorId ?? ""}`)).size === items.length,
+      { message: "لا يمكن تكرار نفس المنتج/اللون أكثر من مرة — عدّل الكمية بدلاً من ذلك" },
+    ),
   customerName: z.string().min(2, "اسم العميل مطلوب"),
   customerPhone: z.string().min(7, "رقم هاتف العميل مطلوب"),
   city: z.string().optional(),

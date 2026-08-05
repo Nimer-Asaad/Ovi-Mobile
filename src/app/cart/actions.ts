@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireCartEligibleUser } from "@/lib/auth/guards";
 import { STOCK_CHECK_PRODUCT_SELECT, getAvailableStock } from "@/lib/cart";
@@ -24,6 +25,7 @@ function parseQuantity(formData: FormData): { quantity: number } | { error: stri
 
 export async function addToCart(
   productId: string,
+  colorId: string | null,
   _prevState: CartActionState,
   formData: FormData,
 ): Promise<CartActionState> {
@@ -36,14 +38,25 @@ export async function addToCart(
 
   const product = await prisma.product.findUnique({
     where: { id: productId },
-    select: STOCK_CHECK_PRODUCT_SELECT,
+    select: { ...STOCK_CHECK_PRODUCT_SELECT, colorOptions: { select: { colorId: true } } },
   });
 
   if (!product || !product.isActive) {
     return { error: OUT_OF_STOCK_MESSAGE };
   }
 
-  const availableStock = getAvailableStock(product);
+  // Never trust the client's colorId — a product with color options must
+  // get exactly one of its own colors, a colorless product must get none.
+  const hasColorOptions = product.colorOptions.length > 0;
+  if (hasColorOptions && (!colorId || !product.colorOptions.some((option) => option.colorId === colorId))) {
+    return { error: "اختر لوناً متوفراً لهذا المنتج" };
+  }
+  if (!hasColorOptions && colorId) {
+    return { error: "هذا المنتج لا يتوفر بألوان" };
+  }
+  const resolvedColorId = hasColorOptions ? colorId : null;
+
+  const availableStock = getAvailableStock(product, resolvedColorId);
 
   const cart = await prisma.cart.upsert({
     where: { userId: user.id },
@@ -51,9 +64,13 @@ export async function addToCart(
     create: { userId: user.id },
   });
 
-  const existingItem = await prisma.cartItem.findUnique({
-    where: { cartId_productId: { cartId: cart.id, productId } },
-  });
+  // Never the productId_locationId_colorId-style compound-key shorthand —
+  // Prisma's generated type for it disallows `null`, and SQL unique
+  // constraints treat NULL as distinct from every other NULL anyway, so a
+  // colorless product's uniqueness is enforced by a hand-authored partial
+  // index instead (see the migration) — only a plain filter can query it.
+  const itemFilter = { cartId: cart.id, productId, colorId: resolvedColorId };
+  const existingItem = await prisma.cartItem.findFirst({ where: itemFilter });
 
   const newQuantity = (existingItem?.quantity ?? 0) + parsedQuantity.quantity;
 
@@ -61,11 +78,21 @@ export async function addToCart(
     return { error: `الكمية المتوفرة في المخزون هي ${availableStock} فقط` };
   }
 
-  await prisma.cartItem.upsert({
-    where: { cartId_productId: { cartId: cart.id, productId } },
-    update: { quantity: newQuantity },
-    create: { cartId: cart.id, productId, quantity: newQuantity },
-  });
+  if (existingItem) {
+    await prisma.cartItem.update({ where: { id: existingItem.id }, data: { quantity: newQuantity } });
+  } else {
+    try {
+      await prisma.cartItem.create({ data: { ...itemFilter, quantity: newQuantity } });
+    } catch (err) {
+      // Lost a create race to a concurrent request for the same line —
+      // fall back to updating the row it just inserted.
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+        await prisma.cartItem.updateMany({ where: itemFilter, data: { quantity: newQuantity } });
+      } else {
+        throw err;
+      }
+    }
+  }
 
   revalidatePath("/cart");
   return { success: true };
@@ -92,7 +119,7 @@ export async function updateCartItemQuantity(
     return { error: CART_ITEM_NOT_FOUND_MESSAGE };
   }
 
-  const availableStock = getAvailableStock(item.product);
+  const availableStock = getAvailableStock(item.product, item.colorId);
   if (parsedQuantity.quantity > availableStock) {
     return { error: `الكمية المتوفرة في المخزون هي ${availableStock} فقط` };
   }

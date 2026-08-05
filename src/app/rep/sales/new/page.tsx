@@ -21,6 +21,8 @@ export default async function RepNewSalePage() {
           orderBy: { updatedAt: "desc" },
           select: {
             quantity: true,
+            colorId: true,
+            color: { select: { id: true, name: true, nameAr: true, hexCode: true } },
             product: {
               select: {
                 id: true,
@@ -54,18 +56,58 @@ export default async function RepNewSalePage() {
       : Promise.resolve([]),
   ]);
 
-  const options = items
-    .filter((item) => item.product.isActive)
-    .map((item) => ({
+  // Group per-color rep-car InventoryItem rows into one option per product
+  // — a colorless product's stock lands in `repStock`, a colored product's
+  // in `colorOptions[].stock`. Only in-stock rows exist here (the query
+  // filters quantity > 0), unlike the stock-request page, since a rep can
+  // only sell what's physically in the car right now.
+  interface SaleColorOption {
+    id: string;
+    name: string;
+    nameAr: string | null;
+    hexCode: string | null;
+    stock: number;
+  }
+  interface SaleProductAccumulator {
+    id: string;
+    sku: string;
+    name: string;
+    nameAr: string | null;
+    retailPriceCents: number;
+    thumbnailUrl: string | null;
+    thumbnailAlt: string | null;
+    repStock: number;
+    colorOptions: SaleColorOption[];
+  }
+
+  const byProductId = new Map<string, SaleProductAccumulator>();
+  for (const item of items) {
+    if (!item.product.isActive) continue;
+    const existing = byProductId.get(item.product.id) ?? {
       id: item.product.id,
       sku: item.product.sku,
       name: item.product.name,
       nameAr: item.product.nameAr,
-      repStock: item.quantity,
       retailPriceCents: item.product.retailPriceCents,
       thumbnailUrl: item.product.images[0]?.url ?? null,
       thumbnailAlt: item.product.images[0]?.altText ?? null,
-    }));
+      repStock: 0,
+      colorOptions: [],
+    };
+    if (item.colorId && item.color) {
+      existing.colorOptions.push({
+        id: item.color.id,
+        name: item.color.name,
+        nameAr: item.color.nameAr,
+        hexCode: item.color.hexCode,
+        stock: item.quantity,
+      });
+    } else {
+      existing.repStock = item.quantity;
+    }
+    byProductId.set(item.product.id, existing);
+  }
+  const options = [...byProductId.values()];
 
   const customers = pastOrders
     .filter((order) => order.contactName && order.contactPhone)

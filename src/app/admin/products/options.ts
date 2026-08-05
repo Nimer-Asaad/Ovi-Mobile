@@ -27,3 +27,13 @@ export async function getSupplierOptions(currentId?: string | null) {
   const current = await prisma.supplier.findUnique({ where: { id: currentId } });
   return current ? [...active, current] : active;
 }
+
+/** Same "active + currently-assigned even if deactivated" pattern as the
+ * others, but for a multi-select (a product can offer several colors). */
+export async function getColorOptions(currentIds: string[] = []) {
+  const active = await prisma.color.findMany({ where: { isActive: true }, orderBy: { name: "asc" } });
+  const missingIds = currentIds.filter((id) => !active.some((color) => color.id === id));
+  if (missingIds.length === 0) return active;
+  const missing = await prisma.color.findMany({ where: { id: { in: missingIds } } });
+  return [...active, ...missing];
+}

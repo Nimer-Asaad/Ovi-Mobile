@@ -34,17 +34,22 @@ export async function getRepStockStats(locationId: string | null): Promise<RepSt
 
   const items = await prisma.inventoryItem.findMany({
     where: { locationId, quantity: { gt: 0 } },
-    select: { quantity: true },
+    select: { productId: true, quantity: true },
   });
 
   let totalUnits = 0;
   let lowStockCount = 0;
+  const distinctProductIds = new Set<string>();
   for (const item of items) {
     totalUnits += item.quantity;
     if (isLowStock(item.quantity)) lowStockCount += 1;
+    // Rows, not products, once a product's colors are separate InventoryItem
+    // rows — count distinct productId so a 3-color product still counts as
+    // one product, not three.
+    distinctProductIds.add(item.productId);
   }
 
-  return { totalUnits, distinctProducts: items.length, lowStockCount };
+  return { totalUnits, distinctProducts: distinctProductIds.size, lowStockCount };
 }
 
 /** Admin-only: total stock value at a rep location using Product.costCents.

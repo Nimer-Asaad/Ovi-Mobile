@@ -38,6 +38,7 @@ export default async function AdminInvoicePage({ params }: AdminInvoicePageProps
           quantity: true,
           unitPriceCents: true,
           totalCents: true,
+          color: { select: { name: true, nameAr: true } },
           product: { select: { sku: true, name: true, nameAr: true } },
         },
       },

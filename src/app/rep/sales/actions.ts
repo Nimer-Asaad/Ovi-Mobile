@@ -7,15 +7,11 @@ import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth/guards";
 import { ROLES, ORDER_SOURCES, ORDER_STATUSES, PAYMENT_METHODS, PAYMENT_STATUSES, STOCK_MOVEMENT_TYPES } from "@/lib/constants";
 import { repSaleSchema } from "@/lib/validation/repSale";
+import { decrementInventoryAtomic, recordStockMovement, InsufficientInventoryError } from "@/lib/inventory-transactions";
 
 export interface RepSaleState {
   error?: string;
 }
-
-/** Thrown inside the sale transaction when the rep's car stock is no
- * longer sufficient at commit time — caught outside to return a clean
- * Arabic message instead of a raw transaction rollback error. */
-class InsufficientStockError extends Error {}
 
 const PARSE_ERROR_MESSAGE = "بيانات البيع غير صالحة";
 
@@ -84,17 +80,21 @@ export async function createRepSale(_prevState: RepSaleState, formData: FormData
   const productIds = saleItems.map((item) => item.productId);
   const products = await prisma.product.findMany({
     where: { id: { in: productIds } },
-    select: { id: true, isActive: true, name: true, nameAr: true },
+    select: { id: true, isActive: true, name: true, nameAr: true, colorOptions: { select: { colorId: true } } },
   });
   const productById = new Map(products.map((product) => [product.id, product]));
 
   const inventoryItems = await prisma.inventoryItem.findMany({
     where: { locationId, productId: { in: productIds } },
-    select: { productId: true, quantity: true },
+    select: { productId: true, colorId: true, quantity: true },
   });
-  const stockByProductId = new Map(inventoryItems.map((item) => [item.productId, item.quantity]));
+  const stockByLineKey = new Map(
+    inventoryItems.map((item) => [`${item.productId}:${item.colorId ?? ""}`, item.quantity]),
+  );
 
-  for (const item of saleItems) {
+  const lines = saleItems.map((item) => ({ ...item, colorId: item.colorId ?? null }));
+
+  for (const item of lines) {
     const product = productById.get(item.productId);
     if (!product) {
       return { error: "أحد المنتجات المحددة غير موجود" };
@@ -102,7 +102,10 @@ export async function createRepSale(_prevState: RepSaleState, formData: FormData
     if (!product.isActive) {
       return { error: `المنتج "${product.nameAr ?? product.name}" غير مفعّل ولا يمكن بيعه` };
     }
-    const available = stockByProductId.get(item.productId) ?? 0;
+    if (item.colorId && !product.colorOptions.some((option) => option.colorId === item.colorId)) {
+      return { error: `اللون المحدد لا ينتمي للمنتج "${product.nameAr ?? product.name}"` };
+    }
+    const available = stockByLineKey.get(`${item.productId}:${item.colorId ?? ""}`) ?? 0;
     if (available <= 0) {
       return { error: `المنتج "${product.nameAr ?? product.name}" غير موجود في مخزونك` };
     }
@@ -111,7 +114,7 @@ export async function createRepSale(_prevState: RepSaleState, formData: FormData
     }
   }
 
-  const totalCents = saleItems.reduce((sum, item) => sum + item.unitPriceCents * item.quantity, 0);
+  const totalCents = lines.reduce((sum, item) => sum + item.unitPriceCents * item.quantity, 0);
 
   let orderNumber = "";
   let succeeded = false;
@@ -139,8 +142,9 @@ export async function createRepSale(_prevState: RepSaleState, formData: FormData
             paymentStatus: PAYMENT_STATUSES.PAID,
             paidAmountCents: totalCents,
             items: {
-              create: saleItems.map((item) => ({
+              create: lines.map((item) => ({
                 productId: item.productId,
+                colorId: item.colorId,
                 quantity: item.quantity,
                 unitPriceCents: item.unitPriceCents,
                 totalCents: item.unitPriceCents * item.quantity,
@@ -151,41 +155,33 @@ export async function createRepSale(_prevState: RepSaleState, formData: FormData
 
         // Per line: atomic conditional decrement — never a stale
         // read-then-write. If the rep's car stock is no longer sufficient
-        // (e.g. a concurrent sale of the same item), `count !== 1` and the
-        // whole sale rolls back instead of driving stock negative.
-        for (const item of saleItems) {
-          const decremented = await tx.inventoryItem.updateMany({
-            where: { productId: item.productId, locationId, quantity: { gte: item.quantity } },
-            data: { quantity: { decrement: item.quantity } },
-          });
-          if (decremented.count !== 1) {
-            throw new InsufficientStockError("INSUFFICIENT_STOCK");
-          }
+        // (e.g. a concurrent sale of the same item), the whole sale rolls
+        // back instead of driving stock negative.
+        for (const item of lines) {
+          const change = await decrementInventoryAtomic(
+            tx,
+            { productId: item.productId, colorId: item.colorId, locationId },
+            item.quantity,
+          );
 
-          const current = await tx.inventoryItem.findUniqueOrThrow({
-            where: { productId_locationId: { productId: item.productId, locationId } },
-            select: { quantity: true },
-          });
-
-          await tx.stockMovement.create({
-            data: {
-              type: STOCK_MOVEMENT_TYPES.SALE_OUT,
-              productId: item.productId,
-              fromLocationId: locationId,
-              toLocationId: null,
-              quantity: item.quantity,
-              previousQuantity: current.quantity + item.quantity,
-              newQuantity: current.quantity,
-              note: `بيع مباشر — طلب ${orderNumber}`,
-              createdById: user.id,
-            },
+          await recordStockMovement(tx, {
+            type: STOCK_MOVEMENT_TYPES.SALE_OUT,
+            productId: item.productId,
+            colorId: item.colorId,
+            fromLocationId: locationId,
+            toLocationId: null,
+            quantity: item.quantity,
+            previousQuantity: change.previousQuantity,
+            newQuantity: change.newQuantity,
+            note: `بيع مباشر — طلب ${orderNumber}`,
+            createdById: user.id,
           });
         }
       });
       succeeded = true;
       break;
     } catch (err) {
-      if (err instanceof InsufficientStockError) {
+      if (err instanceof InsufficientInventoryError) {
         return { error: "الكمية المطلوبة أكبر من مخزونك الحالي لأحد المنتجات، حاول مرة أخرى" };
       }
       const isDuplicateOrderNumber =

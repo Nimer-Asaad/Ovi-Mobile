@@ -10,20 +10,12 @@ import { getMainWarehouse } from "@/lib/inventory";
 import { getOrCreateMerchantAccount, getExistingCustomerAccountId } from "@/lib/accounts";
 import { checkoutSchema } from "@/lib/validation/checkout";
 import { ORDER_SOURCES, ORDER_STATUSES, PAYMENT_METHODS, PAYMENT_STATUSES, STOCK_MOVEMENT_TYPES } from "@/lib/constants";
+import { decrementInventoryAtomic, recordStockMovement, InsufficientInventoryError } from "@/lib/inventory-transactions";
 import type { z } from "zod";
 
 export interface CheckoutState {
   error?: string;
   fieldErrors?: Record<string, string>;
-}
-
-/** Thrown inside the checkout transaction when a line's Main Warehouse
- * stock is no longer sufficient at commit time — caught outside to return
- * a clean Arabic message instead of a raw transaction rollback error. */
-class InsufficientStockError extends Error {
-  constructor(public readonly productName: string) {
-    super("INSUFFICIENT_STOCK");
-  }
 }
 
 function fieldErrorsFrom(error: z.ZodError) {
@@ -70,7 +62,7 @@ export async function placeOrder(_prevState: CheckoutState, formData: FormData):
     if (!item.product.isActive) {
       return { error: `المنتج "${item.product.name}" لم يعد متوفراً` };
     }
-    const availableStock = getAvailableStock(item.product);
+    const availableStock = getAvailableStock(item.product, item.colorId);
     if (item.quantity > availableStock) {
       return {
         error: `الكمية المطلوبة من "${item.product.name}" تتجاوز المخزون المتوفر (${availableStock})`,
@@ -88,11 +80,14 @@ export async function placeOrder(_prevState: CheckoutState, formData: FormData):
     const unitPriceCents = readCatalogPriceCents(item.product);
     return {
       productId: item.product.id,
+      colorId: item.colorId,
       quantity: item.quantity,
       unitPriceCents,
       totalCents: unitPriceCents * item.quantity,
     };
   });
+
+  const productNameById = new Map(cart.items.map((item) => [item.product.id, item.product.name]));
 
   const subtotalCents = orderItemsData.reduce((sum, item) => sum + item.totalCents, 0);
 
@@ -148,36 +143,23 @@ export async function placeOrder(_prevState: CheckoutState, formData: FormData):
         // (or no longer exists), `count` is 0 and the whole order rolls
         // back — nothing is oversold.
         for (const item of cart.items) {
-          const decremented = await tx.inventoryItem.updateMany({
-            where: {
-              productId: item.product.id,
-              locationId: warehouse.id,
-              quantity: { gte: item.quantity },
-            },
-            data: { quantity: { decrement: item.quantity } },
-          });
+          const change = await decrementInventoryAtomic(
+            tx,
+            { productId: item.product.id, colorId: item.colorId, locationId: warehouse.id },
+            item.quantity,
+          );
 
-          if (decremented.count !== 1) {
-            throw new InsufficientStockError(item.product.name);
-          }
-
-          const current = await tx.inventoryItem.findUniqueOrThrow({
-            where: { productId_locationId: { productId: item.product.id, locationId: warehouse.id } },
-            select: { quantity: true },
-          });
-
-          await tx.stockMovement.create({
-            data: {
-              type: STOCK_MOVEMENT_TYPES.SALE_OUT,
-              productId: item.product.id,
-              fromLocationId: warehouse.id,
-              toLocationId: null,
-              quantity: item.quantity,
-              previousQuantity: current.quantity + item.quantity,
-              newQuantity: current.quantity,
-              note: `طلب ${orderNumber}`,
-              createdById: user.id,
-            },
+          await recordStockMovement(tx, {
+            type: STOCK_MOVEMENT_TYPES.SALE_OUT,
+            productId: item.product.id,
+            colorId: item.colorId,
+            fromLocationId: warehouse.id,
+            toLocationId: null,
+            quantity: item.quantity,
+            previousQuantity: change.previousQuantity,
+            newQuantity: change.newQuantity,
+            note: `طلب ${orderNumber}`,
+            createdById: user.id,
           });
         }
 
@@ -189,9 +171,10 @@ export async function placeOrder(_prevState: CheckoutState, formData: FormData):
       createdOrderId = order.id;
       break;
     } catch (err) {
-      if (err instanceof InsufficientStockError) {
+      if (err instanceof InsufficientInventoryError) {
+        const productName = productNameById.get(err.productId) ?? "";
         return {
-          error: `الكمية المطلوبة من "${err.productName}" لم تعد متوفرة، يرجى تحديث السلة`,
+          error: `الكمية المطلوبة من "${productName}" لم تعد متوفرة، يرجى تحديث السلة`,
         };
       }
       const isDuplicateOrderNumber =

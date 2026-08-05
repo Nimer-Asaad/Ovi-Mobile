@@ -7,16 +7,16 @@ import { ROLES, STOCK_REQUEST_STATUSES, STOCK_MOVEMENT_TYPES } from "@/lib/const
 import { getMainWarehouse } from "@/lib/inventory";
 import { getOrCreateRepLocation } from "@/lib/reps";
 import { repStockRequestReviewSchema } from "@/lib/validation/repStockRequest";
+import {
+  decrementInventoryAtomic,
+  incrementInventoryUpsert,
+  recordStockMovement,
+  InsufficientInventoryError,
+} from "@/lib/inventory-transactions";
 
 export interface RepStockRequestActionState {
   error?: string;
 }
-
-/** Thrown inside completeStockRequest's transaction when a line's Main
- * Warehouse stock is no longer sufficient at commit time — carries the
- * product name, caught outside to return a clean Arabic message instead
- * of a raw transaction rollback error. */
-class InsufficientStockError extends Error {}
 
 const PARSE_ERROR_MESSAGE = "بيانات المراجعة غير صالحة";
 
@@ -188,7 +188,7 @@ export async function completeStockRequest(
       status: true,
       salesRep: { select: { id: true, user: { select: { name: true } } } },
       items: {
-        select: { id: true, productId: true, requestedQuantity: true, approvedQuantity: true },
+        select: { id: true, productId: true, colorId: true, requestedQuantity: true, approvedQuantity: true },
       },
     },
   });
@@ -213,9 +213,11 @@ export async function completeStockRequest(
   const productIds = linesToTransfer.map((line) => line.productId);
   const warehouseItems = await prisma.inventoryItem.findMany({
     where: { productId: { in: productIds }, locationId: warehouse.id },
-    select: { productId: true, quantity: true },
+    select: { productId: true, colorId: true, quantity: true },
   });
-  const warehouseQtyByProduct = new Map(warehouseItems.map((item) => [item.productId, item.quantity]));
+  const warehouseQtyByLineKey = new Map(
+    warehouseItems.map((item) => [`${item.productId}:${item.colorId ?? ""}`, item.quantity]),
+  );
 
   const products = await prisma.product.findMany({
     where: { id: { in: productIds } },
@@ -224,7 +226,7 @@ export async function completeStockRequest(
   const productById = new Map(products.map((product) => [product.id, product]));
 
   for (const line of linesToTransfer) {
-    const available = warehouseQtyByProduct.get(line.productId) ?? 0;
+    const available = warehouseQtyByLineKey.get(`${line.productId}:${line.colorId ?? ""}`) ?? 0;
     if (line.approvedQuantity > available) {
       const product = productById.get(line.productId);
       return {
@@ -247,42 +249,32 @@ export async function completeStockRequest(
 
       for (const line of linesToTransfer) {
         // Atomic conditional decrement on the source (warehouse) — never a
-        // stale read-then-write. `count !== 1` means the warehouse no
-        // longer has enough stock for this line, so the whole completion
-        // rolls back rather than silently going negative.
-        const decremented = await tx.inventoryItem.updateMany({
-          where: { productId: line.productId, locationId: warehouse.id, quantity: { gte: line.approvedQuantity } },
-          data: { quantity: { decrement: line.approvedQuantity } },
-        });
-        if (decremented.count !== 1) {
-          const product = productById.get(line.productId);
-          throw new InsufficientStockError(product?.nameAr ?? product?.name ?? line.productId);
-        }
+        // stale read-then-write. Insufficient stock for this line rolls
+        // back the whole completion rather than silently going negative.
+        await decrementInventoryAtomic(
+          tx,
+          { productId: line.productId, colorId: line.colorId, locationId: warehouse.id },
+          line.approvedQuantity,
+        );
 
         // Atomic increment on the destination (rep car).
-        await tx.inventoryItem.upsert({
-          where: { productId_locationId: { productId: line.productId, locationId: repLocation.id } },
-          update: { quantity: { increment: line.approvedQuantity } },
-          create: { productId: line.productId, locationId: repLocation.id, quantity: line.approvedQuantity },
-        });
+        const change = await incrementInventoryUpsert(
+          tx,
+          { productId: line.productId, colorId: line.colorId, locationId: repLocation.id },
+          line.approvedQuantity,
+        );
 
-        const repItemAfter = await tx.inventoryItem.findUniqueOrThrow({
-          where: { productId_locationId: { productId: line.productId, locationId: repLocation.id } },
-          select: { quantity: true },
-        });
-
-        await tx.stockMovement.create({
-          data: {
-            type: STOCK_MOVEMENT_TYPES.REP_ASSIGNMENT,
-            productId: line.productId,
-            fromLocationId: warehouse.id,
-            toLocationId: repLocation.id,
-            quantity: line.approvedQuantity,
-            previousQuantity: repItemAfter.quantity - line.approvedQuantity,
-            newQuantity: repItemAfter.quantity,
-            note: `استلام طلب مخزون سيارة — طلب ${noteSuffix}`,
-            createdById: admin.id,
-          },
+        await recordStockMovement(tx, {
+          type: STOCK_MOVEMENT_TYPES.REP_ASSIGNMENT,
+          productId: line.productId,
+          colorId: line.colorId,
+          fromLocationId: warehouse.id,
+          toLocationId: repLocation.id,
+          quantity: line.approvedQuantity,
+          previousQuantity: change.previousQuantity,
+          newQuantity: change.newQuantity,
+          note: `استلام طلب مخزون سيارة — طلب ${noteSuffix}`,
+          createdById: admin.id,
         });
       }
 
@@ -295,9 +287,10 @@ export async function completeStockRequest(
     if (err instanceof Error && err.message === ALREADY_PROCESSED) {
       return { error: "تم استلام هذا الطلب بالفعل" };
     }
-    if (err instanceof InsufficientStockError) {
+    if (err instanceof InsufficientInventoryError) {
+      const product = productById.get(err.productId);
       return {
-        error: `الكمية المتوفرة من "${err.message}" في المستودع الرئيسي لم تعد كافية`,
+        error: `الكمية المتوفرة من "${product?.nameAr ?? product?.name ?? ""}" في المستودع الرئيسي لم تعد كافية`,
       };
     }
     throw err;

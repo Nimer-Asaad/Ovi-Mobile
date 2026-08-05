@@ -1,7 +1,11 @@
+"use client";
+
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { AddToCartButton } from "@/components/cart/AddToCartButton";
+import { ColorSwatchSelector, type ColorSwatchOption } from "@/components/catalog/ColorSwatchSelector";
 import { formatCurrencyFromCents } from "@/lib/utils";
 import type { CartEligibility } from "@/lib/cart";
 
@@ -14,15 +18,24 @@ export interface ProductPurchasePanelProps {
   priceCents: number;
   isWholesale: boolean;
   isFeatured: boolean;
+  /** Whole-product stock, used only when there are no color options. */
   totalStock: number;
+  /** Empty for a colorless product. */
+  colorOptions: ColorSwatchOption[];
   cartEligibility: CartEligibility;
   imageUrl?: string | null;
 }
 
-/** Purchase card — title/meta/price/stock/cart action. Purely presentational:
- * every prop is a plain value the page already computes from the existing
- * price-mode select and `readCatalogPriceCents`/`isWholesalePriced` helpers,
- * so no pricing or cart logic lives here. */
+function pickDefaultColorId(colors: ColorSwatchOption[]): string | null {
+  if (colors.length === 0) return null;
+  return (colors.find((color) => color.stock > 0) ?? colors[0])?.id ?? null;
+}
+
+/** Purchase card — title/meta/price/stock/color/cart action. Every prop the
+ * page already computes from the existing price-mode select and
+ * readCatalogPriceCents/isWholesalePriced helpers; the only local state is
+ * which color is currently selected, which drives the displayed stock and
+ * the AddToCartButton's colorId. */
 export function ProductPurchasePanel({
   productId,
   title,
@@ -33,9 +46,19 @@ export function ProductPurchasePanel({
   isWholesale,
   isFeatured,
   totalStock,
+  colorOptions,
   cartEligibility,
   imageUrl,
 }: ProductPurchasePanelProps) {
+  const [selectedColorId, setSelectedColorId] = useState<string | null>(() => pickDefaultColorId(colorOptions));
+
+  const hasColors = colorOptions.length > 0;
+  const selectedColor = useMemo(
+    () => colorOptions.find((color) => color.id === selectedColorId) ?? null,
+    [colorOptions, selectedColorId],
+  );
+  const effectiveStock = hasColors ? (selectedColor?.stock ?? 0) : totalStock;
+
   return (
     <Card className="flex animate-fade-in flex-col gap-4 transition-shadow hover:shadow-lg">
       {isFeatured && <Badge variant="gold">مميز</Badge>}
@@ -55,8 +78,12 @@ export function ProductPurchasePanel({
         {isWholesale && <Badge variant="gold">سعر الجملة</Badge>}
       </div>
 
-      <Badge variant={totalStock > 0 ? "success" : "danger"} className="self-start">
-        {totalStock > 0 ? "متوفر" : "غير متوفر حالياً"}
+      {hasColors && (
+        <ColorSwatchSelector colors={colorOptions} selectedColorId={selectedColorId} onSelect={setSelectedColorId} />
+      )}
+
+      <Badge variant={effectiveStock > 0 ? "success" : "danger"} className="self-start">
+        {effectiveStock > 0 ? "متوفر" : "غير متوفر حالياً"}
       </Badge>
 
       <div className="mt-2">
@@ -68,10 +95,11 @@ export function ProductPurchasePanel({
             سجّل الدخول للشراء
           </Link>
         )}
-        {cartEligibility === "eligible" && totalStock > 0 && (
+        {cartEligibility === "eligible" && effectiveStock > 0 && (!hasColors || selectedColorId) && (
           <AddToCartButton
             productId={productId}
-            maxQuantity={totalStock}
+            colorId={selectedColorId}
+            maxQuantity={effectiveStock}
             showQuantityInput
             productName={title}
             productSku={sku}

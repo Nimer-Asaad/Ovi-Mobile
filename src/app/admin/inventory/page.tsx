@@ -58,7 +58,9 @@ export default async function AdminInventoryPage({ searchParams }: AdminInventor
 
   let rows = products.map((product) => ({
     ...product,
-    stock: product.inventoryItems[0]?.quantity ?? 0,
+    // Sum, not inventoryItems[0] — a colored product has one InventoryItem
+    // row per color at this same warehouse location, not just one.
+    stock: product.inventoryItems.reduce((sum, item) => sum + item.quantity, 0),
   }));
 
   if (lowStock === "1") {
@@ -100,6 +102,9 @@ export default async function AdminInventoryPage({ searchParams }: AdminInventor
           <>
             <Link href="/admin/inventory/movements">
               <Button variant="outline">سجل الحركات</Button>
+            </Link>
+            <Link href="/admin/inventory/colors">
+              <Button variant="outline">جرد الألوان</Button>
             </Link>
             <Link href="/admin/inventory/adjust">
               <Button>تعديل مخزون</Button>

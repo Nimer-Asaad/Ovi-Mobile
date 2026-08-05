@@ -1,11 +1,14 @@
 import { requireRole } from "@/lib/auth/guards";
 import { ROLES } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
+import { getMainWarehouse } from "@/lib/inventory";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { RepStockRequestForm } from "@/components/reps/RepStockRequestForm";
 
 export default async function NewRepStockRequestPage() {
   await requireRole([ROLES.SALES_REPRESENTATIVE]);
+
+  const warehouse = await getMainWarehouse();
 
   const products = await prisma.product.findMany({
     where: { isActive: true },
@@ -22,8 +25,21 @@ export default async function NewRepStockRequestPage() {
         orderBy: [{ isMain: "desc" }, { sortOrder: "asc" }],
         take: 1,
       },
+      colorOptions: {
+        select: { color: { select: { id: true, name: true, nameAr: true, hexCode: true } } },
+        orderBy: { sortOrder: "asc" },
+      },
     },
   });
+
+  const productIds = products.map((product) => product.id);
+  const warehouseInventory = await prisma.inventoryItem.findMany({
+    where: { productId: { in: productIds }, locationId: warehouse.id, colorId: { not: null } },
+    select: { productId: true, colorId: true, quantity: true },
+  });
+  const warehouseStockByKey = new Map(
+    warehouseInventory.map((item) => [`${item.productId}:${item.colorId}`, item.quantity]),
+  );
 
   const options = products.map((product) => ({
     id: product.id,
@@ -34,6 +50,13 @@ export default async function NewRepStockRequestPage() {
     brandLabel: product.brand?.name ?? null,
     thumbnailUrl: product.images[0]?.url ?? null,
     thumbnailAlt: product.images[0]?.altText ?? null,
+    colorOptions: product.colorOptions.map((option) => ({
+      id: option.color.id,
+      name: option.color.name,
+      nameAr: option.color.nameAr,
+      hexCode: option.color.hexCode,
+      stock: warehouseStockByKey.get(`${product.id}:${option.color.id}`) ?? 0,
+    })),
   }));
 
   return (

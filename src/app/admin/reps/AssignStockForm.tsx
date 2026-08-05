@@ -1,46 +1,73 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import { assignStockToRep, type RepStockTransferState } from "./actions";
-import { Select } from "@/components/ui/Select";
 import { Input } from "@/components/ui/Input";
 import { Textarea } from "@/components/ui/Textarea";
 import { Button } from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Spinner";
+import { ProductThumb, ProductQuickPicker, type PickableProduct } from "@/components/reps/ProductQuickPicker";
 
-interface ProductOption {
-  id: string;
-  sku: string;
-  name: string;
-  nameAr: string | null;
+export interface AssignStockProductOption extends PickableProduct {
+  /** Colorless warehouse stock — a colored product's stock lives per-color
+   * on `colorOptions[].stock` instead. */
   warehouseStock: number;
 }
 
 interface AssignStockFormProps {
   repId: string;
-  products: ProductOption[];
+  products: AssignStockProductOption[];
 }
 
 const initialState: RepStockTransferState = {};
 
+/** Single-transfer form (warehouse → rep car) — reuses the same
+ * search/thumbnail/color picker as the rep-facing stock-request and sale
+ * forms, replacing the previous plain product `<select>`. */
 export function AssignStockForm({ repId, products }: AssignStockFormProps) {
   const action = assignStockToRep.bind(null, repId);
   const [state, formAction, isPending] = useActionState(action, initialState);
+  const [selected, setSelected] = useState<{ product: AssignStockProductOption; colorId: string | null } | null>(
+    null,
+  );
+
+  function handlePick(product: AssignStockProductOption, colorId: string | null) {
+    setSelected({ product, colorId });
+  }
+
+  const selectedColor = selected?.colorId
+    ? (selected.product.colorOptions?.find((color) => color.id === selected.colorId) ?? null)
+    : null;
+  const availableStock = selectedColor ? (selectedColor.stock ?? 0) : (selected?.product.warehouseStock ?? 0);
 
   return (
     <form action={formAction} className="flex max-w-xl flex-col gap-4">
-      <Select name="productId" label="المنتج" defaultValue="" required>
-        <option value="" disabled>
-          اختر منتجاً
-        </option>
-        {products.map((product) => (
-          <option key={product.id} value={product.id}>
-            {product.sku} — {product.nameAr ?? product.name} (مخزون المستودع الرئيسي: {product.warehouseStock})
-          </option>
-        ))}
-      </Select>
+      <input type="hidden" name="productId" value={selected?.product.id ?? ""} />
+      <input type="hidden" name="colorId" value={selected?.colorId ?? ""} />
 
-      <Input name="quantity" type="number" min={1} step={1} label="الكمية" required />
+      {!selected ? (
+        <ProductQuickPicker products={products} excludeIds={new Set()} onPick={handlePick} placeholder="ابحث عن منتج لتخصيصه..." />
+      ) : (
+        <div className="flex items-center justify-between gap-3 rounded-card border border-navy-soft bg-navy-deep px-3 py-2">
+          <div className="flex items-center gap-3">
+            <ProductThumb product={selected.product} className="h-10 w-10" />
+            <div>
+              <p className="text-sm text-neutral-bg">
+                {selected.product.nameAr ?? selected.product.name}
+                {selectedColor && <span> — {selectedColor.nameAr ?? selectedColor.name}</span>}
+              </p>
+              <p className="text-xs text-neutral-bg/50">
+                {selected.product.sku} — مخزون المستودع الرئيسي: {availableStock}
+              </p>
+            </div>
+          </div>
+          <Button type="button" variant="ghost" size="sm" onClick={() => setSelected(null)}>
+            تغيير
+          </Button>
+        </div>
+      )}
+
+      <Input name="quantity" type="number" min={1} step={1} label="الكمية" required disabled={!selected} />
 
       <Textarea name="notes" label="ملاحظات / السبب (اختياري)" rows={3} />
 
@@ -50,7 +77,7 @@ export function AssignStockForm({ repId, products }: AssignStockFormProps) {
         </p>
       )}
 
-      <Button type="submit" disabled={isPending}>
+      <Button type="submit" disabled={isPending || !selected}>
         {isPending && <Spinner />}
         {isPending ? "جارٍ الحفظ..." : "تخصيص المخزون"}
       </Button>

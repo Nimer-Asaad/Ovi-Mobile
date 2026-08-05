@@ -17,18 +17,10 @@ import {
   STOCK_MOVEMENT_TYPES,
 } from "@/lib/constants";
 import { manualOrderSchema, MANUAL_ORDER_CUSTOMER_MODES } from "@/lib/validation/manualOrder";
+import { decrementInventoryAtomic, recordStockMovement, InsufficientInventoryError } from "@/lib/inventory-transactions";
 
 export interface ManualOrderState {
   error?: string;
-}
-
-/** Thrown inside the order transaction when a line's Main Warehouse stock
- * is no longer sufficient at commit time — caught outside to return a
- * clean Arabic message instead of a raw transaction rollback error. */
-class InsufficientStockError extends Error {
-  constructor(public readonly productName: string) {
-    super("INSUFFICIENT_STOCK");
-  }
 }
 
 const PARSE_ERROR_MESSAGE = "بيانات الطلب غير صالحة";
@@ -148,11 +140,13 @@ export async function createManualOrder(
   const productIds = parsed.data.items.map((item) => item.productId);
   const products = await prisma.product.findMany({
     where: { id: { in: productIds } },
-    select: { id: true, isActive: true, name: true, nameAr: true },
+    select: { id: true, isActive: true, name: true, nameAr: true, colorOptions: { select: { colorId: true } } },
   });
   const productById = new Map(products.map((product) => [product.id, product]));
 
-  for (const item of parsed.data.items) {
+  const lines = parsed.data.items.map((item) => ({ ...item, colorId: item.colorId ?? null }));
+
+  for (const item of lines) {
     const product = productById.get(item.productId);
     if (!product) {
       return { error: "أحد المنتجات المحددة غير موجود" };
@@ -160,18 +154,21 @@ export async function createManualOrder(
     if (!product.isActive) {
       return { error: `المنتج "${product.nameAr ?? product.name}" غير مفعّل ولا يمكن بيعه` };
     }
+    if (item.colorId && !product.colorOptions.some((option) => option.colorId === item.colorId)) {
+      return { error: `اللون المحدد لا ينتمي للمنتج "${product.nameAr ?? product.name}"` };
+    }
   }
 
   const warehouse = await getMainWarehouse();
   const inventoryItems = await prisma.inventoryItem.findMany({
     where: { productId: { in: productIds }, locationId: warehouse.id },
-    select: { productId: true, quantity: true },
+    select: { productId: true, colorId: true, quantity: true },
   });
-  const stockByProductId = new Map(inventoryItems.map((row) => [row.productId, row.quantity]));
+  const stockByLineKey = new Map(inventoryItems.map((row) => [`${row.productId}:${row.colorId ?? ""}`, row.quantity]));
 
-  for (const item of parsed.data.items) {
+  for (const item of lines) {
     const product = productById.get(item.productId)!;
-    const available = stockByProductId.get(item.productId) ?? 0;
+    const available = stockByLineKey.get(`${item.productId}:${item.colorId ?? ""}`) ?? 0;
     if (item.quantity > available) {
       return {
         error: `الكمية المطلوبة من "${product.nameAr ?? product.name}" تتجاوز المخزون المتوفر (${available})`,
@@ -182,8 +179,9 @@ export async function createManualOrder(
   // ---------------------------------------------------------------------
   // Server-computed totals — never trust anything the client summed.
   // ---------------------------------------------------------------------
-  const orderItemsData = parsed.data.items.map((item) => ({
+  const orderItemsData = lines.map((item) => ({
     productId: item.productId,
+    colorId: item.colorId,
     quantity: item.quantity,
     unitPriceCents: item.unitPriceCents,
     totalCents: item.unitPriceCents * item.quantity,
@@ -270,47 +268,34 @@ export async function createManualOrder(
         // 1` means a concurrent order already consumed the stock, so this
         // whole order (and any lines already decremented in this loop)
         // rolls back — nothing is oversold.
-        for (const item of parsed.data.items) {
-          const decremented = await tx.inventoryItem.updateMany({
-            where: {
-              productId: item.productId,
-              locationId: warehouse.id,
-              quantity: { gte: item.quantity },
-            },
-            data: { quantity: { decrement: item.quantity } },
-          });
+        for (const item of lines) {
+          const change = await decrementInventoryAtomic(
+            tx,
+            { productId: item.productId, colorId: item.colorId, locationId: warehouse.id },
+            item.quantity,
+          );
 
-          if (decremented.count !== 1) {
-            const product = productById.get(item.productId);
-            throw new InsufficientStockError(product?.nameAr ?? product?.name ?? item.productId);
-          }
-
-          const current = await tx.inventoryItem.findUniqueOrThrow({
-            where: { productId_locationId: { productId: item.productId, locationId: warehouse.id } },
-            select: { quantity: true },
-          });
-
-          await tx.stockMovement.create({
-            data: {
-              type: STOCK_MOVEMENT_TYPES.SALE_OUT,
-              productId: item.productId,
-              fromLocationId: warehouse.id,
-              toLocationId: null,
-              quantity: item.quantity,
-              previousQuantity: current.quantity + item.quantity,
-              newQuantity: current.quantity,
-              note: `طلب يدوي — طلب ${orderNumber}`,
-              createdById: admin.id,
-            },
+          await recordStockMovement(tx, {
+            type: STOCK_MOVEMENT_TYPES.SALE_OUT,
+            productId: item.productId,
+            colorId: item.colorId,
+            fromLocationId: warehouse.id,
+            toLocationId: null,
+            quantity: item.quantity,
+            previousQuantity: change.previousQuantity,
+            newQuantity: change.newQuantity,
+            note: `طلب يدوي — طلب ${orderNumber}`,
+            createdById: admin.id,
           });
         }
       });
       succeeded = true;
       break;
     } catch (err) {
-      if (err instanceof InsufficientStockError) {
+      if (err instanceof InsufficientInventoryError) {
+        const product = productById.get(err.productId);
         return {
-          error: `الكمية المطلوبة من "${err.productName}" لم تعد متوفرة، يرجى تحديث الطلب`,
+          error: `الكمية المطلوبة من "${product?.nameAr ?? product?.name ?? ""}" لم تعد متوفرة، يرجى تحديث الطلب`,
         };
       }
       const isDuplicateOrderNumber =

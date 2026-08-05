@@ -12,6 +12,8 @@ import { RepCarProductGrid } from "@/components/reps/RepCarProductGrid";
  * field (retail, wholesale, or cost). */
 const REP_STOCK_ITEM_SELECT = {
   quantity: true,
+  colorId: true,
+  color: { select: { name: true, nameAr: true } },
   product: {
     select: {
       id: true,
@@ -52,6 +54,8 @@ export default async function RepStockPage() {
 
   const gridItems = items.map((item) => ({
     productId: item.product.id,
+    colorId: item.colorId,
+    colorLabel: item.color ? (item.color.nameAr ?? item.color.name) : null,
     sku: item.product.sku,
     name: item.product.name,
     nameAr: item.product.nameAr,

@@ -25,6 +25,20 @@ export const brandSchema = z.object({
 export type BrandInput = z.infer<typeof brandSchema>;
 
 // ---------------------------------------------------------------------------
+// Colors
+// ---------------------------------------------------------------------------
+
+export const colorSchema = z.object({
+  name: z.string().min(2, "اسم اللون يجب أن يكون حرفين على الأقل"),
+  nameAr: z.string().optional(),
+  hexCode: z.string().optional().refine((v) => !v || /^#[0-9a-fA-F]{6}$/.test(v), {
+    message: "كود اللون يجب أن يكون بصيغة #RRGGBB",
+  }),
+});
+
+export type ColorInput = z.infer<typeof colorSchema>;
+
+// ---------------------------------------------------------------------------
 // Suppliers
 // ---------------------------------------------------------------------------
 

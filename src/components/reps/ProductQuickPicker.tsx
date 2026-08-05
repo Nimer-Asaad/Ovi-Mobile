@@ -5,6 +5,18 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { ProductImagePlaceholder } from "@/components/catalog/ProductImagePlaceholder";
+import { cn } from "@/lib/utils";
+
+export interface PickableColorOption {
+  id: string;
+  name: string;
+  nameAr: string | null;
+  hexCode: string | null;
+  /** Omit when stock isn't known/relevant at this call site (e.g. a stock
+   * request doesn't validate against current stock at request time). When
+   * given, a color with stock <= 0 is shown but not selectable. */
+  stock?: number;
+}
 
 export interface PickableProduct {
   id: string;
@@ -15,10 +27,12 @@ export interface PickableProduct {
   brandLabel?: string | null;
   thumbnailUrl: string | null;
   thumbnailAlt: string | null;
+  /** Empty/omitted for a colorless product. */
+  colorOptions?: PickableColorOption[];
 }
 
 /** Small inline thumbnail shared by every rep product list (search results,
- * selected-line lists, the quick-look popup) — falls back to
+ * selected-line lists, the detail popup) — falls back to
  * ProductImagePlaceholder like every other catalog thumbnail in the app. */
 export function ProductThumb({
   product,
@@ -82,15 +96,19 @@ function CloseIcon() {
 
 export interface ProductQuickPickerProps<T extends PickableProduct> {
   products: T[];
-  /** Ids to hide from results — already-added lines. */
+  /** Ids to hide from results — already-added lines. For a colored product
+   * this should be the productId alone (all its colors are still offered
+   * as separate picks) unless every one of its colors is already a line. */
   excludeIds: Set<string>;
-  onPick: (product: T) => void;
+  /** colorId is null for a colorless product/pick. */
+  onPick: (product: T, colorId: string | null) => void;
   placeholder?: string;
 }
 
-/** Shared search + quick-look picker used by both the rep stock-request
- * form and the rep direct-sale form: type to filter, click a row to add it,
- * or open the eye icon for a larger image + category/brand before deciding.
+/** Shared search + detail picker used by both the rep stock-request form
+ * and the rep direct-sale form: type to filter, click a row to add it (or,
+ * for a product with color options, to open a color-choice step first), or
+ * open the eye icon for a larger image + category/brand before deciding.
  * Generic over T so each caller's extra fields (retailPriceCents, repStock,
  * ...) survive the round-trip to onPick untouched. */
 export function ProductQuickPicker<T extends PickableProduct>({
@@ -100,7 +118,7 @@ export function ProductQuickPicker<T extends PickableProduct>({
   placeholder,
 }: ProductQuickPickerProps<T>) {
   const [search, setSearch] = useState("");
-  const [quickLookProduct, setQuickLookProduct] = useState<T | null>(null);
+  const [detailProduct, setDetailProduct] = useState<T | null>(null);
 
   const filteredProducts = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -117,9 +135,18 @@ export function ProductQuickPicker<T extends PickableProduct>({
       );
   }, [search, products, excludeIds]);
 
-  function handlePick(product: T) {
-    onPick(product);
+  function handlePick(product: T, colorId: string | null) {
+    onPick(product, colorId);
     setSearch("");
+    setDetailProduct(null);
+  }
+
+  function handleRowClick(product: T) {
+    if ((product.colorOptions?.length ?? 0) > 0) {
+      setDetailProduct(product);
+    } else {
+      handlePick(product, null);
+    }
   }
 
   return (
@@ -137,7 +164,7 @@ export function ProductQuickPicker<T extends PickableProduct>({
               <div key={product.id} className="flex items-center gap-3 px-3 py-2 hover:bg-navy-deep">
                 <button
                   type="button"
-                  onClick={() => handlePick(product)}
+                  onClick={() => handleRowClick(product)}
                   className="flex min-w-0 flex-1 items-center gap-3 text-start"
                 >
                   <ProductThumb product={product} className="h-10 w-10" />
@@ -148,7 +175,7 @@ export function ProductQuickPicker<T extends PickableProduct>({
                 </button>
                 <button
                   type="button"
-                  onClick={() => setQuickLookProduct(product)}
+                  onClick={() => setDetailProduct(product)}
                   aria-label={`عرض سريع لـ ${product.nameAr ?? product.name}`}
                   className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-neutral-bg/50 transition-colors hover:bg-navy-soft/60 hover:text-gold-champagne"
                 >
@@ -160,10 +187,10 @@ export function ProductQuickPicker<T extends PickableProduct>({
         </div>
       )}
 
-      {quickLookProduct && (
+      {detailProduct && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
-          onClick={() => setQuickLookProduct(null)}
+          onClick={() => setDetailProduct(null)}
         >
           <div
             role="dialog"
@@ -173,38 +200,64 @@ export function ProductQuickPicker<T extends PickableProduct>({
           >
             <button
               type="button"
-              onClick={() => setQuickLookProduct(null)}
+              onClick={() => setDetailProduct(null)}
               aria-label="إغلاق"
               className="absolute start-3 top-3 flex h-7 w-7 items-center justify-center rounded-full text-neutral-bg/60 transition-colors hover:bg-navy-deep hover:text-neutral-bg"
             >
               <CloseIcon />
             </button>
 
-            <ProductThumb product={quickLookProduct} className="mx-auto h-40 w-40" />
+            <ProductThumb product={detailProduct} className="mx-auto h-40 w-40" />
 
             <div className="mt-4 text-center">
               <p className="text-base font-semibold text-neutral-bg">
-                {quickLookProduct.nameAr ?? quickLookProduct.name}
+                {detailProduct.nameAr ?? detailProduct.name}
               </p>
-              <p className="mt-1 text-xs text-neutral-bg/50">{quickLookProduct.sku}</p>
-              {(quickLookProduct.categoryLabel || quickLookProduct.brandLabel) && (
+              <p className="mt-1 text-xs text-neutral-bg/50">{detailProduct.sku}</p>
+              {(detailProduct.categoryLabel || detailProduct.brandLabel) && (
                 <div className="mt-3 flex flex-wrap justify-center gap-2">
-                  {quickLookProduct.categoryLabel && <Badge variant="neutral">{quickLookProduct.categoryLabel}</Badge>}
-                  {quickLookProduct.brandLabel && <Badge variant="neutral">{quickLookProduct.brandLabel}</Badge>}
+                  {detailProduct.categoryLabel && <Badge variant="neutral">{detailProduct.categoryLabel}</Badge>}
+                  {detailProduct.brandLabel && <Badge variant="neutral">{detailProduct.brandLabel}</Badge>}
                 </div>
               )}
             </div>
 
-            <Button
-              type="button"
-              className="mt-5 w-full"
-              onClick={() => {
-                handlePick(quickLookProduct);
-                setQuickLookProduct(null);
-              }}
-            >
-              إضافة
-            </Button>
+            {detailProduct.colorOptions && detailProduct.colorOptions.length > 0 ? (
+              <div className="mt-5 flex flex-col gap-2">
+                <p className="text-center text-xs text-neutral-bg/50">اختر اللون</p>
+                <div className="flex flex-wrap justify-center gap-2">
+                  {detailProduct.colorOptions.map((color) => {
+                    const outOfStock = color.stock !== undefined && color.stock <= 0;
+                    return (
+                      <button
+                        key={color.id}
+                        type="button"
+                        disabled={outOfStock}
+                        onClick={() => handlePick(detailProduct, color.id)}
+                        className={cn(
+                          "flex items-center gap-2 rounded-full border border-navy-soft px-3 py-1.5 text-sm text-neutral-bg/80 transition-colors hover:border-gold-champagne/40",
+                          outOfStock && "cursor-not-allowed opacity-40",
+                        )}
+                      >
+                        {color.hexCode && (
+                          <span
+                            aria-hidden="true"
+                            className="h-4 w-4 shrink-0 rounded-full border border-navy-soft"
+                            style={{ backgroundColor: color.hexCode }}
+                          />
+                        )}
+                        {color.nameAr ?? color.name}
+                        {outOfStock && <span className="text-xs text-neutral-bg/50">(نفذ)</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : (
+              <Button type="button" className="mt-5 w-full" onClick={() => handlePick(detailProduct, null)}>
+                إضافة
+              </Button>
+            )}
           </div>
         </div>
       )}

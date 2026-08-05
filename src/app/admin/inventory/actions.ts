@@ -7,6 +7,13 @@ import { requireRole } from "@/lib/auth/guards";
 import { ROLES, MANUAL_STOCK_MOVEMENT_TYPES } from "@/lib/constants";
 import { getMainWarehouse } from "@/lib/inventory";
 import { stockAdjustmentSchema } from "@/lib/validation/inventory";
+import {
+  decrementInventoryAtomic,
+  incrementInventoryUpsert,
+  setInventoryAbsolute,
+  recordStockMovement,
+  InsufficientInventoryError,
+} from "@/lib/inventory-transactions";
 
 export interface StockAdjustmentState {
   error?: string;
@@ -39,6 +46,7 @@ export async function createStockMovement(
 
   const parsed = stockAdjustmentSchema.safeParse({
     productId: formData.get("productId")?.toString() ?? "",
+    colorId: formData.get("colorId")?.toString() || undefined,
     movementType: formData.get("movementType")?.toString() ?? "",
     quantity: formData.get("quantity")?.toString() ?? "",
     notes: formData.get("notes")?.toString().trim() || undefined,
@@ -49,10 +57,11 @@ export async function createStockMovement(
   }
 
   const { productId, movementType, quantity, notes } = parsed.data;
+  const colorId = parsed.data.colorId ?? null;
 
   const product = await prisma.product.findUnique({
     where: { id: productId },
-    select: { id: true, isActive: true },
+    select: { id: true, isActive: true, colorOptions: { select: { colorId: true } } },
   });
   if (!product) {
     return { error: "المنتج غير موجود" };
@@ -60,88 +69,67 @@ export async function createStockMovement(
   if (!product.isActive) {
     return { error: "لا يمكن تعديل مخزون منتج غير مفعل" };
   }
+  if (colorId && !product.colorOptions.some((option) => option.colorId === colorId)) {
+    return { error: "اللون المحدد لا ينتمي لهذا المنتج" };
+  }
 
   if (movementType !== MANUAL_STOCK_MOVEMENT_TYPES.ADJUSTMENT && quantity <= 0) {
     return { error: POSITIVE_QUANTITY_MESSAGE };
   }
 
   const warehouse = await getMainWarehouse();
-  const itemWhere = { productId_locationId: { productId, locationId: warehouse.id } };
+  const key = { productId, colorId, locationId: warehouse.id };
 
   try {
     await prisma.$transaction(async (tx) => {
       if (movementType === MANUAL_STOCK_MOVEMENT_TYPES.ADJUSTMENT) {
-        // Absolute set, not a delta — read the current value as the very
-        // last step before writing (inside the transaction) so the window
-        // for a concurrent change to make this stale is as small as
-        // possible; quantity entered is the exact final stock level.
-        const existingItem = await tx.inventoryItem.findUnique({ where: itemWhere, select: { quantity: true } });
-        const previousQuantity = existingItem?.quantity ?? 0;
-
-        if (quantity === previousQuantity) {
-          throw new StockActionError(NO_OP_MESSAGE);
-        }
         if (quantity < 0) {
           throw new StockActionError("لا يمكن أن يكون المخزون أقل من صفر");
         }
 
-        await tx.inventoryItem.upsert({
-          where: itemWhere,
-          update: { quantity },
-          create: { productId, locationId: warehouse.id, quantity },
-        });
+        const change = await setInventoryAbsolute(tx, key, quantity);
+        if (change.previousQuantity === change.newQuantity) {
+          throw new StockActionError(NO_OP_MESSAGE);
+        }
 
-        await tx.stockMovement.create({
-          data: {
-            type: movementType,
-            productId,
-            quantity: Math.abs(quantity - previousQuantity),
-            previousQuantity,
-            newQuantity: quantity,
-            note: notes,
-            createdById: admin.id,
-            toLocationId: warehouse.id,
-          },
+        await recordStockMovement(tx, {
+          type: movementType,
+          productId,
+          colorId,
+          quantity: Math.abs(change.newQuantity - change.previousQuantity),
+          previousQuantity: change.previousQuantity,
+          newQuantity: change.newQuantity,
+          note: notes,
+          createdById: admin.id,
+          toLocationId: warehouse.id,
         });
         return;
       }
 
-      if (movementType === MANUAL_STOCK_MOVEMENT_TYPES.STOCK_OUT) {
-        // Atomic conditional decrement — never reads a stale quantity
-        // before writing. `count !== 1` means the row didn't have enough
-        // stock (or didn't exist), so the whole transaction rolls back.
-        const decremented = await tx.inventoryItem.updateMany({
-          where: { productId, locationId: warehouse.id, quantity: { gte: quantity } },
-          data: { quantity: { decrement: quantity } },
-        });
-        if (decremented.count !== 1) {
+      const isStockOut = movementType === MANUAL_STOCK_MOVEMENT_TYPES.STOCK_OUT;
+      let change;
+      try {
+        change = isStockOut
+          ? await decrementInventoryAtomic(tx, key, quantity)
+          : await incrementInventoryUpsert(tx, key, quantity);
+      } catch (err) {
+        if (err instanceof InsufficientInventoryError) {
           throw new StockActionError("الكمية المطلوب إخراجها أكبر من المخزون الحالي");
         }
-      } else {
-        // STOCK_IN: atomic increment, safe even if two admins stock the
-        // same product in at the same moment.
-        await tx.inventoryItem.upsert({
-          where: itemWhere,
-          update: { quantity: { increment: quantity } },
-          create: { productId, locationId: warehouse.id, quantity },
-        });
+        throw err;
       }
 
-      const after = await tx.inventoryItem.findUniqueOrThrow({ where: itemWhere, select: { quantity: true } });
-      const isStockOut = movementType === MANUAL_STOCK_MOVEMENT_TYPES.STOCK_OUT;
-
-      await tx.stockMovement.create({
-        data: {
-          type: movementType,
-          productId,
-          quantity,
-          previousQuantity: isStockOut ? after.quantity + quantity : after.quantity - quantity,
-          newQuantity: after.quantity,
-          note: notes,
-          createdById: admin.id,
-          toLocationId: isStockOut ? undefined : warehouse.id,
-          fromLocationId: isStockOut ? warehouse.id : undefined,
-        },
+      await recordStockMovement(tx, {
+        type: movementType,
+        productId,
+        colorId,
+        quantity,
+        previousQuantity: change.previousQuantity,
+        newQuantity: change.newQuantity,
+        note: notes,
+        createdById: admin.id,
+        toLocationId: isStockOut ? undefined : warehouse.id,
+        fromLocationId: isStockOut ? warehouse.id : undefined,
       });
     });
   } catch (err) {

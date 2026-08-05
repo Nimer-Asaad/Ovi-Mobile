@@ -6,6 +6,7 @@ export interface InvoiceItem {
   quantity: number;
   unitPriceCents: number;
   totalCents: number;
+  color: { name: string; nameAr: string | null } | null;
   product: {
     sku: string;
     name: string;
@@ -117,7 +118,12 @@ export function InvoiceView({ order }: { order: InvoiceData }) {
           <tbody className="divide-y divide-neutral-100">
             {order.items.map((item) => (
               <tr key={item.id}>
-                <td className="py-2 text-neutral-900">{item.product.nameAr ?? item.product.name}</td>
+                <td className="py-2 text-neutral-900">
+                  {item.product.nameAr ?? item.product.name}
+                  {item.color && (
+                    <span className="text-neutral-500"> — {item.color.nameAr ?? item.color.name}</span>
+                  )}
+                </td>
                 <td className="py-2 text-neutral-500">{item.product.sku}</td>
                 <td className="py-2 text-neutral-700">{item.quantity}</td>
                 <td className="py-2 text-neutral-700">{formatCurrencyFromCents(item.unitPriceCents)}</td>

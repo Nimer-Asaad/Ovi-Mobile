@@ -8,15 +8,16 @@ import { ROLES, STOCK_MOVEMENT_TYPES } from "@/lib/constants";
 import { getMainWarehouse } from "@/lib/inventory";
 import { getOrCreateRepLocation } from "@/lib/reps";
 import { repStockTransferSchema } from "@/lib/validation/reps";
+import {
+  decrementInventoryAtomic,
+  incrementInventoryUpsert,
+  recordStockMovement,
+  InsufficientInventoryError,
+} from "@/lib/inventory-transactions";
 
 export interface RepStockTransferState {
   error?: string;
 }
-
-/** Thrown inside a transfer transaction when the source location's stock
- * is no longer sufficient at commit time — caught outside to return a
- * clean Arabic message instead of a raw transaction rollback error. */
-class InsufficientStockError extends Error {}
 
 const PARSE_ERROR_MESSAGE = "بيانات التحويل غير صالحة";
 
@@ -36,6 +37,7 @@ function revalidateRepPaths(repId: string): void {
 function parseTransferForm(formData: FormData) {
   return repStockTransferSchema.safeParse({
     productId: formData.get("productId")?.toString() ?? "",
+    colorId: formData.get("colorId")?.toString() || undefined,
     quantity: formData.get("quantity")?.toString() ?? "",
     notes: formData.get("notes")?.toString().trim() || undefined,
   });
@@ -53,6 +55,7 @@ export async function assignStockToRep(
     return { error: PARSE_ERROR_MESSAGE };
   }
   const { productId, quantity, notes } = parsed.data;
+  const colorId = parsed.data.colorId ?? null;
 
   const rep = await prisma.salesRepresentative.findUnique({
     where: { id: repId },
@@ -67,13 +70,16 @@ export async function assignStockToRep(
 
   const product = await prisma.product.findUnique({
     where: { id: productId },
-    select: { id: true, isActive: true },
+    select: { id: true, isActive: true, colorOptions: { select: { colorId: true } } },
   });
   if (!product) {
     return { error: "المنتج غير موجود" };
   }
   if (!product.isActive) {
     return { error: "لا يمكن تخصيص منتج غير مفعل" };
+  }
+  if (colorId && !product.colorOptions.some((option) => option.colorId === colorId)) {
+    return { error: "اللون المحدد لا ينتمي لهذا المنتج" };
   }
 
   const warehouse = await getMainWarehouse();
@@ -82,45 +88,35 @@ export async function assignStockToRep(
   try {
     await prisma.$transaction(async (tx) => {
       // Atomic conditional decrement on the source (warehouse) — never a
-      // stale read-then-write. `count !== 1` means the warehouse no
-      // longer has enough stock, so nothing is transferred.
-      const decremented = await tx.inventoryItem.updateMany({
-        where: { productId, locationId: warehouse.id, quantity: { gte: quantity } },
-        data: { quantity: { decrement: quantity } },
-      });
-      if (decremented.count !== 1) {
-        throw new InsufficientStockError("الكمية المطلوبة أكبر من المخزون المتوفر في المستودع الرئيسي");
-      }
+      // stale read-then-write. Insufficient stock rolls back the whole
+      // transfer.
+      await decrementInventoryAtomic(tx, { productId, colorId, locationId: warehouse.id }, quantity);
 
       // Atomic increment on the destination (rep car) — safe even if two
       // transfers to the same rep/product land at the same moment.
-      await tx.inventoryItem.upsert({
-        where: { productId_locationId: { productId, locationId: repLocation.id } },
-        update: { quantity: { increment: quantity } },
-        create: { productId, locationId: repLocation.id, quantity },
-      });
+      const change = await incrementInventoryUpsert(
+        tx,
+        { productId, colorId, locationId: repLocation.id },
+        quantity,
+      );
 
-      const repItemAfter = await tx.inventoryItem.findUniqueOrThrow({
-        where: { productId_locationId: { productId, locationId: repLocation.id } },
-        select: { quantity: true },
-      });
-
-      await tx.stockMovement.create({
-        data: {
-          type: STOCK_MOVEMENT_TYPES.REP_ASSIGNMENT,
-          productId,
-          fromLocationId: warehouse.id,
-          toLocationId: repLocation.id,
-          quantity,
-          previousQuantity: repItemAfter.quantity - quantity,
-          newQuantity: repItemAfter.quantity,
-          note: notes,
-          createdById: admin.id,
-        },
+      await recordStockMovement(tx, {
+        type: STOCK_MOVEMENT_TYPES.REP_ASSIGNMENT,
+        productId,
+        colorId,
+        fromLocationId: warehouse.id,
+        toLocationId: repLocation.id,
+        quantity,
+        previousQuantity: change.previousQuantity,
+        newQuantity: change.newQuantity,
+        note: notes,
+        createdById: admin.id,
       });
     });
   } catch (err) {
-    if (err instanceof InsufficientStockError) return { error: err.message };
+    if (err instanceof InsufficientInventoryError) {
+      return { error: "الكمية المطلوبة أكبر من المخزون المتوفر في المستودع الرئيسي" };
+    }
     throw err;
   }
 
@@ -140,6 +136,7 @@ export async function returnStockFromRep(
     return { error: PARSE_ERROR_MESSAGE };
   }
   const { productId, quantity, notes } = parsed.data;
+  const colorId = parsed.data.colorId ?? null;
 
   const rep = await prisma.salesRepresentative.findUnique({
     where: { id: repId },
@@ -151,10 +148,13 @@ export async function returnStockFromRep(
 
   const product = await prisma.product.findUnique({
     where: { id: productId },
-    select: { id: true },
+    select: { id: true, colorOptions: { select: { colorId: true } } },
   });
   if (!product) {
     return { error: "المنتج غير موجود" };
+  }
+  if (colorId && !product.colorOptions.some((option) => option.colorId === colorId)) {
+    return { error: "اللون المحدد لا ينتمي لهذا المنتج" };
   }
 
   const warehouse = await getMainWarehouse();
@@ -167,44 +167,34 @@ export async function returnStockFromRep(
   try {
     await prisma.$transaction(async (tx) => {
       // Atomic conditional decrement on the source (rep car) — never a
-      // stale read-then-write. `count !== 1` means the rep no longer has
-      // enough stock, so nothing is returned.
-      const decremented = await tx.inventoryItem.updateMany({
-        where: { productId, locationId: repLocation.id, quantity: { gte: quantity } },
-        data: { quantity: { decrement: quantity } },
-      });
-      if (decremented.count !== 1) {
-        throw new InsufficientStockError("الكمية المطلوبة أكبر من مخزون المندوب الحالي");
-      }
+      // stale read-then-write. Insufficient stock rolls back the whole
+      // return.
+      const change = await decrementInventoryAtomic(
+        tx,
+        { productId, colorId, locationId: repLocation.id },
+        quantity,
+      );
 
       // Atomic increment on the destination (warehouse).
-      await tx.inventoryItem.upsert({
-        where: { productId_locationId: { productId, locationId: warehouse.id } },
-        update: { quantity: { increment: quantity } },
-        create: { productId, locationId: warehouse.id, quantity },
-      });
+      await incrementInventoryUpsert(tx, { productId, colorId, locationId: warehouse.id }, quantity);
 
-      const repItemAfter = await tx.inventoryItem.findUniqueOrThrow({
-        where: { productId_locationId: { productId, locationId: repLocation.id } },
-        select: { quantity: true },
-      });
-
-      await tx.stockMovement.create({
-        data: {
-          type: STOCK_MOVEMENT_TYPES.REP_RETURN,
-          productId,
-          fromLocationId: repLocation.id,
-          toLocationId: warehouse.id,
-          quantity,
-          previousQuantity: repItemAfter.quantity + quantity,
-          newQuantity: repItemAfter.quantity,
-          note: notes,
-          createdById: admin.id,
-        },
+      await recordStockMovement(tx, {
+        type: STOCK_MOVEMENT_TYPES.REP_RETURN,
+        productId,
+        colorId,
+        fromLocationId: repLocation.id,
+        toLocationId: warehouse.id,
+        quantity,
+        previousQuantity: change.previousQuantity,
+        newQuantity: change.newQuantity,
+        note: notes,
+        createdById: admin.id,
       });
     });
   } catch (err) {
-    if (err instanceof InsufficientStockError) return { error: err.message };
+    if (err instanceof InsufficientInventoryError) {
+      return { error: "الكمية المطلوبة أكبر من مخزون المندوب الحالي" };
+    }
     throw err;
   }
 

@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { getBrandOptions, getCategoryOptions, getSupplierOptions } from "../../options";
+import { getBrandOptions, getCategoryOptions, getColorOptions, getSupplierOptions } from "../../options";
 import { ProductForm } from "../../ProductForm";
 
 interface EditProductPageProps {
@@ -16,14 +16,18 @@ export default async function EditProductPage({ params }: EditProductPageProps) 
       // Main Warehouse stock only — rep-assigned stock is tracked separately under /admin/reps.
       inventoryItems: { where: { location: { isDefault: true } }, select: { quantity: true } },
       images: { orderBy: [{ isMain: "desc" }, { sortOrder: "asc" }] },
+      colorOptions: { select: { colorId: true } },
     },
   });
   if (!product) notFound();
 
-  const [categories, brands, suppliers] = await Promise.all([
+  const selectedColorIds = product.colorOptions.map((option) => option.colorId);
+
+  const [categories, brands, suppliers, colors] = await Promise.all([
     getCategoryOptions(product.categoryId),
     getBrandOptions(product.brandId),
     getSupplierOptions(product.supplierId),
+    getColorOptions(selectedColorIds),
   ]);
 
   const currentStock = product.inventoryItems.reduce((sum, item) => sum + item.quantity, 0);
@@ -35,9 +39,11 @@ export default async function EditProductPage({ params }: EditProductPageProps) 
         categories={categories}
         brands={brands}
         suppliers={suppliers}
+        colors={colors}
         product={product}
         currentStock={currentStock}
         images={product.images}
+        selectedColorIds={selectedColorIds}
       />
     </div>
   );

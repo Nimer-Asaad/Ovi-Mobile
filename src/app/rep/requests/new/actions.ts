@@ -62,17 +62,22 @@ export async function createStockRequest(
   const productIds = parsed.data.items.map((item) => item.productId);
   const products = await prisma.product.findMany({
     where: { id: { in: productIds } },
-    select: { id: true, isActive: true, name: true, nameAr: true },
+    select: { id: true, isActive: true, name: true, nameAr: true, colorOptions: { select: { colorId: true } } },
   });
   const productById = new Map(products.map((product) => [product.id, product]));
 
-  for (const item of parsed.data.items) {
+  const lines = parsed.data.items.map((item) => ({ ...item, colorId: item.colorId ?? null }));
+
+  for (const item of lines) {
     const product = productById.get(item.productId);
     if (!product) {
       return { error: "أحد المنتجات المحددة غير موجود" };
     }
     if (!product.isActive) {
       return { error: `المنتج "${product.nameAr ?? product.name}" غير مفعّل ولا يمكن طلبه` };
+    }
+    if (item.colorId && !product.colorOptions.some((option) => option.colorId === item.colorId)) {
+      return { error: `اللون المحدد لا ينتمي للمنتج "${product.nameAr ?? product.name}"` };
     }
   }
 
@@ -90,8 +95,9 @@ export async function createStockRequest(
           type: STOCK_REQUEST_TYPES.RESTOCK,
           repNote: parsed.data.repNote,
           items: {
-            create: parsed.data.items.map((item) => ({
+            create: lines.map((item) => ({
               productId: item.productId,
+              colorId: item.colorId,
               requestedQuantity: item.requestedQuantity,
             })),
           },

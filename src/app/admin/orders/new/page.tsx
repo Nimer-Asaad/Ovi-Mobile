@@ -45,7 +45,14 @@ export default async function NewManualOrderPage({ searchParams }: NewManualOrde
         wholesalePriceCents: true,
         category: { select: { name: true, nameAr: true } },
         brand: { select: { name: true } },
-        inventoryItems: { where: { location: { isDefault: true } }, select: { quantity: true } },
+        inventoryItems: {
+          where: { location: { isDefault: true } },
+          select: { quantity: true, colorId: true },
+        },
+        colorOptions: {
+          select: { color: { select: { id: true, name: true, nameAr: true, hexCode: true } } },
+          orderBy: { sortOrder: "asc" },
+        },
       },
       orderBy: { name: "asc" },
     }),
@@ -59,17 +66,31 @@ export default async function NewManualOrderPage({ searchParams }: NewManualOrde
     }),
   ]);
 
-  const productOptions = products.map((product) => ({
-    id: product.id,
-    sku: product.sku,
-    name: product.name,
-    nameAr: product.nameAr,
-    retailPriceCents: product.retailPriceCents,
-    wholesalePriceCents: product.wholesalePriceCents,
-    categoryLabel: product.category?.nameAr ?? product.category?.name ?? null,
-    brandLabel: product.brand?.name ?? null,
-    stock: product.inventoryItems.reduce((sum, item) => sum + item.quantity, 0),
-  }));
+  const productOptions = products.map((product) => {
+    const stockByColorId = new Map(
+      product.inventoryItems.filter((item) => item.colorId).map((item) => [item.colorId as string, item.quantity]),
+    );
+    return {
+      id: product.id,
+      sku: product.sku,
+      name: product.name,
+      nameAr: product.nameAr,
+      retailPriceCents: product.retailPriceCents,
+      wholesalePriceCents: product.wholesalePriceCents,
+      categoryLabel: product.category?.nameAr ?? product.category?.name ?? null,
+      brandLabel: product.brand?.name ?? null,
+      // Colorless total — only meaningful when the product has no colors,
+      // since a colored product's purchasable stock is per-color instead.
+      stock: product.inventoryItems.filter((item) => !item.colorId).reduce((sum, item) => sum + item.quantity, 0),
+      colorOptions: product.colorOptions.map((option) => ({
+        id: option.color.id,
+        name: option.color.name,
+        nameAr: option.color.nameAr,
+        hexCode: option.color.hexCode,
+        stock: stockByColorId.get(option.color.id) ?? 0,
+      })),
+    };
+  });
 
   return (
     <div className="flex flex-col gap-6">
