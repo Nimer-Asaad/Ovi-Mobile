@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth/guards";
-import { ROLES } from "@/lib/constants";
+import { PRODUCT_VARIANT_MODES, ROLES, VARIANT_ALLOCATION_STATUSES } from "@/lib/constants";
 import { productSchema } from "@/lib/validation/catalog";
 import { validateMediaBuffer, inferMediaTypeFromUrl, type MediaType } from "@/lib/validation/productMedia";
 import { deleteUnreferencedUploadedProductFiles, saveUploadedProductFile } from "@/lib/uploads";
@@ -217,6 +217,7 @@ export async function createProduct(
   }
 
   const isFeatured = formData.get("isFeatured") === "on";
+  const usesPhoneVariants = formData.get("usesPhoneVariants") === "on";
 
   let productId: string;
   try {
@@ -233,6 +234,8 @@ export async function createProduct(
         wholesalePriceCents: parsed.data.wholesalePriceCents,
         costCents: parsed.data.costCents,
         isFeatured,
+        variantMode: usesPhoneVariants ? PRODUCT_VARIANT_MODES.PHONE_COMPATIBILITY : PRODUCT_VARIANT_MODES.NONE,
+        variantAllocationStatus: usesPhoneVariants ? VARIANT_ALLOCATION_STATUSES.PENDING : VARIANT_ALLOCATION_STATUSES.NOT_REQUIRED,
       },
     });
     productId = product.id;
@@ -251,7 +254,7 @@ export async function createProduct(
   revalidatePath("/admin/products");
   revalidatePath("/admin");
   revalidatePath("/products");
-  redirect("/admin/products");
+  redirect(usesPhoneVariants ? `/admin/products/${productId}/variants` : "/admin/products");
 }
 
 export async function updateProduct(
@@ -426,6 +429,7 @@ export async function removeProduct(productId: string): Promise<ProductRemovalRe
         await tx.inventoryItem.deleteMany({
           where: { productId: product.id, quantity: 0 },
         });
+        await tx.productVariant.deleteMany({ where: { productId: product.id } });
         await tx.product.delete({ where: { id: product.id } });
 
         return { kind: "deleted" as const, removableMedia };

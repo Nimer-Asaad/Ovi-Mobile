@@ -31,6 +31,7 @@ export default async function AdminRepRequestPrintPage({ params }: AdminRepReque
           id: true,
           requestedQuantity: true,
           approvedQuantity: true,
+          variant: { select: { color: { select: { name: true, nameAr: true } }, phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } } } },
           product: { select: { sku: true, name: true, nameAr: true } },
         },
       },
@@ -62,7 +63,7 @@ export default async function AdminRepRequestPrintPage({ params }: AdminRepReque
           adminNote: request.adminNote,
           items: request.items.map((item) => ({
             id: item.id,
-            productLabel: item.product.nameAr ?? item.product.name,
+            productLabel: `${item.product.nameAr ?? item.product.name}${item.variant ? ` — ${item.variant.phoneModel.phoneBrand.nameAr ?? item.variant.phoneModel.phoneBrand.name} / ${item.variant.phoneModel.nameAr ?? item.variant.phoneModel.name}${item.variant.color ? ` / ${item.variant.color.nameAr ?? item.variant.color.name}` : ""}` : ""}`,
             sku: item.product.sku,
             requestedQuantity: item.requestedQuantity,
             approvedQuantity: item.approvedQuantity,

@@ -15,6 +15,9 @@ export interface InventoryKey {
    * index (`... WHERE "colorId" IS NULL`, see the migration), which only a
    * plain filter can query against. */
   colorId: string | null;
+  /** True ProductVariant identity. Omitted/null keeps legacy and ordinary
+   * product inventory fully compatible during the transition. */
+  variantId?: string | null;
   locationId: string;
 }
 
@@ -42,8 +45,16 @@ export class MissingInventoryError extends Error {
   }
 }
 
+function requirePositiveQuantity(quantity: number): void {
+  if (!Number.isInteger(quantity) || quantity <= 0) throw new RangeError("INVENTORY_QUANTITY_MUST_BE_POSITIVE");
+}
+
+function requireNonnegativeQuantity(quantity: number): void {
+  if (!Number.isInteger(quantity) || quantity < 0) throw new RangeError("INVENTORY_QUANTITY_MUST_BE_NONNEGATIVE");
+}
+
 function keyFilter(key: InventoryKey) {
-  return { productId: key.productId, colorId: key.colorId, locationId: key.locationId };
+  return { productId: key.productId, colorId: key.colorId, variantId: key.variantId ?? null, locationId: key.locationId };
 }
 
 async function readQuantity(tx: Tx, key: InventoryKey): Promise<number> {
@@ -67,7 +78,7 @@ async function createOrElse(
 ): Promise<void> {
   try {
     await tx.inventoryItem.create({
-      data: { productId: key.productId, locationId: key.locationId, colorId: key.colorId, quantity: initialQuantity },
+      data: { productId: key.productId, locationId: key.locationId, colorId: key.colorId, variantId: key.variantId ?? null, quantity: initialQuantity },
     });
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
@@ -88,6 +99,7 @@ export async function decrementInventoryAtomic(
   key: InventoryKey,
   quantity: number,
 ): Promise<QuantityChange> {
+  requirePositiveQuantity(quantity);
   const decremented = await tx.inventoryItem.updateMany({
     where: { ...keyFilter(key), quantity: { gte: quantity } },
     data: { quantity: { decrement: quantity } },
@@ -108,6 +120,7 @@ export async function incrementInventoryUpsert(
   key: InventoryKey,
   quantity: number,
 ): Promise<QuantityChange> {
+  requirePositiveQuantity(quantity);
   const updated = await tx.inventoryItem.updateMany({
     where: keyFilter(key),
     data: { quantity: { increment: quantity } },
@@ -131,6 +144,7 @@ export async function incrementInventoryExisting(
   key: InventoryKey,
   quantity: number,
 ): Promise<QuantityChange> {
+  requirePositiveQuantity(quantity);
   const incremented = await tx.inventoryItem.updateMany({
     where: keyFilter(key),
     data: { quantity: { increment: quantity } },
@@ -152,6 +166,7 @@ export async function setInventoryAbsolute(
   key: InventoryKey,
   quantity: number,
 ): Promise<QuantityChange> {
+  requireNonnegativeQuantity(quantity);
   const existing = await tx.inventoryItem.findFirst({
     where: keyFilter(key),
     select: { quantity: true },
@@ -171,6 +186,8 @@ export interface StockMovementInput {
   type: string;
   productId: string;
   colorId: string | null;
+  variantId?: string | null;
+  allocationBatchId?: string | null;
   fromLocationId?: string | null;
   toLocationId?: string | null;
   quantity: number;
@@ -184,5 +201,6 @@ export interface StockMovementInput {
  * mutation in the app writes to the immutable ledger through the same call
  * shape as the InventoryItem helpers above. */
 export async function recordStockMovement(tx: Tx, input: StockMovementInput): Promise<void> {
+  requirePositiveQuantity(input.quantity);
   await tx.stockMovement.create({ data: { ...input } });
 }

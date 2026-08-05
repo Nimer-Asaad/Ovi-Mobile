@@ -188,7 +188,7 @@ export async function completeStockRequest(
       status: true,
       salesRep: { select: { id: true, user: { select: { name: true } } } },
       items: {
-        select: { id: true, productId: true, colorId: true, requestedQuantity: true, approvedQuantity: true },
+        select: { id: true, productId: true, colorId: true, variantId: true, requestedQuantity: true, approvedQuantity: true },
       },
     },
   });
@@ -213,10 +213,10 @@ export async function completeStockRequest(
   const productIds = linesToTransfer.map((line) => line.productId);
   const warehouseItems = await prisma.inventoryItem.findMany({
     where: { productId: { in: productIds }, locationId: warehouse.id },
-    select: { productId: true, colorId: true, quantity: true },
+    select: { productId: true, colorId: true, variantId: true, quantity: true },
   });
   const warehouseQtyByLineKey = new Map(
-    warehouseItems.map((item) => [`${item.productId}:${item.colorId ?? ""}`, item.quantity]),
+    warehouseItems.map((item) => [`${item.productId}:${item.variantId ?? `legacy:${item.colorId ?? ""}`}`, item.quantity]),
   );
 
   const products = await prisma.product.findMany({
@@ -226,7 +226,7 @@ export async function completeStockRequest(
   const productById = new Map(products.map((product) => [product.id, product]));
 
   for (const line of linesToTransfer) {
-    const available = warehouseQtyByLineKey.get(`${line.productId}:${line.colorId ?? ""}`) ?? 0;
+    const available = warehouseQtyByLineKey.get(`${line.productId}:${line.variantId ?? `legacy:${line.colorId ?? ""}`}`) ?? 0;
     if (line.approvedQuantity > available) {
       const product = productById.get(line.productId);
       return {
@@ -253,14 +253,14 @@ export async function completeStockRequest(
         // back the whole completion rather than silently going negative.
         await decrementInventoryAtomic(
           tx,
-          { productId: line.productId, colorId: line.colorId, locationId: warehouse.id },
+          { productId: line.productId, colorId: line.colorId, variantId: line.variantId, locationId: warehouse.id },
           line.approvedQuantity,
         );
 
         // Atomic increment on the destination (rep car).
         const change = await incrementInventoryUpsert(
           tx,
-          { productId: line.productId, colorId: line.colorId, locationId: repLocation.id },
+          { productId: line.productId, colorId: line.colorId, variantId: line.variantId, locationId: repLocation.id },
           line.approvedQuantity,
         );
 
@@ -268,6 +268,7 @@ export async function completeStockRequest(
           type: STOCK_MOVEMENT_TYPES.REP_ASSIGNMENT,
           productId: line.productId,
           colorId: line.colorId,
+          variantId: line.variantId,
           fromLocationId: warehouse.id,
           toLocationId: repLocation.id,
           quantity: line.approvedQuantity,

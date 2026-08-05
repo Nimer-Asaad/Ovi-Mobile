@@ -22,6 +22,8 @@ export default async function RepNewSalePage() {
           select: {
             quantity: true,
             colorId: true,
+            variantId: true,
+            variant: { select: { id: true, color: { select: { name: true, nameAr: true } }, phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } } } },
             color: { select: { id: true, name: true, nameAr: true, hexCode: true } },
             product: {
               select: {
@@ -78,6 +80,7 @@ export default async function RepNewSalePage() {
     thumbnailAlt: string | null;
     repStock: number;
     colorOptions: SaleColorOption[];
+    variantOptions: { id: string; label: string; stock: number }[];
   }
 
   const byProductId = new Map<string, SaleProductAccumulator>();
@@ -93,8 +96,11 @@ export default async function RepNewSalePage() {
       thumbnailAlt: item.product.images[0]?.altText ?? null,
       repStock: 0,
       colorOptions: [],
+      variantOptions: [],
     };
-    if (item.colorId && item.color) {
+    if (item.variantId && item.variant) {
+      existing.variantOptions.push({ id: item.variant.id, label: `${item.variant.phoneModel.phoneBrand.nameAr ?? item.variant.phoneModel.phoneBrand.name} / ${item.variant.phoneModel.nameAr ?? item.variant.phoneModel.name}${item.variant.color ? ` / ${item.variant.color.nameAr ?? item.variant.color.name}` : ""}`, stock: item.quantity });
+    } else if (item.colorId && item.color) {
       existing.colorOptions.push({
         id: item.color.id,
         name: item.color.name,

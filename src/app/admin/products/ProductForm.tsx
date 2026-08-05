@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
+import Link from "next/link";
 import type { Brand, Category, Color, Product, ProductImage, Supplier } from "@prisma/client";
 import { createProduct, updateProduct, type ProductFormState } from "./actions";
 import { Input } from "@/components/ui/Input";
@@ -198,6 +199,18 @@ export function ProductForm({
         )}
       </FormSection>
 
+      {product && (
+        <FormSection title="التوافق مع موديلات الهواتف والـVariants">
+          <p className="text-sm text-neutral-bg/60">
+            للكفرات وحمايات الشاشة والعدسات: عرّف الماركة والموديل واللون لكل Variant، ثم وزّع المخزون القديم يدوياً دون تغيير مجموعه.
+          </p>
+          <div className="flex flex-wrap items-center gap-3">
+            <Link href={`/admin/products/${product.id}/variants`}><Button type="button" variant="secondary">إدارة الـVariants وتوزيع المخزون</Button></Link>
+            <span className="text-xs text-neutral-bg/50">الحالة: {product.variantAllocationStatus}</span>
+          </div>
+        </FormSection>
+      )}
+
       <FormSection title="الحالة">
         <label className="flex items-center gap-2 text-sm text-neutral-bg/80">
           <input
@@ -208,6 +221,7 @@ export function ProductForm({
           />
           منتج مميز
         </label>
+        {!product && <label className="flex items-center gap-2 text-sm text-neutral-bg/80"><input type="checkbox" name="usesPhoneVariants" className="h-4 w-4" />هذا المنتج يحتاج توافق ماركة + موديل هاتف + لون (سيتم فتح محرر الـVariants بعد الحفظ)</label>}
       </FormSection>
 
       {state.error && (

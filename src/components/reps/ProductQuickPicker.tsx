@@ -29,6 +29,7 @@ export interface PickableProduct {
   thumbnailAlt: string | null;
   /** Empty/omitted for a colorless product. */
   colorOptions?: PickableColorOption[];
+  variantOptions?: { id: string; label: string; stock?: number }[];
 }
 
 /** Small inline thumbnail shared by every rep product list (search results,
@@ -101,7 +102,7 @@ export interface ProductQuickPickerProps<T extends PickableProduct> {
    * as separate picks) unless every one of its colors is already a line. */
   excludeIds: Set<string>;
   /** colorId is null for a colorless product/pick. */
-  onPick: (product: T, colorId: string | null) => void;
+  onPick: (product: T, colorId: string | null, variantId: string | null) => void;
   placeholder?: string;
 }
 
@@ -135,14 +136,14 @@ export function ProductQuickPicker<T extends PickableProduct>({
       );
   }, [search, products, excludeIds]);
 
-  function handlePick(product: T, colorId: string | null) {
-    onPick(product, colorId);
+  function handlePick(product: T, colorId: string | null, variantId: string | null = null) {
+    onPick(product, colorId, variantId);
     setSearch("");
     setDetailProduct(null);
   }
 
   function handleRowClick(product: T) {
-    if ((product.colorOptions?.length ?? 0) > 0) {
+    if ((product.variantOptions?.length ?? 0) > 0 || (product.colorOptions?.length ?? 0) > 0) {
       setDetailProduct(product);
     } else {
       handlePick(product, null);
@@ -222,7 +223,15 @@ export function ProductQuickPicker<T extends PickableProduct>({
               )}
             </div>
 
-            {detailProduct.colorOptions && detailProduct.colorOptions.length > 0 ? (
+            {detailProduct.variantOptions && detailProduct.variantOptions.length > 0 ? (
+              <div className="mt-5 flex flex-col gap-2">
+                <p className="text-center text-xs text-neutral-bg/50">اختر ماركة / موديل / لون الهاتف</p>
+                {detailProduct.variantOptions.map((variant) => {
+                  const outOfStock = variant.stock !== undefined && variant.stock <= 0;
+                  return <button key={variant.id} type="button" disabled={outOfStock} onClick={() => handlePick(detailProduct, null, variant.id)} className={cn("rounded-card border border-navy-soft px-3 py-2 text-sm text-neutral-bg/80 hover:border-gold-champagne/40", outOfStock && "cursor-not-allowed opacity-40")}>{variant.label}{outOfStock && " (نفد)"}</button>;
+                })}
+              </div>
+            ) : detailProduct.colorOptions && detailProduct.colorOptions.length > 0 ? (
               <div className="mt-5 flex flex-col gap-2">
                 <p className="text-center text-xs text-neutral-bg/50">اختر اللون</p>
                 <div className="flex flex-wrap justify-center gap-2">

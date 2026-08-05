@@ -11,7 +11,7 @@ export interface ManualOrderProductPickerProps {
   priceMode: "retail" | "wholesale";
   /** `${productId}:${colorId ?? ""}` for every line already added. */
   addedLineKeys: Set<string>;
-  onAdd: (product: ManualOrderProductOption, colorId: string | null) => void;
+  onAdd: (product: ManualOrderProductOption, colorId: string | null, variantId?: string | null) => void;
 }
 
 /** Local search over the fully-preloaded product list — the catalog is
@@ -49,10 +49,12 @@ export function ManualOrderProductPicker({ products, priceMode, addedLineKeys, o
         )}
         {filtered.map((product) => {
           const hasColors = (product.colorOptions?.length ?? 0) > 0;
+          const hasVariants = (product.variantOptions?.length ?? 0) > 0;
           const allColorsAdded =
-            hasColors && product.colorOptions!.every((color) => addedLineKeys.has(`${product.id}:${color.id}`));
-          const alreadyAdded = hasColors ? allColorsAdded : addedLineKeys.has(`${product.id}:`);
-          const outOfStock = !hasColors && product.stock <= 0;
+            hasColors && product.colorOptions!.every((color) => addedLineKeys.has(`${product.id}:legacy:${color.id}`));
+          const allVariantsAdded = hasVariants && product.variantOptions!.every((variant) => addedLineKeys.has(`${product.id}:${variant.id}`));
+          const alreadyAdded = hasVariants ? allVariantsAdded : hasColors ? allColorsAdded : addedLineKeys.has(`${product.id}:legacy:`);
+          const outOfStock = !hasVariants && !hasColors && product.stock <= 0;
           const priceCents = priceMode === "wholesale" ? product.wholesalePriceCents : product.retailPriceCents;
 
           return (
@@ -64,7 +66,7 @@ export function ManualOrderProductPicker({ products, priceMode, addedLineKeys, o
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium text-neutral-bg">{product.nameAr ?? product.name}</p>
                   <p className="text-xs text-neutral-bg/50">
-                    {product.sku} · متوفر: {hasColors ? "حسب اللون" : product.stock} · {formatCurrencyFromCents(priceCents)}
+                    {product.sku} · متوفر: {hasVariants ? "حسب الموديل واللون" : hasColors ? "حسب اللون" : product.stock} · {formatCurrencyFromCents(priceCents)}
                   </p>
                 </div>
                 <Button
@@ -73,17 +75,17 @@ export function ManualOrderProductPicker({ products, priceMode, addedLineKeys, o
                   variant="outline"
                   disabled={alreadyAdded || outOfStock}
                   onClick={() =>
-                    hasColors ? setColorPickProductId(product.id === colorPickProductId ? null : product.id) : onAdd(product, null)
+                    hasVariants || hasColors ? setColorPickProductId(product.id === colorPickProductId ? null : product.id) : onAdd(product, null)
                   }
                 >
-                  {alreadyAdded ? "أُضيف" : outOfStock ? "نفد المخزون" : hasColors ? "اختر اللون" : "إضافة"}
+                  {alreadyAdded ? "أُضيف" : outOfStock ? "نفد المخزون" : hasVariants ? "اختر الموديل" : hasColors ? "اختر اللون" : "إضافة"}
                 </Button>
               </div>
 
-              {colorPickProductId === product.id && hasColors && (
+              {colorPickProductId === product.id && hasColors && !hasVariants && (
                 <div className="flex flex-wrap gap-2 border-t border-navy-soft pt-2">
                   {product.colorOptions!.map((color) => {
-                    const used = addedLineKeys.has(`${product.id}:${color.id}`);
+                    const used = addedLineKeys.has(`${product.id}:legacy:${color.id}`);
                     const oos = color.stock <= 0;
                     return (
                       <button
@@ -109,6 +111,15 @@ export function ManualOrderProductPicker({ products, priceMode, addedLineKeys, o
                         {color.nameAr ?? color.name} {used ? "(أُضيف)" : oos ? "(نفذ)" : `(${color.stock})`}
                       </button>
                     );
+                  })}
+                </div>
+              )}
+              {colorPickProductId === product.id && hasVariants && (
+                <div className="flex flex-col gap-2 border-t border-navy-soft pt-2">
+                  {product.variantOptions!.map((variant) => {
+                    const used = addedLineKeys.has(`${product.id}:${variant.id}`);
+                    const oos = variant.stock <= 0;
+                    return <button key={variant.id} type="button" disabled={used || oos} onClick={() => { onAdd(product, null, variant.id); setColorPickProductId(null); }} className={cn("rounded-card border border-navy-soft px-3 py-2 text-start text-xs text-neutral-bg/80", (used || oos) && "cursor-not-allowed opacity-40")}>{variant.label} ({variant.stock})</button>;
                   })}
                 </div>
               )}

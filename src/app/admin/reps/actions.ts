@@ -38,6 +38,7 @@ function parseTransferForm(formData: FormData) {
   return repStockTransferSchema.safeParse({
     productId: formData.get("productId")?.toString() ?? "",
     colorId: formData.get("colorId")?.toString() || undefined,
+    variantId: formData.get("variantId")?.toString() || undefined,
     quantity: formData.get("quantity")?.toString() ?? "",
     notes: formData.get("notes")?.toString().trim() || undefined,
   });
@@ -56,6 +57,7 @@ export async function assignStockToRep(
   }
   const { productId, quantity, notes } = parsed.data;
   const colorId = parsed.data.colorId ?? null;
+  const variantId = parsed.data.variantId ?? null;
 
   const rep = await prisma.salesRepresentative.findUnique({
     where: { id: repId },
@@ -70,7 +72,7 @@ export async function assignStockToRep(
 
   const product = await prisma.product.findUnique({
     where: { id: productId },
-    select: { id: true, isActive: true, colorOptions: { select: { colorId: true } } },
+    select: { id: true, isActive: true, variantMode: true, variantAllocationStatus: true, colorOptions: { select: { colorId: true } }, variants: { where: { isActive: true }, select: { id: true } } },
   });
   if (!product) {
     return { error: "المنتج غير موجود" };
@@ -81,6 +83,8 @@ export async function assignStockToRep(
   if (colorId && !product.colorOptions.some((option) => option.colorId === colorId)) {
     return { error: "اللون المحدد لا ينتمي لهذا المنتج" };
   }
+  if (product.variantMode === "PHONE_COMPATIBILITY" && (product.variantAllocationStatus !== "READY" || !variantId || !product.variants.some((variant) => variant.id === variantId))) return { error: "اختر Variant صالحاً وجاهز المخزون" };
+  if (product.variantMode !== "PHONE_COMPATIBILITY" && variantId) return { error: "Variant لا يتبع المنتج" };
 
   const warehouse = await getMainWarehouse();
   const repLocation = await getOrCreateRepLocation(rep.id, rep.user.name);
@@ -90,13 +94,13 @@ export async function assignStockToRep(
       // Atomic conditional decrement on the source (warehouse) — never a
       // stale read-then-write. Insufficient stock rolls back the whole
       // transfer.
-      await decrementInventoryAtomic(tx, { productId, colorId, locationId: warehouse.id }, quantity);
+      await decrementInventoryAtomic(tx, { productId, colorId, variantId, locationId: warehouse.id }, quantity);
 
       // Atomic increment on the destination (rep car) — safe even if two
       // transfers to the same rep/product land at the same moment.
       const change = await incrementInventoryUpsert(
         tx,
-        { productId, colorId, locationId: repLocation.id },
+        { productId, colorId, variantId, locationId: repLocation.id },
         quantity,
       );
 
@@ -104,6 +108,7 @@ export async function assignStockToRep(
         type: STOCK_MOVEMENT_TYPES.REP_ASSIGNMENT,
         productId,
         colorId,
+        variantId,
         fromLocationId: warehouse.id,
         toLocationId: repLocation.id,
         quantity,
@@ -137,6 +142,7 @@ export async function returnStockFromRep(
   }
   const { productId, quantity, notes } = parsed.data;
   const colorId = parsed.data.colorId ?? null;
+  const variantId = parsed.data.variantId ?? null;
 
   const rep = await prisma.salesRepresentative.findUnique({
     where: { id: repId },
@@ -148,7 +154,7 @@ export async function returnStockFromRep(
 
   const product = await prisma.product.findUnique({
     where: { id: productId },
-    select: { id: true, colorOptions: { select: { colorId: true } } },
+    select: { id: true, variantMode: true, colorOptions: { select: { colorId: true } }, variants: { select: { id: true } } },
   });
   if (!product) {
     return { error: "المنتج غير موجود" };
@@ -156,6 +162,7 @@ export async function returnStockFromRep(
   if (colorId && !product.colorOptions.some((option) => option.colorId === colorId)) {
     return { error: "اللون المحدد لا ينتمي لهذا المنتج" };
   }
+  if (product.variantMode === "PHONE_COMPATIBILITY" && (!variantId || !product.variants.some((variant) => variant.id === variantId))) return { error: "اختر Variant صالحاً" };
 
   const warehouse = await getMainWarehouse();
   const repLocation = await prisma.stockLocation.findUnique({ where: { salesRepId: rep.id } });
@@ -171,17 +178,18 @@ export async function returnStockFromRep(
       // return.
       const change = await decrementInventoryAtomic(
         tx,
-        { productId, colorId, locationId: repLocation.id },
+        { productId, colorId, variantId, locationId: repLocation.id },
         quantity,
       );
 
       // Atomic increment on the destination (warehouse).
-      await incrementInventoryUpsert(tx, { productId, colorId, locationId: warehouse.id }, quantity);
+      await incrementInventoryUpsert(tx, { productId, colorId, variantId, locationId: warehouse.id }, quantity);
 
       await recordStockMovement(tx, {
         type: STOCK_MOVEMENT_TYPES.REP_RETURN,
         productId,
         colorId,
+        variantId,
         fromLocationId: repLocation.id,
         toLocationId: warehouse.id,
         quantity,

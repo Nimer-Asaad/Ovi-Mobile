@@ -58,6 +58,10 @@ export default async function OrderDetailPage({ params }: OrderDetailPageProps) 
           unitPriceCents: true,
           totalCents: true,
           color: { select: { name: true, nameAr: true } },
+          phoneBrandSnapshot: true,
+          phoneModelSnapshot: true,
+          colorNameSnapshot: true,
+          variantCodeSnapshot: true,
           product: {
             select: {
               sku: true,

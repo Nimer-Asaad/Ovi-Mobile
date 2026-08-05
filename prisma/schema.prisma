@@ -58,18 +58,19 @@ model User {
   merchantProfile            Merchant?
   salesRepresentativeProfile SalesRepresentative?
 
-  ordersPlaced            Order[]                      @relation("OrderCustomer")
-  stockMovements          StockMovement[]              @relation("StockMovementCreatedBy")
-  sessions                Session[]
-  cart                    Cart?
-  wishlistItems           WishlistItem[]
-  orderStatusChanges      OrderStatusHistory[]         @relation("OrderStatusChangedBy")
-  orderCompensations      OrderInventoryCompensation[] @relation("OrderCompensationCreatedBy")
-  activityEvents          UserActivityEvent[]
-  auditLogsAsAdmin        AdminAuditLog[]              @relation("AuditLogAdmin")
-  auditLogsAsTarget       AdminAuditLog[]              @relation("AuditLogTarget")
-  accountAsCustomer       CustomerAccount?             @relation("AccountCustomer")
-  accountPaymentsRecorded AccountPayment[]             @relation("AccountPaymentCreatedBy")
+  ordersPlaced                Order[]                         @relation("OrderCustomer")
+  stockMovements              StockMovement[]                 @relation("StockMovementCreatedBy")
+  sessions                    Session[]
+  cart                        Cart?
+  wishlistItems               WishlistItem[]
+  orderStatusChanges          OrderStatusHistory[]            @relation("OrderStatusChangedBy")
+  orderCompensations          OrderInventoryCompensation[]    @relation("OrderCompensationCreatedBy")
+  activityEvents              UserActivityEvent[]
+  auditLogsAsAdmin            AdminAuditLog[]                 @relation("AuditLogAdmin")
+  auditLogsAsTarget           AdminAuditLog[]                 @relation("AuditLogTarget")
+  accountAsCustomer           CustomerAccount?                @relation("AccountCustomer")
+  accountPaymentsRecorded     AccountPayment[]                @relation("AccountPaymentCreatedBy")
+  completedVariantAllocations ProductVariantAllocationBatch[] @relation("VariantAllocationCompletedBy")
 
   @@map("users")
 }
@@ -272,8 +273,46 @@ model Color {
   stockMovements    StockMovement[]
   stockRequestItems StockRequestItem[]
   stockReturnItems  StockReturnItem[]
+  variants          ProductVariant[]
 
   @@map("colors")
+}
+
+/// Phone manufacturers are intentionally separate from Brand: Brand is the
+/// manufacturer of the catalog product, while PhoneBrand describes devices
+/// that a case/protector/lens is compatible with.
+model PhoneBrand {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  nameAr    String?
+  slug      String   @unique
+  isActive  Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  models PhoneModel[]
+
+  @@map("phone_brands")
+}
+
+model PhoneModel {
+  id           String     @id @default(cuid())
+  phoneBrandId String
+  phoneBrand   PhoneBrand @relation(fields: [phoneBrandId], references: [id])
+  name         String
+  nameAr       String?
+  slug         String
+  isActive     Boolean    @default(true)
+  sortOrder    Int        @default(0)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  variants ProductVariant[]
+
+  @@unique([phoneBrandId, slug])
+  @@index([phoneBrandId])
+  @@map("phone_models")
 }
 
 /// Declares which colors a specific product currently offers — separate
@@ -313,22 +352,77 @@ model Product {
   /// Smallest currency unit. Internal cost, admin-only.
   costCents           Int?
 
-  isActive   Boolean  @default(true)
-  isFeatured Boolean  @default(false)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  isActive                Boolean  @default(true)
+  isFeatured              Boolean  @default(false)
+  /// NONE | PHONE_COMPATIBILITY. Existing products remain NONE until an
+  /// admin explicitly opts them into variant tracking.
+  variantMode             String   @default("NONE")
+  /// NOT_REQUIRED | PENDING | READY. PENDING inventory is never offered as
+  /// variant stock until its legacy balance has been reviewed manually.
+  variantAllocationStatus String   @default("NOT_REQUIRED")
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
 
-  inventoryItems    InventoryItem[]
-  stockMovements    StockMovement[]
-  orderItems        OrderItem[]
-  stockRequestItems StockRequestItem[]
-  stockReturnItems  StockReturnItem[]
-  images            ProductImage[]
-  cartItems         CartItem[]
-  wishlistItems     WishlistItem[]
-  colorOptions      ProductColorOption[]
+  inventoryItems         InventoryItem[]
+  stockMovements         StockMovement[]
+  orderItems             OrderItem[]
+  stockRequestItems      StockRequestItem[]
+  stockReturnItems       StockReturnItem[]
+  images                 ProductImage[]
+  cartItems              CartItem[]
+  wishlistItems          WishlistItem[]
+  colorOptions           ProductColorOption[]
+  variants               ProductVariant[]
+  variantAllocationBatch ProductVariantAllocationBatch?
 
   @@map("products")
+}
+
+model ProductVariant {
+  id           String     @id @default(cuid())
+  productId    String
+  product      Product    @relation(fields: [productId], references: [id])
+  phoneModelId String
+  phoneModel   PhoneModel @relation(fields: [phoneModelId], references: [id])
+  colorId      String?
+  color        Color?     @relation(fields: [colorId], references: [id])
+  variantCode  String?    @unique
+  isActive     Boolean    @default(true)
+  sortOrder    Int        @default(0)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  inventoryItems    InventoryItem[]
+  cartItems         CartItem[]
+  orderItems        OrderItem[]
+  stockMovements    StockMovement[]
+  stockRequestItems StockRequestItem[]
+  stockReturnItems  StockReturnItem[]
+
+  @@unique([productId, phoneModelId, colorId])
+  @@unique([id, productId])
+  @@index([productId, isActive])
+  @@index([phoneModelId])
+  @@map("product_variants")
+}
+
+/// Immutable baseline for the one-time manual conversion of legacy product
+/// inventory into variant inventory. A completed batch is never reopened.
+model ProductVariantAllocationBatch {
+  id                     String          @id @default(cuid())
+  productId              String          @unique
+  product                Product         @relation(fields: [productId], references: [id])
+  originalLegacyQuantity Int
+  allocatedQuantity      Int             @default(0)
+  status                 String          @default("PENDING")
+  createdAt              DateTime        @default(now())
+  completedAt            DateTime?
+  completedById          String?
+  completedBy            User?           @relation("VariantAllocationCompletedBy", fields: [completedById], references: [id], onDelete: Restrict)
+  stockMovements         StockMovement[]
+
+  @@index([status])
+  @@map("product_variant_allocation_batches")
 }
 
 // ---------------------------------------------------------------------------
@@ -350,19 +444,21 @@ model Cart {
 }
 
 model CartItem {
-  id        String   @id @default(cuid())
+  id        String          @id @default(cuid())
   cartId    String
-  cart      Cart     @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  cart      Cart            @relation(fields: [cartId], references: [id], onDelete: Cascade)
   productId String
-  product   Product  @relation(fields: [productId], references: [id])
+  product   Product         @relation(fields: [productId], references: [id])
   /// Null for colorless products — see Color model doc comment.
   colorId   String?
-  color     Color?   @relation(fields: [colorId], references: [id])
+  color     Color?          @relation(fields: [colorId], references: [id])
+  variantId String?
+  variant   ProductVariant? @relation(fields: [variantId, productId], references: [id, productId])
   quantity  Int
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
 
-  @@unique([cartId, productId, colorId])
+  @@unique([cartId, productId, colorId, variantId])
   @@map("cart_items")
 }
 
@@ -434,18 +530,20 @@ model StockLocation {
 /// source of truth is the StockMovement ledger; this table is a maintained
 /// aggregate for fast reads.
 model InventoryItem {
-  id         String        @id @default(cuid())
+  id         String          @id @default(cuid())
   productId  String
-  product    Product       @relation(fields: [productId], references: [id])
+  product    Product         @relation(fields: [productId], references: [id])
   locationId String
-  location   StockLocation @relation(fields: [locationId], references: [id])
+  location   StockLocation   @relation(fields: [locationId], references: [id])
   /// Null for colorless products — see Color model doc comment.
   colorId    String?
-  color      Color?        @relation(fields: [colorId], references: [id])
-  quantity   Int           @default(0)
-  updatedAt  DateTime      @updatedAt
+  color      Color?          @relation(fields: [colorId], references: [id])
+  variantId  String?
+  variant    ProductVariant? @relation(fields: [variantId, productId], references: [id, productId])
+  quantity   Int             @default(0)
+  updatedAt  DateTime        @updatedAt
 
-  @@unique([productId, locationId, colorId])
+  @@unique([productId, locationId, colorId, variantId])
   @@map("inventory_items")
 }
 
@@ -457,25 +555,31 @@ model InventoryItem {
 /// returns, adjustments, rep stock assignment/return) is recorded here and
 /// is never edited or deleted, only appended to.
 model StockMovement {
-  id               String         @id @default(cuid())
-  type             String
-  productId        String
-  product          Product        @relation(fields: [productId], references: [id])
+  id                String                         @id @default(cuid())
+  type              String
+  productId         String
+  product           Product                        @relation(fields: [productId], references: [id])
   /// Null for colorless products — see Color model doc comment.
-  colorId          String?
-  color            Color?         @relation(fields: [colorId], references: [id])
-  fromLocationId   String?
-  fromLocation     StockLocation? @relation("MovementFromLocation", fields: [fromLocationId], references: [id])
-  toLocationId     String?
-  toLocation       StockLocation? @relation("MovementToLocation", fields: [toLocationId], references: [id])
-  quantity         Int
-  previousQuantity Int?
-  newQuantity      Int?
-  note             String?
-  createdById      String?
-  createdBy        User?          @relation("StockMovementCreatedBy", fields: [createdById], references: [id])
-  createdAt        DateTime       @default(now())
+  colorId           String?
+  color             Color?                         @relation(fields: [colorId], references: [id])
+  variantId         String?
+  variant           ProductVariant?                @relation(fields: [variantId, productId], references: [id, productId])
+  allocationBatchId String?
+  allocationBatch   ProductVariantAllocationBatch? @relation(fields: [allocationBatchId], references: [id])
+  fromLocationId    String?
+  fromLocation      StockLocation?                 @relation("MovementFromLocation", fields: [fromLocationId], references: [id])
+  toLocationId      String?
+  toLocation        StockLocation?                 @relation("MovementToLocation", fields: [toLocationId], references: [id])
+  quantity          Int
+  previousQuantity  Int?
+  newQuantity       Int?
+  note              String?
+  createdById       String?
+  createdBy         User?                          @relation("StockMovementCreatedBy", fields: [createdById], references: [id])
+  createdAt         DateTime                       @default(now())
 
+  @@index([variantId])
+  @@index([allocationBatchId])
   @@map("stock_movements")
 }
 
@@ -549,20 +653,29 @@ model Order {
 }
 
 model OrderItem {
-  id             String  @id @default(cuid())
-  orderId        String
-  order          Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  productId      String
-  product        Product @relation(fields: [productId], references: [id])
+  id                  String          @id @default(cuid())
+  orderId             String
+  order               Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId           String
+  product             Product         @relation(fields: [productId], references: [id])
   /// Null for colorless products — see Color model doc comment. Deliberately
   /// no color-name snapshot, matching OrderItem's existing convention of
   /// never snapshotting product name/SKU and always joining live.
-  colorId        String?
-  color          Color?  @relation(fields: [colorId], references: [id])
-  quantity       Int
-  unitPriceCents Int
-  totalCents     Int
+  colorId             String?
+  color               Color?          @relation(fields: [colorId], references: [id])
+  variantId           String?
+  variant             ProductVariant? @relation(fields: [variantId, productId], references: [id, productId])
+  productNameSnapshot String?
+  productSkuSnapshot  String?
+  variantCodeSnapshot String?
+  phoneBrandSnapshot  String?
+  phoneModelSnapshot  String?
+  colorNameSnapshot   String?
+  quantity            Int
+  unitPriceCents      Int
+  totalCents          Int
 
+  @@index([variantId])
   @@map("order_items")
 }
 
@@ -691,18 +804,21 @@ model StockRequest {
 }
 
 model StockRequestItem {
-  id                String       @id @default(cuid())
+  id                String          @id @default(cuid())
   stockRequestId    String
-  stockRequest      StockRequest @relation(fields: [stockRequestId], references: [id], onDelete: Cascade)
+  stockRequest      StockRequest    @relation(fields: [stockRequestId], references: [id], onDelete: Cascade)
   productId         String
-  product           Product      @relation(fields: [productId], references: [id])
+  product           Product         @relation(fields: [productId], references: [id])
   /// Null for colorless products — see Color model doc comment.
   colorId           String?
-  color             Color?       @relation(fields: [colorId], references: [id])
+  color             Color?          @relation(fields: [colorId], references: [id])
+  variantId         String?
+  variant           ProductVariant? @relation(fields: [variantId, productId], references: [id, productId])
   requestedQuantity Int
   /// Set by admin during review. null = not yet reviewed; 0 = rejected/removed line.
   approvedQuantity  Int?
 
+  @@index([variantId])
   @@map("stock_request_items")
 }
 
@@ -722,15 +838,18 @@ model StockReturn {
 }
 
 model StockReturnItem {
-  id            String      @id @default(cuid())
+  id            String          @id @default(cuid())
   stockReturnId String
-  stockReturn   StockReturn @relation(fields: [stockReturnId], references: [id], onDelete: Cascade)
+  stockReturn   StockReturn     @relation(fields: [stockReturnId], references: [id], onDelete: Cascade)
   productId     String
-  product       Product     @relation(fields: [productId], references: [id])
+  product       Product         @relation(fields: [productId], references: [id])
   /// Null for colorless products — see Color model doc comment.
   colorId       String?
-  color         Color?      @relation(fields: [colorId], references: [id])
+  color         Color?          @relation(fields: [colorId], references: [id])
+  variantId     String?
+  variant       ProductVariant? @relation(fields: [variantId, productId], references: [id, productId])
   quantity      Int
 
+  @@index([variantId])
   @@map("stock_return_items")
 }

@@ -6,6 +6,7 @@ export interface TransferInvoiceData {
   newQuantity: number | null;
   note: string | null;
   product: { sku: string; name: string; nameAr: string | null };
+  variantLabel: string | null;
   fromLocationName: string | null;
   toLocationName: string | null;
   repName: string;
@@ -88,7 +89,7 @@ export function RepTransferInvoiceView({ movement }: { movement: TransferInvoice
           </thead>
           <tbody className="divide-y divide-neutral-100">
             <tr>
-              <td className="py-2 text-neutral-900">{movement.product.nameAr ?? movement.product.name}</td>
+              <td className="py-2 text-neutral-900">{movement.product.nameAr ?? movement.product.name}{movement.variantLabel && <span className="block text-xs text-neutral-500">{movement.variantLabel}</span>}</td>
               <td className="py-2 text-neutral-500">{movement.product.sku}</td>
               <td className="py-2 font-medium text-neutral-900">{movement.quantity}</td>
               <td className="py-2 text-neutral-700">{movement.previousQuantity ?? "—"}</td>

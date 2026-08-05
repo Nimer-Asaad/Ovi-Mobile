@@ -47,12 +47,15 @@ export default async function NewManualOrderPage({ searchParams }: NewManualOrde
         brand: { select: { name: true } },
         inventoryItems: {
           where: { location: { isDefault: true } },
-          select: { quantity: true, colorId: true },
+          select: { quantity: true, colorId: true, variantId: true },
         },
         colorOptions: {
           select: { color: { select: { id: true, name: true, nameAr: true, hexCode: true } } },
           orderBy: { sortOrder: "asc" },
         },
+        variants: { where: { isActive: true }, select: { id: true, color: { select: { name: true, nameAr: true } }, phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } } } },
+        variantMode: true,
+        variantAllocationStatus: true,
       },
       orderBy: { name: "asc" },
     }),
@@ -89,6 +92,7 @@ export default async function NewManualOrderPage({ searchParams }: NewManualOrde
         hexCode: option.color.hexCode,
         stock: stockByColorId.get(option.color.id) ?? 0,
       })),
+      variantOptions: product.variantMode === "PHONE_COMPATIBILITY" && product.variantAllocationStatus === "READY" ? product.variants.map((variant) => ({ id: variant.id, label: `${variant.phoneModel.phoneBrand.nameAr ?? variant.phoneModel.phoneBrand.name} / ${variant.phoneModel.nameAr ?? variant.phoneModel.name}${variant.color ? ` / ${variant.color.nameAr ?? variant.color.name}` : ""}`, stock: product.inventoryItems.find((item) => item.variantId === variant.id)?.quantity ?? 0 })) : [],
     };
   });
 

@@ -11,6 +11,7 @@ export default async function AdminInventoryAdjustPage({ searchParams }: AdminIn
   const warehouse = await getMainWarehouse();
 
   const products = await prisma.product.findMany({
+    where: { variantMode: "NONE" },
     orderBy: { name: "asc" },
     select: {
       id: true,

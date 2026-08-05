@@ -42,6 +42,7 @@ export default async function RepStockRequestDetailPage({ params }: RepStockRequ
               id: true,
               requestedQuantity: true,
               approvedQuantity: true,
+              variant: { select: { color: { select: { name: true, nameAr: true } }, phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } } } },
               product: { select: { sku: true, name: true, nameAr: true } },
             },
           },
@@ -78,6 +79,7 @@ export default async function RepStockRequestDetailPage({ params }: RepStockRequ
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium text-neutral-bg">{item.product.nameAr ?? item.product.name}</p>
                   <p className="text-xs text-neutral-bg/50">{item.product.sku}</p>
+                  {item.variant && <p className="text-xs text-gold-champagne">{item.variant.phoneModel.phoneBrand.nameAr ?? item.variant.phoneModel.phoneBrand.name} / {item.variant.phoneModel.nameAr ?? item.variant.phoneModel.name}{item.variant.color ? ` / ${item.variant.color.nameAr ?? item.variant.color.name}` : ""}</p>}
                 </div>
                 <div className="flex items-center gap-4 text-sm">
                   <span className="text-neutral-bg/70">مطلوب: {item.requestedQuantity}</span>

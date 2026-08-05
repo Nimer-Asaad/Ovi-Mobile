@@ -20,6 +20,9 @@ export const PUBLIC_PRODUCT_CARD_SELECT = {
   descriptionAr: true,
   retailPriceCents: true,
   isFeatured: true,
+  variantMode: true,
+  variantAllocationStatus: true,
+  colorOptions: { select: { id: true }, take: 1 },
   createdAt: true,
   category: { select: { name: true, nameAr: true } },
   brand: { select: { name: true } },
@@ -46,6 +49,9 @@ export const MERCHANT_PRODUCT_CARD_SELECT = {
   descriptionAr: true,
   wholesalePriceCents: true,
   isFeatured: true,
+  variantMode: true,
+  variantAllocationStatus: true,
+  colorOptions: { select: { id: true }, take: 1 },
   createdAt: true,
   category: { select: { name: true, nameAr: true } },
   brand: { select: { name: true } },
@@ -69,6 +75,8 @@ export const PUBLIC_PRODUCT_DETAIL_SELECT = {
   descriptionAr: true,
   retailPriceCents: true,
   isFeatured: true,
+  variantMode: true,
+  variantAllocationStatus: true,
   categoryId: true,
   category: { select: { name: true, nameAr: true, slug: true } },
   brand: { select: { name: true, slug: true } },
@@ -82,9 +90,20 @@ export const PUBLIC_PRODUCT_DETAIL_SELECT = {
    * stock is tracked separately and isn't part of public availability.
    * colorId is included so per-color stock can be resolved (see
    * getAvailableStock in src/lib/cart.ts). */
-  inventoryItems: { where: { location: { isDefault: true } }, select: { quantity: true, colorId: true } },
+  inventoryItems: { where: { location: { isDefault: true } }, select: { quantity: true, colorId: true, variantId: true } },
   colorOptions: {
     select: { color: { select: { id: true, name: true, nameAr: true, hexCode: true } } },
+    orderBy: { sortOrder: "asc" },
+  },
+  variants: {
+    where: { isActive: true },
+    select: {
+      id: true,
+      variantCode: true,
+      color: { select: { id: true, name: true, nameAr: true, hexCode: true } },
+      phoneModel: { select: { id: true, name: true, nameAr: true, phoneBrand: { select: { id: true, name: true, nameAr: true } } } },
+      inventoryItems: { where: { location: { isDefault: true } }, select: { quantity: true } },
+    },
     orderBy: { sortOrder: "asc" },
   },
 } satisfies Prisma.ProductSelect;
@@ -100,6 +119,8 @@ export const MERCHANT_PRODUCT_DETAIL_SELECT = {
   descriptionAr: true,
   wholesalePriceCents: true,
   isFeatured: true,
+  variantMode: true,
+  variantAllocationStatus: true,
   categoryId: true,
   category: { select: { name: true, nameAr: true, slug: true } },
   brand: { select: { name: true, slug: true } },
@@ -111,9 +132,20 @@ export const MERCHANT_PRODUCT_DETAIL_SELECT = {
    * stock is tracked separately and isn't part of public availability.
    * colorId is included so per-color stock can be resolved (see
    * getAvailableStock in src/lib/cart.ts). */
-  inventoryItems: { where: { location: { isDefault: true } }, select: { quantity: true, colorId: true } },
+  inventoryItems: { where: { location: { isDefault: true } }, select: { quantity: true, colorId: true, variantId: true } },
   colorOptions: {
     select: { color: { select: { id: true, name: true, nameAr: true, hexCode: true } } },
+    orderBy: { sortOrder: "asc" },
+  },
+  variants: {
+    where: { isActive: true },
+    select: {
+      id: true,
+      variantCode: true,
+      color: { select: { id: true, name: true, nameAr: true, hexCode: true } },
+      phoneModel: { select: { id: true, name: true, nameAr: true, phoneBrand: { select: { id: true, name: true, nameAr: true } } } },
+      inventoryItems: { where: { location: { isDefault: true } }, select: { quantity: true } },
+    },
     orderBy: { sortOrder: "asc" },
   },
 } satisfies Prisma.ProductSelect;

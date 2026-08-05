@@ -42,7 +42,7 @@ export async function bulkAdjustColorInventory(
 
   const [validProductColorPairs, warehouse] = await Promise.all([
     prisma.productColorOption.findMany({
-      where: { productId: { in: productIds }, colorId: { in: colorIds } },
+      where: { productId: { in: productIds }, colorId: { in: colorIds }, product: { variantMode: "NONE" } },
       select: { productId: true, colorId: true },
     }),
     getMainWarehouse(),

@@ -62,7 +62,10 @@ export async function placeOrder(_prevState: CheckoutState, formData: FormData):
     if (!item.product.isActive) {
       return { error: `المنتج "${item.product.name}" لم يعد متوفراً` };
     }
-    const availableStock = getAvailableStock(item.product, item.colorId);
+    if (item.product.variantMode === "PHONE_COMPATIBILITY" && (!item.variant || !item.variant.isActive || item.product.variantAllocationStatus !== "READY")) {
+      return { error: `يرجى إعادة اختيار موديل ولون المنتج "${item.product.name}" قبل إتمام الطلب` };
+    }
+    const availableStock = getAvailableStock(item.product, item.colorId, item.variantId);
     if (item.quantity > availableStock) {
       return {
         error: `الكمية المطلوبة من "${item.product.name}" تتجاوز المخزون المتوفر (${availableStock})`,
@@ -81,6 +84,13 @@ export async function placeOrder(_prevState: CheckoutState, formData: FormData):
     return {
       productId: item.product.id,
       colorId: item.colorId,
+      variantId: item.variantId,
+      productNameSnapshot: item.product.nameAr ?? item.product.name,
+      productSkuSnapshot: item.product.sku,
+      variantCodeSnapshot: item.variant?.variantCode ?? null,
+      phoneBrandSnapshot: item.variant ? (item.variant.phoneModel.phoneBrand.nameAr ?? item.variant.phoneModel.phoneBrand.name) : null,
+      phoneModelSnapshot: item.variant ? (item.variant.phoneModel.nameAr ?? item.variant.phoneModel.name) : null,
+      colorNameSnapshot: item.variant?.color ? (item.variant.color.nameAr ?? item.variant.color.name) : item.color ? (item.color.nameAr ?? item.color.name) : null,
       quantity: item.quantity,
       unitPriceCents,
       totalCents: unitPriceCents * item.quantity,
@@ -122,6 +132,13 @@ export async function placeOrder(_prevState: CheckoutState, formData: FormData):
     orderNumber = generateOrderNumber();
     try {
       const order = await prisma.$transaction(async (tx) => {
+        const requestedVariantIds = cart.items.flatMap((item) => item.variantId ? [item.variantId] : []);
+        if (requestedVariantIds.length > 0) {
+          const activeVariants = await tx.productVariant.count({
+            where: { id: { in: requestedVariantIds }, isActive: true },
+          });
+          if (activeVariants !== new Set(requestedVariantIds).size) throw new Error("INACTIVE_VARIANT");
+        }
         // Wholesale orders always roll up into the merchant's debt ledger
         // account (lazily created on first need). Ordinary retail orders
         // only attach if this customer already has an account — most retail
@@ -145,7 +162,7 @@ export async function placeOrder(_prevState: CheckoutState, formData: FormData):
         for (const item of cart.items) {
           const change = await decrementInventoryAtomic(
             tx,
-            { productId: item.product.id, colorId: item.colorId, locationId: warehouse.id },
+            { productId: item.product.id, colorId: item.colorId, variantId: item.variantId, locationId: warehouse.id },
             item.quantity,
           );
 
@@ -153,6 +170,7 @@ export async function placeOrder(_prevState: CheckoutState, formData: FormData):
             type: STOCK_MOVEMENT_TYPES.SALE_OUT,
             productId: item.product.id,
             colorId: item.colorId,
+            variantId: item.variantId,
             fromLocationId: warehouse.id,
             toLocationId: null,
             quantity: item.quantity,
@@ -171,6 +189,9 @@ export async function placeOrder(_prevState: CheckoutState, formData: FormData):
       createdOrderId = order.id;
       break;
     } catch (err) {
+      if (err instanceof Error && err.message === "INACTIVE_VARIANT") {
+        return { error: "أحد خيارات المنتج لم يعد متوفراً؛ يرجى إعادة اختيار الموديل واللون" };
+      }
       if (err instanceof InsufficientInventoryError) {
         const productName = productNameById.get(err.productId) ?? "";
         return {

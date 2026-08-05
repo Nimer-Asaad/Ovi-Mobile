@@ -8,6 +8,8 @@ export interface RepCarProductGridItem {
   /** Null for colorless products — one card per productId+colorId. */
   colorId: string | null;
   colorLabel: string | null;
+  variantId: string | null;
+  variantLabel: string | null;
   sku: string;
   name: string;
   nameAr: string | null;
@@ -47,7 +49,7 @@ export function RepCarProductGrid({
               const lowStock = isLowStock(item.quantity);
               return (
                 <div
-                  key={`${item.productId}:${item.colorId ?? ""}`}
+                  key={`${item.productId}:${item.variantId ?? `legacy:${item.colorId ?? ""}`}`}
                   className="flex flex-col overflow-hidden rounded-card border border-navy-soft bg-navy-deep"
                 >
                   <div className="relative aspect-square w-full overflow-hidden bg-navy-soft">
@@ -73,6 +75,7 @@ export function RepCarProductGrid({
                     <p className="text-[11px] text-neutral-bg/50">
                       {item.sku}
                       {item.colorLabel && <span> — {item.colorLabel}</span>}
+                      {item.variantLabel && <span> — {item.variantLabel}</span>}
                     </p>
                     {lowStock && (
                       <Badge variant="warning" className="mt-auto self-start">

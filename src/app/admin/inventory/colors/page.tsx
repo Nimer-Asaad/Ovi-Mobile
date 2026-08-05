@@ -11,7 +11,7 @@ export default async function AdminColorInventoryPage() {
   const warehouse = await getMainWarehouse();
 
   const products = await prisma.product.findMany({
-    where: { isActive: true, colorOptions: { some: {} } },
+    where: { isActive: true, variantMode: "NONE", colorOptions: { some: {} } },
     orderBy: { name: "asc" },
     select: {
       id: true,

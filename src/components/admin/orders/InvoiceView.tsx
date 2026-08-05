@@ -7,6 +7,10 @@ export interface InvoiceItem {
   unitPriceCents: number;
   totalCents: number;
   color: { name: string; nameAr: string | null } | null;
+  phoneBrandSnapshot: string | null;
+  phoneModelSnapshot: string | null;
+  colorNameSnapshot: string | null;
+  variantCodeSnapshot: string | null;
   product: {
     sku: string;
     name: string;
@@ -123,6 +127,7 @@ export function InvoiceView({ order }: { order: InvoiceData }) {
                   {item.color && (
                     <span className="text-neutral-500"> — {item.color.nameAr ?? item.color.name}</span>
                   )}
+                  {item.phoneModelSnapshot && <span className="text-neutral-500"> — {item.phoneBrandSnapshot} / {item.phoneModelSnapshot}{item.colorNameSnapshot ? ` / ${item.colorNameSnapshot}` : ""}{item.variantCodeSnapshot ? ` (${item.variantCodeSnapshot})` : ""}</span>}
                 </td>
                 <td className="py-2 text-neutral-500">{item.product.sku}</td>
                 <td className="py-2 text-neutral-700">{item.quantity}</td>

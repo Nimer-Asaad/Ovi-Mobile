@@ -62,11 +62,11 @@ export async function createStockRequest(
   const productIds = parsed.data.items.map((item) => item.productId);
   const products = await prisma.product.findMany({
     where: { id: { in: productIds } },
-    select: { id: true, isActive: true, name: true, nameAr: true, colorOptions: { select: { colorId: true } } },
+    select: { id: true, isActive: true, name: true, nameAr: true, variantMode: true, variantAllocationStatus: true, colorOptions: { select: { colorId: true } }, variants: { where: { isActive: true }, select: { id: true } } },
   });
   const productById = new Map(products.map((product) => [product.id, product]));
 
-  const lines = parsed.data.items.map((item) => ({ ...item, colorId: item.colorId ?? null }));
+  const lines = parsed.data.items.map((item) => ({ ...item, colorId: item.colorId ?? null, variantId: item.variantId ?? null }));
 
   for (const item of lines) {
     const product = productById.get(item.productId);
@@ -79,6 +79,8 @@ export async function createStockRequest(
     if (item.colorId && !product.colorOptions.some((option) => option.colorId === item.colorId)) {
       return { error: `اللون المحدد لا ينتمي للمنتج "${product.nameAr ?? product.name}"` };
     }
+    if (product.variantMode === "PHONE_COMPATIBILITY" && (product.variantAllocationStatus !== "READY" || !item.variantId || !product.variants.some((variant) => variant.id === item.variantId))) return { error: `اختر Variant صالحاً للمنتج "${product.nameAr ?? product.name}"` };
+    if (product.variantMode !== "PHONE_COMPATIBILITY" && item.variantId) return { error: "Variant لا يتبع المنتج المحدد" };
   }
 
   let requestId = "";
@@ -98,6 +100,7 @@ export async function createStockRequest(
             create: lines.map((item) => ({
               productId: item.productId,
               colorId: item.colorId,
+              variantId: item.variantId,
               requestedQuantity: item.requestedQuantity,
             })),
           },

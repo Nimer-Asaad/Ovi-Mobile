@@ -40,6 +40,19 @@ export const STOCK_MOVEMENT_TYPES = {
   ORDER_RELEASED: "ORDER_RELEASED",
   ORDER_FULFILLED: "ORDER_FULFILLED",
   RETURNED: "RETURNED",
+  VARIANT_ALLOCATION: "VARIANT_ALLOCATION",
+  VARIANT_ALLOCATION_SOURCE: "VARIANT_ALLOCATION_SOURCE",
+} as const;
+
+export const PRODUCT_VARIANT_MODES = {
+  NONE: "NONE",
+  PHONE_COMPATIBILITY: "PHONE_COMPATIBILITY",
+} as const;
+
+export const VARIANT_ALLOCATION_STATUSES = {
+  NOT_REQUIRED: "NOT_REQUIRED",
+  PENDING: "PENDING",
+  READY: "READY",
 } as const;
 
 /** Subset of STOCK_MOVEMENT_TYPES usable from the Phase 7 manual adjustment
@@ -175,6 +188,7 @@ export const ADMIN_NAV_ITEMS = [
   { label: "Categories", labelAr: "الأقسام", href: "/admin/categories" },
   { label: "Brands", labelAr: "العلامات التجارية", href: "/admin/brands" },
   { label: "Colors", labelAr: "الألوان", href: "/admin/colors" },
+  { label: "Phone Compatibility", labelAr: "ماركات وموديلات الهواتف", href: "/admin/phone-devices" },
   { label: "Suppliers", labelAr: "الموردون", href: "/admin/suppliers" },
   { label: "Inventory", labelAr: "المخزون", href: "/admin/inventory" },
   { label: "Orders", labelAr: "الطلبات", href: "/admin/orders" },

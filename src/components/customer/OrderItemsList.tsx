@@ -7,6 +7,10 @@ export interface OrderItemRow {
   unitPriceCents: number;
   totalCents: number;
   color: { name: string; nameAr: string | null } | null;
+  phoneBrandSnapshot: string | null;
+  phoneModelSnapshot: string | null;
+  colorNameSnapshot: string | null;
+  variantCodeSnapshot: string | null;
   product: {
     sku: string;
     name: string;
@@ -51,6 +55,7 @@ export function OrderItemsList({ items, isWholesaleOrder = false }: OrderItemsLi
               <p className="text-xs text-neutral-bg/50">
                 {item.product.sku}
                 {item.color && <span> — {item.color.nameAr ?? item.color.name}</span>}
+                {item.phoneModelSnapshot && <span> — {item.phoneBrandSnapshot} / {item.phoneModelSnapshot}{item.colorNameSnapshot ? ` / ${item.colorNameSnapshot}` : ""}{item.variantCodeSnapshot ? ` (${item.variantCodeSnapshot})` : ""}</span>}
               </p>
               <p className="text-xs text-neutral-bg/60">
                 {formatCurrencyFromCents(item.unitPriceCents)}

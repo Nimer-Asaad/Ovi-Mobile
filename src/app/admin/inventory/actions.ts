@@ -61,7 +61,7 @@ export async function createStockMovement(
 
   const product = await prisma.product.findUnique({
     where: { id: productId },
-    select: { id: true, isActive: true, colorOptions: { select: { colorId: true } } },
+    select: { id: true, isActive: true, variantMode: true, colorOptions: { select: { colorId: true } } },
   });
   if (!product) {
     return { error: "المنتج غير موجود" };
@@ -69,6 +69,7 @@ export async function createStockMovement(
   if (!product.isActive) {
     return { error: "لا يمكن تعديل مخزون منتج غير مفعل" };
   }
+  if (product.variantMode === "PHONE_COMPATIBILITY") return { error: "مخزون هذا المنتج يُدار من شاشة الـVariants والتوزيع اليدوي" };
   if (colorId && !product.colorOptions.some((option) => option.colorId === colorId)) {
     return { error: "اللون المحدد لا ينتمي لهذا المنتج" };
   }

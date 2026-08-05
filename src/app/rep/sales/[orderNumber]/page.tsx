@@ -52,6 +52,10 @@ export default async function RepSaleDetailPage({ params }: RepSaleDetailPagePro
           unitPriceCents: true,
           totalCents: true,
           color: { select: { name: true, nameAr: true } },
+          phoneBrandSnapshot: true,
+          phoneModelSnapshot: true,
+          colorNameSnapshot: true,
+          variantCodeSnapshot: true,
           product: {
             select: {
               sku: true,
@@ -116,6 +120,7 @@ export default async function RepSaleDetailPage({ params }: RepSaleDetailPagePro
                     <p className="text-xs text-neutral-bg/50">
                       {item.product.sku}
                       {item.color && <span> — {item.color.nameAr ?? item.color.name}</span>}
+                      {item.phoneModelSnapshot && <span> — {item.phoneBrandSnapshot} / {item.phoneModelSnapshot}{item.colorNameSnapshot ? ` / ${item.colorNameSnapshot}` : ""}{item.variantCodeSnapshot ? ` (${item.variantCodeSnapshot})` : ""}</span>}
                     </p>
                     <p className="text-xs text-neutral-bg/60">
                       {formatCurrencyFromCents(item.unitPriceCents)} × {item.quantity}

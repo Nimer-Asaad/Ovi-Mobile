@@ -27,6 +27,7 @@ export interface SaleCustomerOption {
 interface SaleLine {
   productId: string;
   colorId: string | null;
+  variantId: string | null;
   colorLabel: string | null;
   sku: string;
   label: string;
@@ -49,8 +50,8 @@ function centsToInputValue(cents: number): string {
   return (cents / 100).toFixed(2);
 }
 
-function lineKey(productId: string, colorId: string | null): string {
-  return `${productId}:${colorId ?? ""}`;
+function lineKey(productId: string, colorId: string | null, variantId: string | null = null): string {
+  return `${productId}:${variantId ?? `legacy:${colorId ?? ""}`}`;
 }
 
 /** Multi-line direct-sale form — same search/thumbnail/detail product
@@ -71,10 +72,12 @@ export function NewSaleForm({ products, customers }: NewSaleFormProps) {
   // A colored product stays pickable until every one of its colors already
   // has a line — only a colorless (or fully-used) product is excluded.
   const excludeIds = useMemo(() => {
-    const usedKeys = new Set(lines.map((line) => lineKey(line.productId, line.colorId)));
+    const usedKeys = new Set(lines.map((line) => lineKey(line.productId, line.colorId, line.variantId)));
     const ids = new Set<string>();
     for (const product of products) {
-      if (product.colorOptions && product.colorOptions.length > 0) {
+      if (product.variantOptions && product.variantOptions.length > 0) {
+        if (product.variantOptions.every((variant) => usedKeys.has(lineKey(product.id, null, variant.id)))) ids.add(product.id);
+      } else if (product.colorOptions && product.colorOptions.length > 0) {
         if (product.colorOptions.every((color) => usedKeys.has(lineKey(product.id, color.id)))) {
           ids.add(product.id);
         }
@@ -85,42 +88,44 @@ export function NewSaleForm({ products, customers }: NewSaleFormProps) {
     return ids;
   }, [lines, products]);
 
-  function handleAddProduct(product: SaleProductOption, colorId: string | null) {
+  function handleAddProduct(product: SaleProductOption, colorId: string | null, variantId: string | null) {
     const color = product.colorOptions?.find((option) => option.id === colorId) ?? null;
+    const variant = product.variantOptions?.find((option) => option.id === variantId) ?? null;
     setLines((prev) => [
       ...prev,
       {
         productId: product.id,
         colorId,
-        colorLabel: color ? (color.nameAr ?? color.name) : null,
+        variantId,
+        colorLabel: variant?.label ?? (color ? (color.nameAr ?? color.name) : null),
         sku: product.sku,
         label: product.nameAr ?? product.name,
         quantity: 1,
         unitPrice: centsToInputValue(product.retailPriceCents),
-        repStock: color ? (color.stock ?? 0) : product.repStock,
+        repStock: variant ? (variant.stock ?? 0) : color ? (color.stock ?? 0) : product.repStock,
         thumbnailUrl: product.thumbnailUrl,
         thumbnailAlt: product.thumbnailAlt,
       },
     ]);
   }
 
-  function handleRemoveLine(productId: string, colorId: string | null) {
-    setLines((prev) => prev.filter((line) => lineKey(line.productId, line.colorId) !== lineKey(productId, colorId)));
+  function handleRemoveLine(productId: string, colorId: string | null, variantId: string | null) {
+    setLines((prev) => prev.filter((line) => lineKey(line.productId, line.colorId, line.variantId) !== lineKey(productId, colorId, variantId)));
   }
 
-  function handleQuantityChange(productId: string, colorId: string | null, value: string) {
+  function handleQuantityChange(productId: string, colorId: string | null, variantId: string | null, value: string) {
     const quantity = Math.max(1, Math.floor(Number(value) || 1));
     setLines((prev) =>
       prev.map((line) =>
-        lineKey(line.productId, line.colorId) === lineKey(productId, colorId) ? { ...line, quantity } : line,
+        lineKey(line.productId, line.colorId, line.variantId) === lineKey(productId, colorId, variantId) ? { ...line, quantity } : line,
       ),
     );
   }
 
-  function handlePriceChange(productId: string, colorId: string | null, value: string) {
+  function handlePriceChange(productId: string, colorId: string | null, variantId: string | null, value: string) {
     setLines((prev) =>
       prev.map((line) =>
-        lineKey(line.productId, line.colorId) === lineKey(productId, colorId) ? { ...line, unitPrice: value } : line,
+        lineKey(line.productId, line.colorId, line.variantId) === lineKey(productId, colorId, variantId) ? { ...line, unitPrice: value } : line,
       ),
     );
   }
@@ -158,6 +163,7 @@ export function NewSaleForm({ products, customers }: NewSaleFormProps) {
         lines.map((line) => ({
           productId: line.productId,
           colorId: line.colorId,
+          variantId: line.variantId,
           quantity: line.quantity,
           unitPriceCents: Math.round(Number(line.unitPrice || 0) * 100),
         })),
@@ -193,7 +199,7 @@ export function NewSaleForm({ products, customers }: NewSaleFormProps) {
             <div className="flex flex-col divide-y divide-navy-soft">
               {lines.map((line) => (
                 <div
-                  key={lineKey(line.productId, line.colorId)}
+                  key={lineKey(line.productId, line.colorId, line.variantId)}
                   className="flex flex-wrap items-center gap-3 py-3 first:pt-0 last:pb-0"
                 >
                   <ProductThumb product={{ ...line, name: line.label }} className="h-10 w-10" />
@@ -210,7 +216,7 @@ export function NewSaleForm({ products, customers }: NewSaleFormProps) {
                       min={1}
                       max={line.repStock}
                       value={line.quantity}
-                      onChange={(event) => handleQuantityChange(line.productId, line.colorId, event.target.value)}
+                      onChange={(event) => handleQuantityChange(line.productId, line.colorId, line.variantId, event.target.value)}
                       aria-label="الكمية"
                     />
                   </div>
@@ -220,7 +226,7 @@ export function NewSaleForm({ products, customers }: NewSaleFormProps) {
                       min={0.01}
                       step={0.01}
                       value={line.unitPrice}
-                      onChange={(event) => handlePriceChange(line.productId, line.colorId, event.target.value)}
+                      onChange={(event) => handlePriceChange(line.productId, line.colorId, line.variantId, event.target.value)}
                       aria-label="سعر البيع"
                     />
                   </div>
@@ -228,7 +234,7 @@ export function NewSaleForm({ products, customers }: NewSaleFormProps) {
                     type="button"
                     variant="ghost"
                     size="sm"
-                    onClick={() => handleRemoveLine(line.productId, line.colorId)}
+                    onClick={() => handleRemoveLine(line.productId, line.colorId, line.variantId)}
                   >
                     حذف
                   </Button>

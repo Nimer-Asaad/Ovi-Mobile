@@ -32,7 +32,9 @@ export function ProductCard({ product, cartEligibility = "ineligible" }: Product
   const priceCents = readCatalogPriceCents(product);
   const isWholesale = isWholesalePriced(product);
   const totalStock = product.inventoryItems.reduce((sum, item) => sum + item.quantity, 0);
-  const isOutOfStock = totalStock === 0;
+  const variantPending = product.variantMode === "PHONE_COMPATIBILITY" && product.variantAllocationStatus !== "READY";
+  const requiresOptions = product.variantMode === "PHONE_COMPATIBILITY" || product.colorOptions.length > 0;
+  const isOutOfStock = totalStock === 0 || variantPending;
   const isLowStock = totalStock > 0 && totalStock < LOW_STOCK_THRESHOLD;
   const productAgeMs = Date.now() - product.createdAt.getTime();
   const isNew = productAgeMs >= 0 && productAgeMs <= NEW_PRODUCT_WINDOW_MS;
@@ -69,6 +71,8 @@ export function ProductCard({ product, cartEligibility = "ineligible" }: Product
               secondaryAlt={secondaryImage?.altText ?? `${productTitle} - صورة إضافية`}
               className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.035] group-focus-within:scale-[1.035]"
             />
+          ) : requiresOptions ? (
+            <Link href={`/products/${encodeURIComponent(product.sku)}`} className="block min-h-10 rounded-card border border-gold-champagne/45 px-3 py-2 text-center text-sm font-semibold text-gold-dark">اختر الماركة والموديل واللون</Link>
           ) : (
             <ProductImagePlaceholder className="h-full w-full" />
           )}

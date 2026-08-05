@@ -63,7 +63,7 @@ export default async function ProductDetailPage({ params }: ProductDetailPagePro
 
   if (!product) notFound();
 
-  const totalStock = product.inventoryItems.reduce((sum, item) => sum + item.quantity, 0);
+  const legacyTotalStock = product.inventoryItems.filter((item) => !item.variantId).reduce((sum, item) => sum + item.quantity, 0);
   const colorOptions = product.colorOptions.map((option) => ({
     id: option.color.id,
     name: option.color.name,
@@ -71,6 +71,17 @@ export default async function ProductDetailPage({ params }: ProductDetailPagePro
     hexCode: option.color.hexCode,
     stock: getAvailableStock(product, option.color.id),
   }));
+  const variants = product.variants.map((variant) => ({
+    id: variant.id,
+    variantCode: variant.variantCode,
+    stock: variant.inventoryItems.reduce((sum, item) => sum + item.quantity, 0),
+    brand: variant.phoneModel.phoneBrand,
+    model: { id: variant.phoneModel.id, name: variant.phoneModel.name, nameAr: variant.phoneModel.nameAr },
+    color: variant.color,
+  }));
+  const totalStock = product.variantMode === "PHONE_COMPATIBILITY"
+    ? product.variantAllocationStatus === "READY" ? variants.reduce((sum, variant) => sum + variant.stock, 0) : 0
+    : legacyTotalStock;
   // Main is always enforced IMAGE on save, but this stays defensive since
   // the gallery's images list here is unfiltered (it also carries videos).
   const mainImageUrl = product.images.find((image) => image.mediaType === "IMAGE")?.url ?? null;
@@ -124,6 +135,9 @@ export default async function ProductDetailPage({ params }: ProductDetailPagePro
                 isFeatured={product.isFeatured}
                 totalStock={totalStock}
                 colorOptions={colorOptions}
+                variantMode={product.variantMode}
+                variantAllocationStatus={product.variantAllocationStatus}
+                variants={variants}
                 cartEligibility={cartEligibility}
                 imageUrl={mainImageUrl}
               />

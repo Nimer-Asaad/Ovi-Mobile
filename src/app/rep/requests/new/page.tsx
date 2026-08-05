@@ -29,17 +29,21 @@ export default async function NewRepStockRequestPage() {
         select: { color: { select: { id: true, name: true, nameAr: true, hexCode: true } } },
         orderBy: { sortOrder: "asc" },
       },
+      variants: { where: { isActive: true }, select: { id: true, color: { select: { name: true, nameAr: true } }, phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } } } },
+      variantMode: true,
+      variantAllocationStatus: true,
     },
   });
 
   const productIds = products.map((product) => product.id);
   const warehouseInventory = await prisma.inventoryItem.findMany({
-    where: { productId: { in: productIds }, locationId: warehouse.id, colorId: { not: null } },
-    select: { productId: true, colorId: true, quantity: true },
+    where: { productId: { in: productIds }, locationId: warehouse.id },
+    select: { productId: true, colorId: true, variantId: true, quantity: true },
   });
   const warehouseStockByKey = new Map(
     warehouseInventory.map((item) => [`${item.productId}:${item.colorId}`, item.quantity]),
   );
+  const warehouseVariantStock = new Map(warehouseInventory.filter((item) => item.variantId).map((item) => [item.variantId as string, item.quantity]));
 
   const options = products.map((product) => ({
     id: product.id,
@@ -57,6 +61,7 @@ export default async function NewRepStockRequestPage() {
       hexCode: option.color.hexCode,
       stock: warehouseStockByKey.get(`${product.id}:${option.color.id}`) ?? 0,
     })),
+    variantOptions: product.variantMode === "PHONE_COMPATIBILITY" && product.variantAllocationStatus === "READY" ? product.variants.map((variant) => ({ id: variant.id, label: `${variant.phoneModel.phoneBrand.nameAr ?? variant.phoneModel.phoneBrand.name} / ${variant.phoneModel.nameAr ?? variant.phoneModel.name}${variant.color ? ` / ${variant.color.nameAr ?? variant.color.name}` : ""}`, stock: warehouseVariantStock.get(variant.id) ?? 0 })) : [],
   }));
 
   return (

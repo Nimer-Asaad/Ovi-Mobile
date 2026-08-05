@@ -22,6 +22,16 @@ export interface ProductPurchasePanelProps {
   totalStock: number;
   /** Empty for a colorless product. */
   colorOptions: ColorSwatchOption[];
+  variantMode: string;
+  variantAllocationStatus: string;
+  variants: {
+    id: string;
+    variantCode: string | null;
+    stock: number;
+    brand: { id: string; name: string; nameAr: string | null };
+    model: { id: string; name: string; nameAr: string | null };
+    color: { id: string; name: string; nameAr: string | null; hexCode: string | null } | null;
+  }[];
   cartEligibility: CartEligibility;
   imageUrl?: string | null;
 }
@@ -47,17 +57,28 @@ export function ProductPurchasePanel({
   isFeatured,
   totalStock,
   colorOptions,
+  variantMode,
+  variantAllocationStatus,
+  variants,
   cartEligibility,
   imageUrl,
 }: ProductPurchasePanelProps) {
   const [selectedColorId, setSelectedColorId] = useState<string | null>(() => pickDefaultColorId(colorOptions));
+  const [selectedBrandId, setSelectedBrandId] = useState<string | null>(null);
+  const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
 
   const hasColors = colorOptions.length > 0;
   const selectedColor = useMemo(
     () => colorOptions.find((color) => color.id === selectedColorId) ?? null,
     [colorOptions, selectedColorId],
   );
-  const effectiveStock = hasColors ? (selectedColor?.stock ?? 0) : totalStock;
+  const usesVariants = variantMode === "PHONE_COMPATIBILITY";
+  const variantReady = variantAllocationStatus === "READY";
+  const brands = useMemo(() => Array.from(new Map(variants.map((variant) => [variant.brand.id, variant.brand])).values()), [variants]);
+  const models = useMemo(() => Array.from(new Map(variants.filter((variant) => variant.brand.id === selectedBrandId).map((variant) => [variant.model.id, variant.model])).values()), [variants, selectedBrandId]);
+  const modelVariants = useMemo(() => variants.filter((variant) => variant.model.id === selectedModelId), [variants, selectedModelId]);
+  const selectedVariant = useMemo(() => modelVariants.find((variant) => variant.color?.id === selectedColorId || (!variant.color && !selectedColorId)) ?? null, [modelVariants, selectedColorId]);
+  const effectiveStock = usesVariants ? (selectedVariant?.stock ?? 0) : hasColors ? (selectedColor?.stock ?? 0) : totalStock;
 
   return (
     <Card className="flex animate-fade-in flex-col gap-4 transition-shadow hover:shadow-lg">
@@ -78,7 +99,16 @@ export function ProductPurchasePanel({
         {isWholesale && <Badge variant="gold">سعر الجملة</Badge>}
       </div>
 
-      {hasColors && (
+      {usesVariants && (
+        <div className="space-y-4">
+          {!variantReady && <p className="rounded-card border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-300">هذا المنتج قيد مراجعة وتوزيع المخزون على الموديلات.</p>}
+          <div><p className="mb-2 text-sm text-neutral-bg/70">ماركة الهاتف</p><div className="flex flex-wrap gap-2">{brands.map((brand) => <button key={brand.id} type="button" onClick={() => { setSelectedBrandId(brand.id); setSelectedModelId(null); setSelectedColorId(null); }} className={`rounded-card border px-3 py-2 text-sm ${selectedBrandId === brand.id ? "border-gold-champagne text-gold-champagne" : "border-navy-soft text-neutral-bg/70"}`}>{brand.nameAr ?? brand.name}</button>)}</div></div>
+          {selectedBrandId && <div><p className="mb-2 text-sm text-neutral-bg/70">موديل الهاتف</p><div className="flex flex-wrap gap-2">{models.map((model) => <button key={model.id} type="button" onClick={() => { setSelectedModelId(model.id); setSelectedColorId(null); }} className={`rounded-card border px-3 py-2 text-sm ${selectedModelId === model.id ? "border-gold-champagne text-gold-champagne" : "border-navy-soft text-neutral-bg/70"}`}>{model.nameAr ?? model.name}</button>)}</div></div>}
+          {selectedModelId && modelVariants.some((variant) => variant.color) && <div><p className="mb-2 text-sm text-neutral-bg/70">اللون</p><div className="flex flex-wrap gap-2">{modelVariants.filter((variant) => variant.color).map((variant) => <button key={variant.id} type="button" disabled={variant.stock <= 0} onClick={() => setSelectedColorId(variant.color!.id)} className={`rounded-card border px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-40 ${selectedColorId === variant.color!.id ? "border-gold-champagne text-gold-champagne" : "border-navy-soft text-neutral-bg/70"}`}><span className="inline-flex items-center gap-2">{variant.color!.hexCode && <span className="h-3 w-3 rounded-full border border-white/20" style={{ backgroundColor: variant.color!.hexCode }} />}{variant.color!.nameAr ?? variant.color!.name}{variant.stock <= 0 && " — نفد"}</span></button>)}</div></div>}
+        </div>
+      )}
+
+      {!usesVariants && hasColors && (
         <ColorSwatchSelector colors={colorOptions} selectedColorId={selectedColorId} onSelect={setSelectedColorId} />
       )}
 
@@ -95,10 +125,11 @@ export function ProductPurchasePanel({
             سجّل الدخول للشراء
           </Link>
         )}
-        {cartEligibility === "eligible" && effectiveStock > 0 && (!hasColors || selectedColorId) && (
+        {cartEligibility === "eligible" && effectiveStock > 0 && (!usesVariants || variantReady) && (!usesVariants || selectedVariant) && (usesVariants || !hasColors || selectedColorId) && (
           <AddToCartButton
             productId={productId}
-            colorId={selectedColorId}
+            colorId={usesVariants ? null : selectedColorId}
+            variantId={selectedVariant?.id ?? null}
             maxQuantity={effectiveStock}
             showQuantityInput
             productName={title}

@@ -26,6 +26,7 @@ function parseQuantity(formData: FormData): { quantity: number } | { error: stri
 export async function addToCart(
   productId: string,
   colorId: string | null,
+  variantId: string | null,
   _prevState: CartActionState,
   formData: FormData,
 ): Promise<CartActionState> {
@@ -38,7 +39,7 @@ export async function addToCart(
 
   const product = await prisma.product.findUnique({
     where: { id: productId },
-    select: { ...STOCK_CHECK_PRODUCT_SELECT, colorOptions: { select: { colorId: true } } },
+    select: { ...STOCK_CHECK_PRODUCT_SELECT, colorOptions: { select: { colorId: true } }, variants: { where: { isActive: true }, select: { id: true } } },
   });
 
   if (!product || !product.isActive) {
@@ -47,7 +48,12 @@ export async function addToCart(
 
   // Never trust the client's colorId — a product with color options must
   // get exactly one of its own colors, a colorless product must get none.
-  const hasColorOptions = product.colorOptions.length > 0;
+  const usesVariants = product.variantMode === "PHONE_COMPATIBILITY";
+  if (usesVariants) {
+    if (product.variantAllocationStatus !== "READY") return { error: "مخزون هذا المنتج ما زال قيد المراجعة" };
+    if (!variantId || !product.variants.some((variant) => variant.id === variantId) || colorId) return { error: "اختر ماركة الهاتف والموديل واللون بشكل صحيح" };
+  } else if (variantId) return { error: "هذا المنتج لا يستخدم Variants" };
+  const hasColorOptions = !usesVariants && product.colorOptions.length > 0;
   if (hasColorOptions && (!colorId || !product.colorOptions.some((option) => option.colorId === colorId))) {
     return { error: "اختر لوناً متوفراً لهذا المنتج" };
   }
@@ -55,8 +61,9 @@ export async function addToCart(
     return { error: "هذا المنتج لا يتوفر بألوان" };
   }
   const resolvedColorId = hasColorOptions ? colorId : null;
+  const resolvedVariantId = usesVariants ? variantId : null;
 
-  const availableStock = getAvailableStock(product, resolvedColorId);
+  const availableStock = getAvailableStock(product, resolvedColorId, resolvedVariantId);
 
   const cart = await prisma.cart.upsert({
     where: { userId: user.id },
@@ -69,7 +76,7 @@ export async function addToCart(
   // constraints treat NULL as distinct from every other NULL anyway, so a
   // colorless product's uniqueness is enforced by a hand-authored partial
   // index instead (see the migration) — only a plain filter can query it.
-  const itemFilter = { cartId: cart.id, productId, colorId: resolvedColorId };
+  const itemFilter = { cartId: cart.id, productId, colorId: resolvedColorId, variantId: resolvedVariantId };
   const existingItem = await prisma.cartItem.findFirst({ where: itemFilter });
 
   const newQuantity = (existingItem?.quantity ?? 0) + parsedQuantity.quantity;
@@ -119,7 +126,7 @@ export async function updateCartItemQuantity(
     return { error: CART_ITEM_NOT_FOUND_MESSAGE };
   }
 
-  const availableStock = getAvailableStock(item.product, item.colorId);
+  const availableStock = getAvailableStock(item.product, item.colorId, item.variantId);
   if (parsedQuantity.quantity > availableStock) {
     return { error: `الكمية المتوفرة في المخزون هي ${availableStock} فقط` };
   }

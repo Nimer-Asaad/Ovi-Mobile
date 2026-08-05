@@ -11,6 +11,7 @@ export interface RepStockRequestReviewItem {
   itemId: string;
   productLabel: string;
   sku: string;
+  variantLabel: string | null;
   requestedQuantity: number;
   approvedQuantity: number | null;
   warehouseAvailable: number;
@@ -60,6 +61,7 @@ export function RepStockRequestReviewForm({ requestId, items, initialAdminNote }
           <div key={item.itemId} className="flex flex-wrap items-center gap-3 py-3 first:pt-0 last:pb-0">
             <div className="min-w-0 flex-1">
               <p className="text-sm font-medium text-neutral-bg">{item.productLabel}</p>
+              {item.variantLabel && <p className="text-xs text-gold-champagne">{item.variantLabel}</p>}
               <p className="text-xs text-neutral-bg/50">
                 {item.sku} · مطلوب: {item.requestedQuantity} · متوفر بالمستودع: {item.warehouseAvailable} · حالياً
                 بالسيارة: {item.carQuantity}

@@ -140,11 +140,11 @@ export async function createManualOrder(
   const productIds = parsed.data.items.map((item) => item.productId);
   const products = await prisma.product.findMany({
     where: { id: { in: productIds } },
-    select: { id: true, isActive: true, name: true, nameAr: true, colorOptions: { select: { colorId: true } } },
+    select: { id: true, sku: true, isActive: true, name: true, nameAr: true, variantMode: true, colorOptions: { select: { colorId: true } }, variants: { where: { isActive: true }, select: { id: true, variantCode: true, color: { select: { name: true, nameAr: true } }, phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } } } } },
   });
   const productById = new Map(products.map((product) => [product.id, product]));
 
-  const lines = parsed.data.items.map((item) => ({ ...item, colorId: item.colorId ?? null }));
+  const lines = parsed.data.items.map((item) => ({ ...item, colorId: item.colorId ?? null, variantId: item.variantId ?? null }));
 
   for (const item of lines) {
     const product = productById.get(item.productId);
@@ -157,18 +157,19 @@ export async function createManualOrder(
     if (item.colorId && !product.colorOptions.some((option) => option.colorId === item.colorId)) {
       return { error: `اللون المحدد لا ينتمي للمنتج "${product.nameAr ?? product.name}"` };
     }
+    if (product.variantMode === "PHONE_COMPATIBILITY" && (!item.variantId || !product.variants.some((variant) => variant.id === item.variantId))) return { error: `اختر Variant صالحاً للمنتج "${product.nameAr ?? product.name}"` };
   }
 
   const warehouse = await getMainWarehouse();
   const inventoryItems = await prisma.inventoryItem.findMany({
     where: { productId: { in: productIds }, locationId: warehouse.id },
-    select: { productId: true, colorId: true, quantity: true },
+    select: { productId: true, colorId: true, variantId: true, quantity: true },
   });
-  const stockByLineKey = new Map(inventoryItems.map((row) => [`${row.productId}:${row.colorId ?? ""}`, row.quantity]));
+  const stockByLineKey = new Map(inventoryItems.map((row) => [`${row.productId}:${row.variantId ?? `legacy:${row.colorId ?? ""}`}`, row.quantity]));
 
   for (const item of lines) {
     const product = productById.get(item.productId)!;
-    const available = stockByLineKey.get(`${item.productId}:${item.colorId ?? ""}`) ?? 0;
+    const available = stockByLineKey.get(`${item.productId}:${item.variantId ?? `legacy:${item.colorId ?? ""}`}`) ?? 0;
     if (item.quantity > available) {
       return {
         error: `الكمية المطلوبة من "${product.nameAr ?? product.name}" تتجاوز المخزون المتوفر (${available})`,
@@ -182,6 +183,13 @@ export async function createManualOrder(
   const orderItemsData = lines.map((item) => ({
     productId: item.productId,
     colorId: item.colorId,
+    variantId: item.variantId,
+    productNameSnapshot: productById.get(item.productId)?.nameAr ?? productById.get(item.productId)?.name,
+    productSkuSnapshot: productById.get(item.productId)?.sku,
+    variantCodeSnapshot: productById.get(item.productId)?.variants.find((variant) => variant.id === item.variantId)?.variantCode ?? null,
+    phoneBrandSnapshot: (() => { const variant = productById.get(item.productId)?.variants.find((row) => row.id === item.variantId); return variant ? (variant.phoneModel.phoneBrand.nameAr ?? variant.phoneModel.phoneBrand.name) : null; })(),
+    phoneModelSnapshot: (() => { const variant = productById.get(item.productId)?.variants.find((row) => row.id === item.variantId); return variant ? (variant.phoneModel.nameAr ?? variant.phoneModel.name) : null; })(),
+    colorNameSnapshot: (() => { const variant = productById.get(item.productId)?.variants.find((row) => row.id === item.variantId); return variant?.color ? (variant.color.nameAr ?? variant.color.name) : null; })(),
     quantity: item.quantity,
     unitPriceCents: item.unitPriceCents,
     totalCents: item.unitPriceCents * item.quantity,
@@ -212,6 +220,11 @@ export async function createManualOrder(
     orderNumber = generateOrderNumber();
     try {
       await prisma.$transaction(async (tx) => {
+        const requestedVariantIds = lines.flatMap((item) => item.variantId ? [item.variantId] : []);
+        if (requestedVariantIds.length > 0) {
+          const activeVariants = await tx.productVariant.count({ where: { id: { in: requestedVariantIds }, isActive: true } });
+          if (activeVariants !== new Set(requestedVariantIds).size) throw new Error("INACTIVE_VARIANT");
+        }
         let accountId: string | undefined;
         if (customerMode === MANUAL_ORDER_CUSTOMER_MODES.EXISTING_MERCHANT && resolvedMerchantId) {
           accountId = await getOrCreateMerchantAccount(tx, resolvedMerchantId);
@@ -271,7 +284,7 @@ export async function createManualOrder(
         for (const item of lines) {
           const change = await decrementInventoryAtomic(
             tx,
-            { productId: item.productId, colorId: item.colorId, locationId: warehouse.id },
+            { productId: item.productId, colorId: item.colorId, variantId: item.variantId, locationId: warehouse.id },
             item.quantity,
           );
 
@@ -279,6 +292,7 @@ export async function createManualOrder(
             type: STOCK_MOVEMENT_TYPES.SALE_OUT,
             productId: item.productId,
             colorId: item.colorId,
+            variantId: item.variantId,
             fromLocationId: warehouse.id,
             toLocationId: null,
             quantity: item.quantity,
@@ -292,6 +306,7 @@ export async function createManualOrder(
       succeeded = true;
       break;
     } catch (err) {
+      if (err instanceof Error && err.message === "INACTIVE_VARIANT") return { error: "أحد خيارات المنتج لم يعد فعالاً؛ أعد اختيار الـVariant" };
       if (err instanceof InsufficientInventoryError) {
         const product = productById.get(err.productId);
         return {

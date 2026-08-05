@@ -17,6 +17,7 @@ export interface RepStockRequestProductOption extends PickableProduct {
 interface RequestLine {
   productId: string;
   colorId: string | null;
+  variantId: string | null;
   colorLabel: string | null;
   sku: string;
   label: string;
@@ -25,8 +26,8 @@ interface RequestLine {
   thumbnailAlt: string | null;
 }
 
-function lineKey(productId: string, colorId: string | null): string {
-  return `${productId}:${colorId ?? ""}`;
+function lineKey(productId: string, colorId: string | null, variantId: string | null = null): string {
+  return `${productId}:${variantId ?? `legacy:${colorId ?? ""}`}`;
 }
 
 const initialState: RepStockRequestState = {};
@@ -44,10 +45,12 @@ export function RepStockRequestForm({ products }: { products: RepStockRequestPro
   // colors already has a line — only a colorless (or fully-used) product
   // is excluded entirely.
   const excludeIds = useMemo(() => {
-    const usedKeys = new Set(lines.map((line) => lineKey(line.productId, line.colorId)));
+    const usedKeys = new Set(lines.map((line) => lineKey(line.productId, line.colorId, line.variantId)));
     const ids = new Set<string>();
     for (const product of products) {
-      if (product.colorOptions && product.colorOptions.length > 0) {
+      if (product.variantOptions && product.variantOptions.length > 0) {
+        if (product.variantOptions.every((variant) => usedKeys.has(lineKey(product.id, null, variant.id)))) ids.add(product.id);
+      } else if (product.colorOptions && product.colorOptions.length > 0) {
         if (product.colorOptions.every((color) => usedKeys.has(lineKey(product.id, color.id)))) {
           ids.add(product.id);
         }
@@ -58,14 +61,16 @@ export function RepStockRequestForm({ products }: { products: RepStockRequestPro
     return ids;
   }, [lines, products]);
 
-  function handleAdd(product: RepStockRequestProductOption, colorId: string | null) {
+  function handleAdd(product: RepStockRequestProductOption, colorId: string | null, variantId: string | null) {
     const color = product.colorOptions?.find((option) => option.id === colorId) ?? null;
+    const variant = product.variantOptions?.find((option) => option.id === variantId) ?? null;
     setLines((prev) => [
       ...prev,
       {
         productId: product.id,
         colorId,
-        colorLabel: color ? (color.nameAr ?? color.name) : null,
+        variantId,
+        colorLabel: variant?.label ?? (color ? (color.nameAr ?? color.name) : null),
         sku: product.sku,
         label: product.nameAr ?? product.name,
         quantity: 1,
@@ -75,15 +80,15 @@ export function RepStockRequestForm({ products }: { products: RepStockRequestPro
     ]);
   }
 
-  function handleRemove(productId: string, colorId: string | null) {
-    setLines((prev) => prev.filter((line) => lineKey(line.productId, line.colorId) !== lineKey(productId, colorId)));
+  function handleRemove(productId: string, colorId: string | null, variantId: string | null) {
+    setLines((prev) => prev.filter((line) => lineKey(line.productId, line.colorId, line.variantId) !== lineKey(productId, colorId, variantId)));
   }
 
-  function handleQuantityChange(productId: string, colorId: string | null, value: string) {
+  function handleQuantityChange(productId: string, colorId: string | null, variantId: string | null, value: string) {
     const quantity = Math.max(1, Math.floor(Number(value) || 1));
     setLines((prev) =>
       prev.map((line) =>
-        lineKey(line.productId, line.colorId) === lineKey(productId, colorId) ? { ...line, quantity } : line,
+        lineKey(line.productId, line.colorId, line.variantId) === lineKey(productId, colorId, variantId) ? { ...line, quantity } : line,
       ),
     );
   }
@@ -91,7 +96,7 @@ export function RepStockRequestForm({ products }: { products: RepStockRequestPro
   const itemsJson = useMemo(
     () =>
       JSON.stringify(
-        lines.map((line) => ({ productId: line.productId, colorId: line.colorId, requestedQuantity: line.quantity })),
+        lines.map((line) => ({ productId: line.productId, colorId: line.colorId, variantId: line.variantId, requestedQuantity: line.quantity })),
       ),
     [lines],
   );
@@ -120,7 +125,7 @@ export function RepStockRequestForm({ products }: { products: RepStockRequestPro
             <div className="flex flex-col divide-y divide-navy-soft">
               {lines.map((line) => (
                 <div
-                  key={lineKey(line.productId, line.colorId)}
+                  key={lineKey(line.productId, line.colorId, line.variantId)}
                   className="flex flex-wrap items-center gap-3 py-3 first:pt-0 last:pb-0"
                 >
                   <ProductThumb product={{ ...line, name: line.label }} className="h-10 w-10" />
@@ -136,7 +141,7 @@ export function RepStockRequestForm({ products }: { products: RepStockRequestPro
                       type="number"
                       min={1}
                       value={line.quantity}
-                      onChange={(event) => handleQuantityChange(line.productId, line.colorId, event.target.value)}
+                      onChange={(event) => handleQuantityChange(line.productId, line.colorId, line.variantId, event.target.value)}
                       aria-label="الكمية المطلوبة"
                     />
                   </div>
@@ -144,7 +149,7 @@ export function RepStockRequestForm({ products }: { products: RepStockRequestPro
                     type="button"
                     variant="ghost"
                     size="sm"
-                    onClick={() => handleRemove(line.productId, line.colorId)}
+                    onClick={() => handleRemove(line.productId, line.colorId, line.variantId)}
                   >
                     حذف
                   </Button>

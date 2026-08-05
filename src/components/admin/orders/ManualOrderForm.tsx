@@ -52,11 +52,13 @@ export interface ManualOrderProductOption {
   stock: number;
   /** Empty/omitted for a colorless product. */
   colorOptions?: ManualOrderColorOption[];
+  variantOptions?: { id: string; label: string; stock: number }[];
 }
 
 interface ManualOrderLine {
   productId: string;
   colorId: string | null;
+  variantId: string | null;
   colorLabel: string | null;
   sku: string;
   label: string;
@@ -65,8 +67,8 @@ interface ManualOrderLine {
   stock: number;
 }
 
-function lineKey(productId: string, colorId: string | null): string {
-  return `${productId}:${colorId ?? ""}`;
+function lineKey(productId: string, colorId: string | null, variantId: string | null = null): string {
+  return `${productId}:${variantId ?? `legacy:${colorId ?? ""}`}`;
 }
 
 export interface ManualOrderFormProps {
@@ -175,44 +177,46 @@ export function ManualOrderForm({
     }
   }
 
-  const addedLineKeys = useMemo(() => new Set(lines.map((line) => lineKey(line.productId, line.colorId))), [lines]);
+  const addedLineKeys = useMemo(() => new Set(lines.map((line) => lineKey(line.productId, line.colorId, line.variantId))), [lines]);
 
-  function handleAddProduct(product: ManualOrderProductOption, colorId: string | null) {
+  function handleAddProduct(product: ManualOrderProductOption, colorId: string | null, variantId: string | null = null) {
     const unitPriceCents = priceMode === "wholesale" ? product.wholesalePriceCents : product.retailPriceCents;
     const color = product.colorOptions?.find((option) => option.id === colorId) ?? null;
+    const variant = product.variantOptions?.find((option) => option.id === variantId) ?? null;
     setLines((prev) => [
       ...prev,
       {
         productId: product.id,
         colorId,
-        colorLabel: color ? (color.nameAr ?? color.name) : null,
+        variantId,
+        colorLabel: variant?.label ?? (color ? (color.nameAr ?? color.name) : null),
         sku: product.sku,
         label: product.nameAr ?? product.name,
         unitPriceCents,
         quantity: 1,
-        stock: color ? color.stock : product.stock,
+        stock: variant ? variant.stock : color ? color.stock : product.stock,
       },
     ]);
   }
 
-  function handleRemoveLine(productId: string, colorId: string | null) {
-    setLines((prev) => prev.filter((line) => lineKey(line.productId, line.colorId) !== lineKey(productId, colorId)));
+  function handleRemoveLine(productId: string, colorId: string | null, variantId: string | null) {
+    setLines((prev) => prev.filter((line) => lineKey(line.productId, line.colorId, line.variantId) !== lineKey(productId, colorId, variantId)));
   }
 
-  function handleQuantityChange(productId: string, colorId: string | null, value: string) {
+  function handleQuantityChange(productId: string, colorId: string | null, variantId: string | null, value: string) {
     const quantity = Math.max(1, Math.floor(Number(value) || 1));
     setLines((prev) =>
       prev.map((line) =>
-        lineKey(line.productId, line.colorId) === lineKey(productId, colorId) ? { ...line, quantity } : line,
+        lineKey(line.productId, line.colorId, line.variantId) === lineKey(productId, colorId, variantId) ? { ...line, quantity } : line,
       ),
     );
   }
 
-  function handleUnitPriceChange(productId: string, colorId: string | null, value: string) {
+  function handleUnitPriceChange(productId: string, colorId: string | null, variantId: string | null, value: string) {
     const unitPriceCents = Math.max(0, Math.round((Number(value) || 0) * 100));
     setLines((prev) =>
       prev.map((line) =>
-        lineKey(line.productId, line.colorId) === lineKey(productId, colorId) ? { ...line, unitPriceCents } : line,
+        lineKey(line.productId, line.colorId, line.variantId) === lineKey(productId, colorId, variantId) ? { ...line, unitPriceCents } : line,
       ),
     );
   }
@@ -228,6 +232,7 @@ export function ManualOrderForm({
         lines.map((line) => ({
           productId: line.productId,
           colorId: line.colorId,
+          variantId: line.variantId,
           quantity: line.quantity,
           unitPriceCents: line.unitPriceCents,
         })),
@@ -387,7 +392,7 @@ export function ManualOrderForm({
               <div className="flex flex-col divide-y divide-navy-soft">
                 {lines.map((line) => (
                   <div
-                    key={lineKey(line.productId, line.colorId)}
+                    key={lineKey(line.productId, line.colorId, line.variantId)}
                     className="flex flex-wrap items-center gap-3 py-3 first:pt-0 last:pb-0"
                   >
                     <div className="min-w-0 flex-1">
@@ -403,7 +408,7 @@ export function ManualOrderForm({
                         min={1}
                         max={line.stock}
                         value={line.quantity}
-                        onChange={(event) => handleQuantityChange(line.productId, line.colorId, event.target.value)}
+                        onChange={(event) => handleQuantityChange(line.productId, line.colorId, line.variantId, event.target.value)}
                         aria-label="الكمية"
                       />
                     </div>
@@ -413,7 +418,7 @@ export function ManualOrderForm({
                         min={0}
                         step="0.01"
                         value={line.unitPriceCents / 100}
-                        onChange={(event) => handleUnitPriceChange(line.productId, line.colorId, event.target.value)}
+                        onChange={(event) => handleUnitPriceChange(line.productId, line.colorId, line.variantId, event.target.value)}
                         aria-label="سعر الوحدة"
                       />
                     </div>
@@ -424,7 +429,7 @@ export function ManualOrderForm({
                       type="button"
                       variant="ghost"
                       size="sm"
-                      onClick={() => handleRemoveLine(line.productId, line.colorId)}
+                      onClick={() => handleRemoveLine(line.productId, line.colorId, line.variantId)}
                     >
                       حذف
                     </Button>
