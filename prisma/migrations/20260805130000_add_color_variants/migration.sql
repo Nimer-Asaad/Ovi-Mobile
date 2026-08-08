@@ -49,19 +49,10 @@ CREATE UNIQUE INDEX "cart_items_cartId_productId_colorId_key" ON "cart_items"("c
 CREATE UNIQUE INDEX "cart_items_cartId_productId_null_color_key" ON "cart_items"("cartId", "productId") WHERE "colorId" IS NULL;
 ALTER TABLE "cart_items" ADD CONSTRAINT "cart_items_colorId_fkey" FOREIGN KEY ("colorId") REFERENCES "colors"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
--- AlterTable: inventory_items
-ALTER TABLE "inventory_items" ADD COLUMN "colorId" TEXT;
-DROP INDEX "inventory_items_productId_locationId_key";
-CREATE UNIQUE INDEX "inventory_items_productId_locationId_colorId_key" ON "inventory_items"("productId", "locationId", "colorId");
--- See the cart_items partial index comment above — same NULL-uniqueness gap,
--- same fix, same "never use the compound-key shorthand for a null colorId"
--- rule in src/lib/inventory-transactions.ts.
-CREATE UNIQUE INDEX "inventory_items_productId_locationId_null_color_key" ON "inventory_items"("productId", "locationId") WHERE "colorId" IS NULL;
-ALTER TABLE "inventory_items" ADD CONSTRAINT "inventory_items_colorId_fkey" FOREIGN KEY ("colorId") REFERENCES "colors"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AlterTable: stock_movements
-ALTER TABLE "stock_movements" ADD COLUMN "colorId" TEXT;
-ALTER TABLE "stock_movements" ADD CONSTRAINT "stock_movements_colorId_fkey" FOREIGN KEY ("colorId") REFERENCES "colors"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+-- inventory_items and stock_movements deliberately never get a colorId
+-- column: the stock bucket is determined solely by product + variant
+-- (phone model), never color. Color is purely descriptive on the
+-- order/cart/request/return-facing tables below.
 
 -- AlterTable: order_items
 ALTER TABLE "order_items" ADD COLUMN "colorId" TEXT;

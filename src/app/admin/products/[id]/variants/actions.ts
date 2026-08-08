@@ -25,21 +25,18 @@ export async function saveProductVariants(productId: string, _state: VariantActi
   if (!parsed.success) return { error: "بيانات الـVariants غير صالحة" };
 
   const modelIds = [...new Set(parsed.data.variants.map((row) => row.phoneModelId))];
-  const colorIds = [...new Set(parsed.data.variants.flatMap((row) => row.colorId ? [row.colorId] : []))];
-  const [models, colors, existing] = await Promise.all([
+  const [models, existing] = await Promise.all([
     prisma.phoneModel.findMany({ where: { id: { in: modelIds } }, select: { id: true } }),
-    prisma.color.findMany({ where: { id: { in: colorIds } }, select: { id: true } }),
     prisma.productVariant.findMany({
       where: { productId },
       select: {
-        id: true, phoneModelId: true, colorId: true, variantCode: true,
+        id: true, phoneModelId: true, variantCode: true,
         _count: { select: { inventoryItems: true, cartItems: true, orderItems: true, stockMovements: true, stockRequestItems: true, stockReturnItems: true } },
       },
     }),
   ]);
-  if (models.length !== modelIds.length || colors.length !== colorIds.length) return { error: "أحد الموديلات أو الألوان غير موجود" };
-  const pairKeys = parsed.data.variants.map((row) => `${row.phoneModelId}:${row.colorId ?? ""}`);
-  if (new Set(pairKeys).size !== pairKeys.length) return { error: "لا يمكن تكرار نفس الموديل واللون" };
+  if (models.length !== modelIds.length) return { error: "أحد الموديلات غير موجود" };
+  if (new Set(modelIds).size !== parsed.data.variants.length) return { error: "لا يمكن تكرار نفس الموديل" };
   const codes = parsed.data.variants.flatMap((row) => row.variantCode ? [row.variantCode] : []);
   if (new Set(codes).size !== codes.length) return { error: "كود الـVariant مكرر" };
   const existingIds = new Set(existing.map((row) => row.id));
@@ -51,9 +48,8 @@ export async function saveProductVariants(productId: string, _state: VariantActi
     if (!submitted) continue;
     const used = Object.values(current._count).some((count) => count > 0);
     const identityChanged = current.phoneModelId !== submitted.phoneModelId
-      || current.colorId !== (submitted.colorId ?? null)
       || current.variantCode !== (submitted.variantCode || null);
-    if (used && identityChanged) return { error: "لا يمكن تعديل موديل أو لون أو كود Variant بعد استخدامه؛ عطّله وأنشئ Variant جديداً" };
+    if (used && identityChanged) return { error: "لا يمكن تعديل موديل أو كود Variant بعد استخدامه؛ عطّله وأنشئ Variant جديداً" };
   }
 
   try {
@@ -75,7 +71,7 @@ export async function saveProductVariants(productId: string, _state: VariantActi
       const submittedIds = parsed.data.variants.flatMap((row) => row.id ? [row.id] : []);
       await tx.productVariant.updateMany({ where: { productId, id: { notIn: submittedIds } }, data: { isActive: false } });
       for (const [sortOrder, row] of parsed.data.variants.entries()) {
-        const data = { phoneModelId: row.phoneModelId, colorId: row.colorId ?? null, variantCode: row.variantCode || null, isActive: row.isActive, sortOrder };
+        const data = { phoneModelId: row.phoneModelId, variantCode: row.variantCode || null, isActive: row.isActive, sortOrder };
         if (row.id) await tx.productVariant.update({ where: { id: row.id }, data });
         else await tx.productVariant.create({ data: { productId, ...data } });
       }
@@ -85,7 +81,7 @@ export async function saveProductVariants(productId: string, _state: VariantActi
       } });
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") return { error: "يوجد Variant بنفس الموديل/اللون أو الكود" };
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") return { error: "يوجد Variant بنفس الموديل أو الكود" };
     if (isRetryableTransactionError(error)) return { error: "حدث تعديل متزامن؛ لم تُحفظ التغييرات، أعد المحاولة" };
     if (error instanceof Error && error.message === "NEGATIVE_LEGACY") return { error: "لا يمكن تثبيت الرصيد الأصلي مع وجود كمية سالبة؛ راجع المخزون أولاً" };
     throw error;
@@ -107,24 +103,23 @@ export async function allocateLegacyInventory(productId: string, _state: Variant
       if (batch.status !== "PENDING") throw new Error("BATCH_COMPLETED");
       if (batch.allocatedQuantity + total > batch.originalLegacyQuantity) throw new Error("BASELINE_EXCEEDED");
 
-      const source = await tx.inventoryItem.findFirst({ where: { id: parsed.data.sourceInventoryItemId, productId, variantId: null }, select: { id: true, locationId: true, colorId: true, quantity: true } });
+      const source = await tx.inventoryItem.findFirst({ where: { id: parsed.data.sourceInventoryItemId, productId, variantId: null }, select: { id: true, locationId: true, quantity: true } });
       if (!source || source.quantity < total || source.quantity < 0) throw new Error("INSUFFICIENT_UNALLOCATED");
-      const variants = await tx.productVariant.findMany({ where: { id: { in: parsed.data.allocations.map((row) => row.variantId) }, productId, isActive: true }, select: { id: true, colorId: true } });
+      const variants = await tx.productVariant.findMany({ where: { id: { in: parsed.data.allocations.map((row) => row.variantId) }, productId, isActive: true }, select: { id: true } });
       if (variants.length !== new Set(parsed.data.allocations.map((row) => row.variantId)).size) throw new Error("INVALID_VARIANT");
-      if (source.colorId && variants.some((variant) => variant.colorId !== source.colorId)) throw new Error("COLOR_MISMATCH");
 
       const decremented = await tx.inventoryItem.updateMany({ where: { id: source.id, quantity: { gte: total } }, data: { quantity: { decrement: total } } });
       if (decremented.count !== 1) throw new Error("INSUFFICIENT_UNALLOCATED");
       const newSourceQuantity = source.quantity - total;
       await recordStockMovement(tx, {
-        type: STOCK_MOVEMENT_TYPES.VARIANT_ALLOCATION_SOURCE, productId, colorId: source.colorId, variantId: null,
+        type: STOCK_MOVEMENT_TYPES.VARIANT_ALLOCATION_SOURCE, productId, variantId: null,
         allocationBatchId: batch.id, fromLocationId: source.locationId, toLocationId: null, quantity: total,
         previousQuantity: source.quantity, newQuantity: newSourceQuantity, note: "خصم من الرصيد القديم للتوزيع على Variants", createdById: admin.id,
       });
       for (const row of parsed.data.allocations) {
-        const change = await incrementInventoryUpsert(tx, { productId, variantId: row.variantId, colorId: null, locationId: source.locationId }, row.quantity);
+        const change = await incrementInventoryUpsert(tx, { productId, variantId: row.variantId, locationId: source.locationId }, row.quantity);
         await recordStockMovement(tx, {
-          type: STOCK_MOVEMENT_TYPES.VARIANT_ALLOCATION, productId, variantId: row.variantId, colorId: null,
+          type: STOCK_MOVEMENT_TYPES.VARIANT_ALLOCATION, productId, variantId: row.variantId,
           allocationBatchId: batch.id, fromLocationId: null, toLocationId: source.locationId, quantity: row.quantity,
           previousQuantity: change.previousQuantity, newQuantity: change.newQuantity, note: "إضافة إلى Variant من الرصيد القديم", createdById: admin.id,
         });
@@ -138,7 +133,6 @@ export async function allocateLegacyInventory(productId: string, _state: Variant
   } catch (error) {
     if (isRetryableTransactionError(error) || (error instanceof Error && error.message === "CONCURRENT_ALLOCATION")) return { error: "تم رفض توزيع متزامن أو مكرر؛ حدّث الصفحة وحاول من الرصيد الحالي" };
     if (error instanceof Error && ["INSUFFICIENT_UNALLOCATED", "BASELINE_EXCEEDED"].includes(error.message)) return { error: "الكمية الموزعة تتجاوز الرصيد القديم المثبت" };
-    if (error instanceof Error && error.message === "COLOR_MISMATCH") return { error: "الرصيد القديم الملوّن لا يمكن توزيعه على لون مختلف" };
     if (error instanceof Error && error.message === "INVALID_VARIANT") return { error: "أحد الـVariants غير صالح أو غير نشط" };
     if (error instanceof Error && error.message === "MISSING_BATCH") return { error: "ابدأ إعداد الـVariants أولاً لتثبيت الرصيد الأصلي" };
     if (error instanceof Error && error.message === "BATCH_COMPLETED") return { error: "تم اعتماد هذا التوزيع ولا يمكن إعادة فتحه" };
@@ -184,9 +178,9 @@ export async function adjustVariantInventory(productId: string, _state: VariantA
   const warehouse = await getMainWarehouse();
   await prisma.$transaction(async (tx) => {
     for (const row of adjustments) {
-      const change = await setInventoryAbsolute(tx, { productId, variantId: row.variantId, colorId: null, locationId: warehouse.id }, row.quantity);
+      const change = await setInventoryAbsolute(tx, { productId, variantId: row.variantId, locationId: warehouse.id }, row.quantity);
       if (change.previousQuantity === change.newQuantity) continue;
-      await recordStockMovement(tx, { type: STOCK_MOVEMENT_TYPES.ADJUSTMENT, productId, variantId: row.variantId, colorId: null, toLocationId: warehouse.id, quantity: Math.abs(change.newQuantity - change.previousQuantity), previousQuantity: change.previousQuantity, newQuantity: change.newQuantity, note: "جرد مباشر لمخزون Variant", createdById: admin.id });
+      await recordStockMovement(tx, { type: STOCK_MOVEMENT_TYPES.ADJUSTMENT, productId, variantId: row.variantId, toLocationId: warehouse.id, quantity: Math.abs(change.newQuantity - change.previousQuantity), previousQuantity: change.previousQuantity, newQuantity: change.newQuantity, note: "جرد مباشر لمخزون Variant", createdById: admin.id });
     }
   });
   revalidatePath(`/admin/products/${productId}/variants`);

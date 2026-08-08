@@ -47,13 +47,13 @@ export default async function NewManualOrderPage({ searchParams }: NewManualOrde
         brand: { select: { name: true } },
         inventoryItems: {
           where: { location: { isDefault: true } },
-          select: { quantity: true, colorId: true, variantId: true },
+          select: { quantity: true, variantId: true },
         },
         colorOptions: {
           select: { color: { select: { id: true, name: true, nameAr: true, hexCode: true } } },
           orderBy: { sortOrder: "asc" },
         },
-        variants: { where: { isActive: true }, select: { id: true, color: { select: { name: true, nameAr: true } }, phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } } } },
+        variants: { where: { isActive: true }, select: { id: true, phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } } } },
         variantMode: true,
         variantAllocationStatus: true,
       },
@@ -69,32 +69,27 @@ export default async function NewManualOrderPage({ searchParams }: NewManualOrde
     }),
   ]);
 
-  const productOptions = products.map((product) => {
-    const stockByColorId = new Map(
-      product.inventoryItems.filter((item) => item.colorId).map((item) => [item.colorId as string, item.quantity]),
-    );
-    return {
-      id: product.id,
-      sku: product.sku,
-      name: product.name,
-      nameAr: product.nameAr,
-      retailPriceCents: product.retailPriceCents,
-      wholesalePriceCents: product.wholesalePriceCents,
-      categoryLabel: product.category?.nameAr ?? product.category?.name ?? null,
-      brandLabel: product.brand?.name ?? null,
-      // Colorless total — only meaningful when the product has no colors,
-      // since a colored product's purchasable stock is per-color instead.
-      stock: product.inventoryItems.filter((item) => !item.colorId).reduce((sum, item) => sum + item.quantity, 0),
-      colorOptions: product.colorOptions.map((option) => ({
-        id: option.color.id,
-        name: option.color.name,
-        nameAr: option.color.nameAr,
-        hexCode: option.color.hexCode,
-        stock: stockByColorId.get(option.color.id) ?? 0,
-      })),
-      variantOptions: product.variantMode === "PHONE_COMPATIBILITY" && product.variantAllocationStatus === "READY" ? product.variants.map((variant) => ({ id: variant.id, label: `${variant.phoneModel.phoneBrand.nameAr ?? variant.phoneModel.phoneBrand.name} / ${variant.phoneModel.nameAr ?? variant.phoneModel.name}${variant.color ? ` / ${variant.color.nameAr ?? variant.color.name}` : ""}`, stock: product.inventoryItems.find((item) => item.variantId === variant.id)?.quantity ?? 0 })) : [],
-    };
-  });
+  const productOptions = products.map((product) => ({
+    id: product.id,
+    sku: product.sku,
+    name: product.name,
+    nameAr: product.nameAr,
+    retailPriceCents: product.retailPriceCents,
+    wholesalePriceCents: product.wholesalePriceCents,
+    categoryLabel: product.category?.nameAr ?? product.category?.name ?? null,
+    brandLabel: product.brand?.name ?? null,
+    // Non-variant total — a phone-variant product's purchasable stock is
+    // per-model instead (variantOptions[].stock). Color never affects
+    // stock either way — see the InventoryItem doc comment in schema.prisma.
+    stock: product.inventoryItems.filter((item) => !item.variantId).reduce((sum, item) => sum + item.quantity, 0),
+    colorOptions: product.colorOptions.map((option) => ({
+      id: option.color.id,
+      name: option.color.name,
+      nameAr: option.color.nameAr,
+      hexCode: option.color.hexCode,
+    })),
+    variantOptions: product.variantMode === "PHONE_COMPATIBILITY" && product.variantAllocationStatus === "READY" ? product.variants.map((variant) => ({ id: variant.id, label: `${variant.phoneModel.phoneBrand.nameAr ?? variant.phoneModel.phoneBrand.name} / ${variant.phoneModel.nameAr ?? variant.phoneModel.name}`, stock: product.inventoryItems.find((item) => item.variantId === variant.id)?.quantity ?? 0 })) : [],
+  }));
 
   return (
     <div className="flex flex-col gap-6">

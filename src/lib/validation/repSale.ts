@@ -17,8 +17,8 @@ export const repSaleSchema = z.object({
     .min(1, "يجب إضافة منتج واحد على الأقل")
     .max(50, "عدد كبير جداً من المنتجات في عملية بيع واحدة")
     .refine(
-      (items) => new Set(items.map((item) => `${item.productId}:${item.variantId ?? `legacy:${item.colorId ?? ""}`}`)).size === items.length,
-      { message: "لا يمكن تكرار نفس المنتج/اللون أكثر من مرة — عدّل الكمية بدلاً من ذلك" },
+      (items) => new Set(items.map((item) => `${item.productId}:${item.variantId ?? ""}:${item.colorId ?? ""}`)).size === items.length,
+      { message: "لا يمكن تكرار نفس المنتج بنفس الخيارات أكثر من مرة — عدّل الكمية بدلاً من ذلك" },
     ),
   customerName: z.string().min(2, "اسم العميل مطلوب"),
   customerPhone: z.string().min(7, "رقم هاتف العميل مطلوب"),

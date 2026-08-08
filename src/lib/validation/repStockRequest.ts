@@ -1,9 +1,10 @@
 import { z } from "zod";
 
+/** A rep requesting stock to be loaded into their car has no customer/order
+ * context, so a request line has no colorId — see repStockTransferSchema
+ * for the same reasoning. */
 const requestItemSchema = z.object({
   productId: z.string().min(1, "المنتج مطلوب"),
-  /** Null for a colorless product/line. */
-  colorId: z.string().nullable().optional(),
   variantId: z.string().nullable().optional(),
   requestedQuantity: z
     .number()
@@ -18,8 +19,8 @@ export const repStockRequestCreateSchema = z.object({
     .min(1, "يجب إضافة منتج واحد على الأقل")
     .max(50, "عدد كبير جداً من المنتجات في طلب واحد")
     .refine(
-      (items) => new Set(items.map((item) => `${item.productId}:${item.variantId ?? `legacy:${item.colorId ?? ""}`}`)).size === items.length,
-      { message: "لا يمكن تكرار نفس المنتج/اللون أكثر من مرة — عدّل الكمية بدلاً من ذلك" },
+      (items) => new Set(items.map((item) => `${item.productId}:${item.variantId ?? ""}`)).size === items.length,
+      { message: "لا يمكن تكرار نفس المنتج أكثر من مرة — عدّل الكمية بدلاً من ذلك" },
     ),
 });
 

@@ -9,8 +9,8 @@ import { Spinner } from "@/components/ui/Spinner";
 import { ProductThumb, ProductQuickPicker, type PickableProduct } from "@/components/reps/ProductQuickPicker";
 
 export interface AssignStockProductOption extends PickableProduct {
-  /** Colorless warehouse stock — a colored product's stock lives per-color
-   * on `colorOptions[].stock` instead. */
+  /** Non-variant warehouse stock — a phone-variant product's stock lives
+   * per-model on `variantOptions[].stock` instead. */
   warehouseStock: number;
 }
 
@@ -22,30 +22,27 @@ interface AssignStockFormProps {
 const initialState: RepStockTransferState = {};
 
 /** Single-transfer form (warehouse → rep car) — reuses the same
- * search/thumbnail/color picker as the rep-facing stock-request and sale
- * forms, replacing the previous plain product `<select>`. */
+ * search/thumbnail picker as the rep-facing stock-request and sale forms,
+ * replacing the previous plain product `<select>`. No customer/order
+ * context, so callers never populate colorOptions here (see
+ * repStockTransferSchema for the same reasoning) — only variantId. */
 export function AssignStockForm({ repId, products }: AssignStockFormProps) {
   const action = assignStockToRep.bind(null, repId);
   const [state, formAction, isPending] = useActionState(action, initialState);
-  const [selected, setSelected] = useState<{ product: AssignStockProductOption; colorId: string | null; variantId: string | null } | null>(
+  const [selected, setSelected] = useState<{ product: AssignStockProductOption; variantId: string | null } | null>(
     null,
   );
 
-  function handlePick(product: AssignStockProductOption, colorId: string | null, variantId: string | null) {
-    setSelected({ product, colorId, variantId });
+  function handlePick(product: AssignStockProductOption, _colorId: string | null, variantId: string | null) {
+    setSelected({ product, variantId });
   }
 
-  const selectedColor = selected?.colorId
-    ? (selected.product.colorOptions?.find((color) => color.id === selected.colorId) ?? null)
-    : null;
-  const availableStock = selectedColor ? (selectedColor.stock ?? 0) : (selected?.product.warehouseStock ?? 0);
   const selectedVariant = selected?.variantId ? selected.product.variantOptions?.find((variant) => variant.id === selected.variantId) : null;
-  const resolvedStock = selectedVariant ? (selectedVariant.stock ?? 0) : availableStock;
+  const resolvedStock = selectedVariant ? (selectedVariant.stock ?? 0) : (selected?.product.warehouseStock ?? 0);
 
   return (
     <form action={formAction} className="flex max-w-xl flex-col gap-4">
       <input type="hidden" name="productId" value={selected?.product.id ?? ""} />
-      <input type="hidden" name="colorId" value={selected?.colorId ?? ""} />
       <input type="hidden" name="variantId" value={selected?.variantId ?? ""} />
 
       {!selected ? (
@@ -57,7 +54,6 @@ export function AssignStockForm({ repId, products }: AssignStockFormProps) {
             <div>
               <p className="text-sm text-neutral-bg">
                 {selected.product.nameAr ?? selected.product.name}
-                {selectedColor && <span> — {selectedColor.nameAr ?? selectedColor.name}</span>}
                 {selectedVariant && <span> — {selectedVariant.label}</span>}
               </p>
               <p className="text-xs text-neutral-bg/50">

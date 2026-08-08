@@ -8,11 +8,12 @@ const positiveIntString = z
   })
   .transform((v) => Number(v));
 
+/** A pure warehouse<->rep-car stock movement — no customer/order context, so
+ * it has no colorId at all: color is only ever recorded on an order line,
+ * never on a stock transfer, and never affects which InventoryItem bucket
+ * moves (see the InventoryItem doc comment in prisma/schema.prisma). */
 export const repStockTransferSchema = z.object({
   productId: z.string().min(1, "المنتج مطلوب"),
-  /** Empty string (no color picked) normalizes to undefined — a colorless
-   * transfer. */
-  colorId: z.string().min(1).optional(),
   variantId: z.string().min(1).optional(),
   quantity: positiveIntString,
   notes: z.string().max(500, "الملاحظات طويلة جداً").optional(),

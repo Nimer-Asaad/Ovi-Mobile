@@ -143,8 +143,8 @@ export default async function AdminOrderDetailPage({ params }: AdminOrderDetailP
                     </p>
                     <p className="text-xs text-neutral-bg/50">
                       {item.product.sku}
-                      {item.color && <span> — {item.color.nameAr ?? item.color.name}</span>}
-                      {item.phoneModelSnapshot && <span> — {item.phoneBrandSnapshot} / {item.phoneModelSnapshot}{item.colorNameSnapshot ? ` / ${item.colorNameSnapshot}` : ""}{item.variantCodeSnapshot ? ` (${item.variantCodeSnapshot})` : ""}</span>}
+                      {(item.color || item.colorNameSnapshot) && <span> — {item.color ? (item.color.nameAr ?? item.color.name) : item.colorNameSnapshot}</span>}
+                      {item.phoneModelSnapshot && <span> — {item.phoneBrandSnapshot} / {item.phoneModelSnapshot}{item.variantCodeSnapshot ? ` (${item.variantCodeSnapshot})` : ""}</span>}
                     </p>
                     <p className="text-xs text-neutral-bg/60">
                       {formatCurrencyFromCents(item.unitPriceCents)}

@@ -12,8 +12,6 @@ import { ProductThumb, ProductQuickPicker, type PickableProduct } from "@/compon
 
 export interface AdjustStockProductOption extends PickableProduct {
   isActive: boolean;
-  /** Colorless warehouse stock — a colored product's stock lives per-color
-   * on `colorOptions[].stock` instead. */
   stock: number;
 }
 
@@ -24,44 +22,31 @@ interface AdjustStockFormProps {
 
 const initialState: StockAdjustmentState = {};
 
-/** Single-product adjustment form — reuses the same search/thumbnail/color
- * picker as the rep-facing stock-request/sale forms. For adjusting many
- * products/colors at once, see the bulk grid at /admin/inventory/colors. */
+/** Single-product adjustment form — no customer/order context, so no color
+ * step at all: reuses the search/thumbnail picker shared with the
+ * rep-facing forms, but callers of this form never populate colorOptions. */
 export function AdjustStockForm({ products, selectedProductId }: AdjustStockFormProps) {
   const [state, formAction, isPending] = useActionState(createStockMovement, initialState);
   const preselected = selectedProductId ? products.find((product) => product.id === selectedProductId) : undefined;
-  const [selected, setSelected] = useState<{ product: AdjustStockProductOption; colorId: string | null } | null>(
-    preselected ? { product: preselected, colorId: null } : null,
-  );
-
-  function handlePick(product: AdjustStockProductOption, colorId: string | null) {
-    setSelected({ product, colorId });
-  }
-
-  const selectedColor = selected?.colorId
-    ? (selected.product.colorOptions?.find((color) => color.id === selected.colorId) ?? null)
-    : null;
-  const currentStock = selectedColor ? (selectedColor.stock ?? 0) : (selected?.product.stock ?? 0);
+  const [selected, setSelected] = useState<AdjustStockProductOption | null>(preselected ?? null);
 
   return (
     <form action={formAction} className="flex max-w-xl flex-col gap-4">
-      <input type="hidden" name="productId" value={selected?.product.id ?? ""} />
-      <input type="hidden" name="colorId" value={selected?.colorId ?? ""} />
+      <input type="hidden" name="productId" value={selected?.id ?? ""} />
 
       {!selected ? (
-        <ProductQuickPicker products={products} excludeIds={new Set()} onPick={handlePick} placeholder="ابحث عن منتج..." />
+        <ProductQuickPicker products={products} excludeIds={new Set()} onPick={setSelected} placeholder="ابحث عن منتج..." />
       ) : (
         <div className="flex items-center justify-between gap-3 rounded-card border border-navy-soft bg-navy-deep px-3 py-2">
           <div className="flex items-center gap-3">
-            <ProductThumb product={selected.product} className="h-10 w-10" />
+            <ProductThumb product={selected} className="h-10 w-10" />
             <div>
               <p className="text-sm text-neutral-bg">
-                {selected.product.nameAr ?? selected.product.name}
-                {selectedColor && <span> — {selectedColor.nameAr ?? selectedColor.name}</span>}
-                {!selected.product.isActive && <span className="text-neutral-bg/50"> — غير مفعل</span>}
+                {selected.nameAr ?? selected.name}
+                {!selected.isActive && <span className="text-neutral-bg/50"> — غير مفعل</span>}
               </p>
               <p className="text-xs text-neutral-bg/50">
-                {selected.product.sku} — المخزون الحالي: {currentStock}
+                {selected.sku} — المخزون الحالي: {selected.stock}
               </p>
             </div>
           </div>

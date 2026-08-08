@@ -54,6 +54,10 @@ export default async function CheckoutPage() {
                   <div key={item.id} className="flex items-center justify-between text-sm">
                     <span className="text-neutral-bg/80">
                       {item.product.nameAr ?? item.product.name}
+                      {item.color && <span> — {item.color.nameAr ?? item.color.name}</span>}
+                      {item.variant && (
+                        <span> — {item.variant.phoneModel.phoneBrand.nameAr ?? item.variant.phoneModel.phoneBrand.name} / {item.variant.phoneModel.nameAr ?? item.variant.phoneModel.name}</span>
+                      )}
                       <span className="text-neutral-bg/50"> × {item.quantity}</span>
                     </span>
                     <span className="text-neutral-bg">

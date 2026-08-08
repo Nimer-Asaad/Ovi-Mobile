@@ -5,9 +5,7 @@ import { isLowStock } from "@/lib/inventory";
 
 export interface RepCarProductGridItem {
   productId: string;
-  /** Null for colorless products — one card per productId+colorId. */
-  colorId: string | null;
-  colorLabel: string | null;
+  /** Null for a non-variant product — one card per productId+variantId. */
   variantId: string | null;
   variantLabel: string | null;
   sku: string;
@@ -49,7 +47,7 @@ export function RepCarProductGrid({
               const lowStock = isLowStock(item.quantity);
               return (
                 <div
-                  key={`${item.productId}:${item.variantId ?? `legacy:${item.colorId ?? ""}`}`}
+                  key={`${item.productId}:${item.variantId ?? ""}`}
                   className="flex flex-col overflow-hidden rounded-card border border-navy-soft bg-navy-deep"
                 >
                   <div className="relative aspect-square w-full overflow-hidden bg-navy-soft">
@@ -74,7 +72,6 @@ export function RepCarProductGrid({
                     </p>
                     <p className="text-[11px] text-neutral-bg/50">
                       {item.sku}
-                      {item.colorLabel && <span> — {item.colorLabel}</span>}
                       {item.variantLabel && <span> — {item.variantLabel}</span>}
                     </p>
                     {lowStock && (

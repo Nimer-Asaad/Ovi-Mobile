@@ -41,10 +41,8 @@ export default async function AdminRepRequestDetailPage({ params }: AdminRepRequ
             id: true,
             requestedQuantity: true,
             approvedQuantity: true,
-            colorId: true,
             variantId: true,
-            color: { select: { name: true, nameAr: true } },
-            variant: { select: { color: { select: { name: true, nameAr: true } }, phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } } } },
+            variant: { select: { phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } } } },
             product: { select: { id: true, sku: true, name: true, nameAr: true } },
           },
         },
@@ -62,20 +60,20 @@ export default async function AdminRepRequestDetailPage({ params }: AdminRepRequ
   const [warehouseItems, repLocation] = await Promise.all([
     prisma.inventoryItem.findMany({
       where: { productId: { in: productIds }, locationId: warehouse.id },
-      select: { productId: true, colorId: true, variantId: true, quantity: true },
+      select: { productId: true, variantId: true, quantity: true },
     }),
     prisma.stockLocation.findUnique({ where: { salesRepId: request.salesRep.id } }),
   ]);
-  const lineKey = (productId: string, colorId: string | null, variantId: string | null) => `${productId}:${variantId ?? `legacy:${colorId ?? ""}`}`;
-  const warehouseQtyByProduct = new Map(warehouseItems.map((item) => [lineKey(item.productId, item.colorId, item.variantId), item.quantity]));
+  const lineKey = (productId: string, variantId: string | null) => `${productId}:${variantId ?? ""}`;
+  const warehouseQtyByProduct = new Map(warehouseItems.map((item) => [lineKey(item.productId, item.variantId), item.quantity]));
 
   const repItems = repLocation
     ? await prisma.inventoryItem.findMany({
         where: { productId: { in: productIds }, locationId: repLocation.id },
-        select: { productId: true, colorId: true, variantId: true, quantity: true },
+        select: { productId: true, variantId: true, quantity: true },
       })
     : [];
-  const repQtyByProduct = new Map(repItems.map((item) => [lineKey(item.productId, item.colorId, item.variantId), item.quantity]));
+  const repQtyByProduct = new Map(repItems.map((item) => [lineKey(item.productId, item.variantId), item.quantity]));
 
   const isEditable =
     request.status === STOCK_REQUEST_STATUSES.PENDING || request.status === STOCK_REQUEST_STATUSES.REVIEWED;
@@ -108,11 +106,11 @@ export default async function AdminRepRequestDetailPage({ params }: AdminRepRequ
                 itemId: item.id,
                 productLabel: item.product.nameAr ?? item.product.name,
                 sku: item.product.sku,
-                variantLabel: item.variant ? `${item.variant.phoneModel.phoneBrand.nameAr ?? item.variant.phoneModel.phoneBrand.name} / ${item.variant.phoneModel.nameAr ?? item.variant.phoneModel.name}${item.variant.color ? ` / ${item.variant.color.nameAr ?? item.variant.color.name}` : ""}` : item.color ? (item.color.nameAr ?? item.color.name) : null,
+                variantLabel: item.variant ? `${item.variant.phoneModel.phoneBrand.nameAr ?? item.variant.phoneModel.phoneBrand.name} / ${item.variant.phoneModel.nameAr ?? item.variant.phoneModel.name}` : null,
                 requestedQuantity: item.requestedQuantity,
                 approvedQuantity: item.approvedQuantity,
-                warehouseAvailable: warehouseQtyByProduct.get(lineKey(item.product.id, item.colorId, item.variantId)) ?? 0,
-                carQuantity: repQtyByProduct.get(lineKey(item.product.id, item.colorId, item.variantId)) ?? 0,
+                warehouseAvailable: warehouseQtyByProduct.get(lineKey(item.product.id, item.variantId)) ?? 0,
+                carQuantity: repQtyByProduct.get(lineKey(item.product.id, item.variantId)) ?? 0,
               }))}
             />
           </CardContent>
@@ -129,7 +127,7 @@ export default async function AdminRepRequestDetailPage({ params }: AdminRepRequ
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium text-neutral-bg">{item.product.nameAr ?? item.product.name}</p>
                     <p className="text-xs text-neutral-bg/50">{item.product.sku}</p>
-                    {item.variant && <p className="text-xs text-gold-champagne">{item.variant.phoneModel.phoneBrand.nameAr ?? item.variant.phoneModel.phoneBrand.name} / {item.variant.phoneModel.nameAr ?? item.variant.phoneModel.name}{item.variant.color ? ` / ${item.variant.color.nameAr ?? item.variant.color.name}` : ""}</p>}
+                    {item.variant && <p className="text-xs text-gold-champagne">{item.variant.phoneModel.phoneBrand.nameAr ?? item.variant.phoneModel.phoneBrand.name} / {item.variant.phoneModel.nameAr ?? item.variant.phoneModel.name}</p>}
                   </div>
                   <div className="flex items-center gap-4 text-sm">
                     <span className="text-neutral-bg/70">مطلوب: {item.requestedQuantity}</span>

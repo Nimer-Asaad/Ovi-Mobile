@@ -26,26 +26,24 @@ export const STOCK_CHECK_PRODUCT_SELECT = {
   name: true,
   isActive: true,
   /* Only Main Warehouse stock counts toward cart/checkout availability —
-   * stock assigned to a sales rep isn't purchasable through the cart.
-   * colorId is included so getAvailableStock can resolve per-color stock
-   * for products with color options, not just the product-wide total. */
-  inventoryItems: { where: { location: { isDefault: true } }, select: { quantity: true, colorId: true, variantId: true } },
+   * stock assigned to a sales rep isn't purchasable through the cart. */
+  inventoryItems: { where: { location: { isDefault: true } }, select: { quantity: true, variantId: true } },
   variantMode: true,
   variantAllocationStatus: true,
 } satisfies Prisma.ProductSelect;
 
 export type StockCheckProduct = Prisma.ProductGetPayload<{ select: typeof STOCK_CHECK_PRODUCT_SELECT }>;
 
-/** Stock available for this product — filtered to a specific color when
- * `colorId` is given (colorless products keep working with the default
- * `null`, which matches their InventoryItem rows' colorId). */
+/** Stock available for this product — filtered to a specific variant (phone
+ * model) when `variantId` is given, or the plain product-wide bucket
+ * otherwise. Color never affects the result: it's a display attribute only,
+ * never a stock dimension — see the InventoryItem doc comment. */
 export function getAvailableStock(
-  product: { inventoryItems: { quantity: number; colorId: string | null; variantId: string | null }[] },
-  colorId: string | null = null,
+  product: { inventoryItems: { quantity: number; variantId: string | null }[] },
   variantId: string | null = null,
 ): number {
   return product.inventoryItems
-    .filter((item) => item.colorId === colorId && item.variantId === variantId)
+    .filter((item) => item.variantId === variantId)
     .reduce((sum, item) => sum + item.quantity, 0);
 }
 
@@ -65,7 +63,7 @@ const CART_PRODUCT_RETAIL_SELECT = {
   },
   /* Only Main Warehouse stock counts toward cart/checkout availability —
    * stock assigned to a sales rep isn't purchasable through the cart. */
-  inventoryItems: { where: { location: { isDefault: true } }, select: { quantity: true, colorId: true, variantId: true } },
+  inventoryItems: { where: { location: { isDefault: true } }, select: { quantity: true, variantId: true } },
 } satisfies Prisma.ProductSelect;
 
 const CART_PRODUCT_WHOLESALE_SELECT = {
@@ -84,7 +82,7 @@ const CART_PRODUCT_WHOLESALE_SELECT = {
   },
   /* Only Main Warehouse stock counts toward cart/checkout availability —
    * stock assigned to a sales rep isn't purchasable through the cart. */
-  inventoryItems: { where: { location: { isDefault: true } }, select: { quantity: true, colorId: true, variantId: true } },
+  inventoryItems: { where: { location: { isDefault: true } }, select: { quantity: true, variantId: true } },
 } satisfies Prisma.ProductSelect;
 
 export type CartProductRetail = Prisma.ProductGetPayload<{ select: typeof CART_PRODUCT_RETAIL_SELECT }>;
@@ -102,7 +100,6 @@ interface CartItemWithProduct<TProduct> {
     id: string;
     isActive: boolean;
     variantCode: string | null;
-    color: { id: string; name: string; nameAr: string | null } | null;
     phoneModel: { name: string; nameAr: string | null; phoneBrand: { name: string; nameAr: string | null } };
   } | null;
   product: TProduct;
@@ -126,7 +123,7 @@ export async function getCurrentUserCart(user: SessionUser): Promise<CartWithIte
           include: {
             product: { select: CART_PRODUCT_WHOLESALE_SELECT },
             color: { select: CART_ITEM_COLOR_SELECT },
-            variant: { select: { id: true, isActive: true, variantCode: true, color: { select: CART_ITEM_COLOR_SELECT }, phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } } } },
+            variant: { select: { id: true, isActive: true, variantCode: true, phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } } } },
           },
           orderBy: { createdAt: "asc" },
         },
@@ -141,7 +138,7 @@ export async function getCurrentUserCart(user: SessionUser): Promise<CartWithIte
         include: {
           product: { select: CART_PRODUCT_RETAIL_SELECT },
             color: { select: CART_ITEM_COLOR_SELECT },
-            variant: { select: { id: true, isActive: true, variantCode: true, color: { select: CART_ITEM_COLOR_SELECT }, phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } } } },
+            variant: { select: { id: true, isActive: true, variantCode: true, phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } } } },
         },
         orderBy: { createdAt: "asc" },
       },

@@ -252,11 +252,12 @@ model Supplier {
 }
 
 /// Global color master list (mirrors Category/Brand) — a color only becomes
-/// buyable/trackable for a specific product once a ProductColorOption row
-/// links the two. InventoryItem/CartItem/OrderItem/StockMovement/
-/// StockRequestItem/StockReturnItem reference Color directly (not
-/// ProductColorOption) so historical rows survive a product no longer
-/// offering that color.
+/// offerable for a specific product once a ProductColorOption row links the
+/// two. Color is a pure descriptive attribute: it never affects which
+/// InventoryItem bucket is decremented (that's determined solely by
+/// productId + variantId). CartItem/OrderItem/StockRequestItem/
+/// StockReturnItem reference Color directly (not ProductColorOption) so
+/// historical rows survive a product no longer offering that color.
 model Color {
   id        String   @id @default(cuid())
   name      String
@@ -267,13 +268,10 @@ model Color {
   updatedAt DateTime @updatedAt
 
   productOptions    ProductColorOption[]
-  inventoryItems    InventoryItem[]
   cartItems         CartItem[]
   orderItems        OrderItem[]
-  stockMovements    StockMovement[]
   stockRequestItems StockRequestItem[]
   stockReturnItems  StockReturnItem[]
-  variants          ProductVariant[]
 
   @@map("colors")
 }
@@ -378,14 +376,17 @@ model Product {
   @@map("products")
 }
 
+/// A variant's identity is product + phone model only — this is the sole
+/// dimension that determines the stock bucket (see InventoryItem). Color is
+/// never part of a variant: it lives independently on CartItem/OrderItem/
+/// StockRequestItem/StockReturnItem as a pure descriptive attribute the
+/// customer picks, unrelated to which variant's stock gets decremented.
 model ProductVariant {
   id           String     @id @default(cuid())
   productId    String
   product      Product    @relation(fields: [productId], references: [id])
   phoneModelId String
   phoneModel   PhoneModel @relation(fields: [phoneModelId], references: [id])
-  colorId      String?
-  color        Color?     @relation(fields: [colorId], references: [id])
   variantCode  String?    @unique
   isActive     Boolean    @default(true)
   sortOrder    Int        @default(0)
@@ -399,7 +400,7 @@ model ProductVariant {
   stockRequestItems StockRequestItem[]
   stockReturnItems  StockReturnItem[]
 
-  @@unique([productId, phoneModelId, colorId])
+  @@unique([productId, phoneModelId])
   @@unique([id, productId])
   @@index([productId, isActive])
   @@index([phoneModelId])
@@ -443,13 +444,21 @@ model Cart {
   @@map("carts")
 }
 
+/// colorId and variantId are independent, non-exclusive attributes of a
+/// line: colorId is purely descriptive (what the customer picked, never
+/// affects stock); variantId is the only thing that determines the stock
+/// bucket. A line can carry either, both, or neither. Uniqueness across the
+/// four null/non-null combinations of the two columns is enforced by four
+/// hand-authored partial unique indexes (not representable in schema.prisma
+/// — see the migration), so application code must use plain `where` filters
+/// here too, never the compound-key shorthand (same rule as documented in
+/// src/lib/inventory-transactions.ts).
 model CartItem {
   id        String          @id @default(cuid())
   cartId    String
   cart      Cart            @relation(fields: [cartId], references: [id], onDelete: Cascade)
   productId String
   product   Product         @relation(fields: [productId], references: [id])
-  /// Null for colorless products — see Color model doc comment.
   colorId   String?
   color     Color?          @relation(fields: [colorId], references: [id])
   variantId String?
@@ -458,7 +467,6 @@ model CartItem {
   createdAt DateTime        @default(now())
   updatedAt DateTime        @updatedAt
 
-  @@unique([cartId, productId, colorId, variantId])
   @@map("cart_items")
 }
 
@@ -528,22 +536,22 @@ model StockLocation {
 
 /// Current on-hand quantity of a product at a location. Derived data — the
 /// source of truth is the StockMovement ledger; this table is a maintained
-/// aggregate for fast reads.
+/// aggregate for fast reads. Deliberately has no colorId: the stock bucket
+/// is determined solely by product + variant (phone model), never color —
+/// color is a pure display attribute on CartItem/OrderItem/etc., not a
+/// stock dimension.
 model InventoryItem {
   id         String          @id @default(cuid())
   productId  String
   product    Product         @relation(fields: [productId], references: [id])
   locationId String
   location   StockLocation   @relation(fields: [locationId], references: [id])
-  /// Null for colorless products — see Color model doc comment.
-  colorId    String?
-  color      Color?          @relation(fields: [colorId], references: [id])
   variantId  String?
   variant    ProductVariant? @relation(fields: [variantId, productId], references: [id, productId])
   quantity   Int             @default(0)
   updatedAt  DateTime        @updatedAt
 
-  @@unique([productId, locationId, colorId, variantId])
+  @@unique([productId, locationId, variantId])
   @@map("inventory_items")
 }
 
@@ -559,9 +567,6 @@ model StockMovement {
   type              String
   productId         String
   product           Product                        @relation(fields: [productId], references: [id])
-  /// Null for colorless products — see Color model doc comment.
-  colorId           String?
-  color             Color?                         @relation(fields: [colorId], references: [id])
   variantId         String?
   variant           ProductVariant?                @relation(fields: [variantId, productId], references: [id, productId])
   allocationBatchId String?
@@ -658,9 +663,9 @@ model OrderItem {
   order               Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
   productId           String
   product             Product         @relation(fields: [productId], references: [id])
-  /// Null for colorless products — see Color model doc comment. Deliberately
-  /// no color-name snapshot, matching OrderItem's existing convention of
-  /// never snapshotting product name/SKU and always joining live.
+  /// Pure descriptive attribute — never affects which InventoryItem bucket
+  /// is decremented (see InventoryItem doc comment). colorNameSnapshot below
+  /// preserves the display name even if the color is later renamed/removed.
   colorId             String?
   color               Color?          @relation(fields: [colorId], references: [id])
   variantId           String?
@@ -809,7 +814,7 @@ model StockRequestItem {
   stockRequest      StockRequest    @relation(fields: [stockRequestId], references: [id], onDelete: Cascade)
   productId         String
   product           Product         @relation(fields: [productId], references: [id])
-  /// Null for colorless products — see Color model doc comment.
+  /// Pure descriptive attribute — see InventoryItem doc comment.
   colorId           String?
   color             Color?          @relation(fields: [colorId], references: [id])
   variantId         String?
@@ -843,7 +848,7 @@ model StockReturnItem {
   stockReturn   StockReturn     @relation(fields: [stockReturnId], references: [id], onDelete: Cascade)
   productId     String
   product       Product         @relation(fields: [productId], references: [id])
-  /// Null for colorless products — see Color model doc comment.
+  /// Pure descriptive attribute — see InventoryItem doc comment.
   colorId       String?
   color         Color?          @relation(fields: [colorId], references: [id])
   variantId     String?

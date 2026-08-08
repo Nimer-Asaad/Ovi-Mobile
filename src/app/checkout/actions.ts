@@ -65,8 +65,23 @@ export async function placeOrder(_prevState: CheckoutState, formData: FormData):
     if (item.product.variantMode === "PHONE_COMPATIBILITY" && (!item.variant || !item.variant.isActive || item.product.variantAllocationStatus !== "READY")) {
       return { error: `يرجى إعادة اختيار موديل ولون المنتج "${item.product.name}" قبل إتمام الطلب` };
     }
-    const availableStock = getAvailableStock(item.product, item.colorId, item.variantId);
-    if (item.quantity > availableStock) {
+  }
+
+  // Color no longer distinguishes a stock bucket, so two cart lines for the
+  // same product+variant but different colors draw from the same bucket —
+  // sum requested quantity per product+variant (ignoring color) before
+  // comparing against available stock, not line-by-line, so an oversell
+  // across colors is caught with one clear error up front rather than a
+  // confusing mid-transaction failure.
+  const requestedByVariant = new Map<string, number>();
+  for (const item of cart.items) {
+    const key = `${item.product.id}:${item.variantId ?? ""}`;
+    requestedByVariant.set(key, (requestedByVariant.get(key) ?? 0) + item.quantity);
+  }
+  for (const item of cart.items) {
+    const key = `${item.product.id}:${item.variantId ?? ""}`;
+    const availableStock = getAvailableStock(item.product, item.variantId);
+    if (requestedByVariant.get(key)! > availableStock) {
       return {
         error: `الكمية المطلوبة من "${item.product.name}" تتجاوز المخزون المتوفر (${availableStock})`,
       };
@@ -90,7 +105,7 @@ export async function placeOrder(_prevState: CheckoutState, formData: FormData):
       variantCodeSnapshot: item.variant?.variantCode ?? null,
       phoneBrandSnapshot: item.variant ? (item.variant.phoneModel.phoneBrand.nameAr ?? item.variant.phoneModel.phoneBrand.name) : null,
       phoneModelSnapshot: item.variant ? (item.variant.phoneModel.nameAr ?? item.variant.phoneModel.name) : null,
-      colorNameSnapshot: item.variant?.color ? (item.variant.color.nameAr ?? item.variant.color.name) : item.color ? (item.color.nameAr ?? item.color.name) : null,
+      colorNameSnapshot: item.color ? (item.color.nameAr ?? item.color.name) : null,
       quantity: item.quantity,
       unitPriceCents,
       totalCents: unitPriceCents * item.quantity,
@@ -162,14 +177,13 @@ export async function placeOrder(_prevState: CheckoutState, formData: FormData):
         for (const item of cart.items) {
           const change = await decrementInventoryAtomic(
             tx,
-            { productId: item.product.id, colorId: item.colorId, variantId: item.variantId, locationId: warehouse.id },
+            { productId: item.product.id, variantId: item.variantId, locationId: warehouse.id },
             item.quantity,
           );
 
           await recordStockMovement(tx, {
             type: STOCK_MOVEMENT_TYPES.SALE_OUT,
             productId: item.product.id,
-            colorId: item.colorId,
             variantId: item.variantId,
             fromLocationId: warehouse.id,
             toLocationId: null,

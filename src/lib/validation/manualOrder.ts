@@ -56,8 +56,8 @@ export const manualOrderSchema = z.object({
     .min(1, "يجب إضافة منتج واحد على الأقل")
     .max(50, "عدد كبير جداً من المنتجات في طلب واحد")
     .refine(
-      (items) => new Set(items.map((item) => `${item.productId}:${item.variantId ?? `legacy:${item.colorId ?? ""}`}`)).size === items.length,
-      { message: "لا يمكن تكرار نفس المنتج/اللون أكثر من مرة — عدّل الكمية بدلاً من ذلك" },
+      (items) => new Set(items.map((item) => `${item.productId}:${item.variantId ?? ""}:${item.colorId ?? ""}`)).size === items.length,
+      { message: "لا يمكن تكرار نفس المنتج بنفس الخيارات أكثر من مرة — عدّل الكمية بدلاً من ذلك" },
     ),
 });
 

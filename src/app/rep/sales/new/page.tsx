@@ -21,10 +21,8 @@ export default async function RepNewSalePage() {
           orderBy: { updatedAt: "desc" },
           select: {
             quantity: true,
-            colorId: true,
             variantId: true,
-            variant: { select: { id: true, color: { select: { name: true, nameAr: true } }, phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } } } },
-            color: { select: { id: true, name: true, nameAr: true, hexCode: true } },
+            variant: { select: { id: true, phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } } } },
             product: {
               select: {
                 id: true,
@@ -37,6 +35,10 @@ export default async function RepNewSalePage() {
                   select: { url: true, altText: true },
                   orderBy: [{ isMain: "desc" }, { sortOrder: "asc" }],
                   take: 1,
+                },
+                colorOptions: {
+                  select: { color: { select: { id: true, name: true, nameAr: true, hexCode: true } } },
+                  orderBy: { sortOrder: "asc" },
                 },
               },
             },
@@ -58,17 +60,18 @@ export default async function RepNewSalePage() {
       : Promise.resolve([]),
   ]);
 
-  // Group per-color rep-car InventoryItem rows into one option per product
-  // — a colorless product's stock lands in `repStock`, a colored product's
-  // in `colorOptions[].stock`. Only in-stock rows exist here (the query
-  // filters quantity > 0), unlike the stock-request page, since a rep can
-  // only sell what's physically in the car right now.
+  // Group rep-car InventoryItem rows into one option per product — a
+  // non-variant product's stock lands in `repStock`, a phone-variant
+  // product's per model in `variantOptions[].stock`. Only in-stock rows
+  // exist here (the query filters quantity > 0), unlike the stock-request
+  // page, since a rep can only sell what's physically in the car right now.
+  // `colorOptions` is independent of stock — it's the product's descriptive
+  // color pick-list (ProductColorOption), never a stock dimension.
   interface SaleColorOption {
     id: string;
     name: string;
     nameAr: string | null;
     hexCode: string | null;
-    stock: number;
   }
   interface SaleProductAccumulator {
     id: string;
@@ -95,19 +98,16 @@ export default async function RepNewSalePage() {
       thumbnailUrl: item.product.images[0]?.url ?? null,
       thumbnailAlt: item.product.images[0]?.altText ?? null,
       repStock: 0,
-      colorOptions: [],
+      colorOptions: item.product.colorOptions.map((option) => ({
+        id: option.color.id,
+        name: option.color.name,
+        nameAr: option.color.nameAr,
+        hexCode: option.color.hexCode,
+      })),
       variantOptions: [],
     };
     if (item.variantId && item.variant) {
-      existing.variantOptions.push({ id: item.variant.id, label: `${item.variant.phoneModel.phoneBrand.nameAr ?? item.variant.phoneModel.phoneBrand.name} / ${item.variant.phoneModel.nameAr ?? item.variant.phoneModel.name}${item.variant.color ? ` / ${item.variant.color.nameAr ?? item.variant.color.name}` : ""}`, stock: item.quantity });
-    } else if (item.colorId && item.color) {
-      existing.colorOptions.push({
-        id: item.color.id,
-        name: item.color.name,
-        nameAr: item.color.nameAr,
-        hexCode: item.color.hexCode,
-        stock: item.quantity,
-      });
+      existing.variantOptions.push({ id: item.variant.id, label: `${item.variant.phoneModel.phoneBrand.nameAr ?? item.variant.phoneModel.phoneBrand.name} / ${item.variant.phoneModel.nameAr ?? item.variant.phoneModel.name}`, stock: item.quantity });
     } else {
       existing.repStock = item.quantity;
     }

@@ -11,8 +11,9 @@ import { formatCurrencyFromCents } from "@/lib/utils";
 import { ProductThumb, ProductQuickPicker, type PickableProduct } from "@/components/reps/ProductQuickPicker";
 
 export interface SaleProductOption extends PickableProduct {
-  /** Rep-car stock for the colorless case only — a colored product's stock
-   * lives per-color on `colorOptions[].stock` instead. */
+  /** Rep-car stock for a non-variant product — a phone-variant product's
+   * stock lives per-model on `variantOptions[].stock` instead. Color never
+   * carries stock either way. */
   repStock: number;
   retailPriceCents: number;
 }
@@ -69,21 +70,18 @@ export function NewSaleForm({ products, customers }: NewSaleFormProps) {
   const [notes, setNotes] = useState("");
   const [customerPicked, setCustomerPicked] = useState(false);
 
-  // A colored product stays pickable until every one of its colors already
-  // has a line — only a colorless (or fully-used) product is excluded.
+  // Variant and color are independent axes now — a product stays pickable
+  // until every combination of its variants × colors already has a line
+  // (each defaulting to a single "none" slot when the product has no
+  // options on that axis).
   const excludeIds = useMemo(() => {
     const usedKeys = new Set(lines.map((line) => lineKey(line.productId, line.colorId, line.variantId)));
     const ids = new Set<string>();
     for (const product of products) {
-      if (product.variantOptions && product.variantOptions.length > 0) {
-        if (product.variantOptions.every((variant) => usedKeys.has(lineKey(product.id, null, variant.id)))) ids.add(product.id);
-      } else if (product.colorOptions && product.colorOptions.length > 0) {
-        if (product.colorOptions.every((color) => usedKeys.has(lineKey(product.id, color.id)))) {
-          ids.add(product.id);
-        }
-      } else if (usedKeys.has(lineKey(product.id, null))) {
-        ids.add(product.id);
-      }
+      const variantIds: (string | null)[] = product.variantOptions?.length ? product.variantOptions.map((variant) => variant.id) : [null];
+      const colorIds: (string | null)[] = product.colorOptions?.length ? product.colorOptions.map((color) => color.id) : [null];
+      const allUsed = variantIds.every((variantId) => colorIds.every((colorId) => usedKeys.has(lineKey(product.id, colorId, variantId))));
+      if (allUsed) ids.add(product.id);
     }
     return ids;
   }, [lines, products]);
@@ -91,18 +89,19 @@ export function NewSaleForm({ products, customers }: NewSaleFormProps) {
   function handleAddProduct(product: SaleProductOption, colorId: string | null, variantId: string | null) {
     const color = product.colorOptions?.find((option) => option.id === colorId) ?? null;
     const variant = product.variantOptions?.find((option) => option.id === variantId) ?? null;
+    const colorLabel = [variant?.label, color ? (color.nameAr ?? color.name) : null].filter(Boolean).join(" — ") || null;
     setLines((prev) => [
       ...prev,
       {
         productId: product.id,
         colorId,
         variantId,
-        colorLabel: variant?.label ?? (color ? (color.nameAr ?? color.name) : null),
+        colorLabel,
         sku: product.sku,
         label: product.nameAr ?? product.name,
         quantity: 1,
         unitPrice: centsToInputValue(product.retailPriceCents),
-        repStock: variant ? (variant.stock ?? 0) : color ? (color.stock ?? 0) : product.repStock,
+        repStock: variant ? (variant.stock ?? 0) : product.repStock,
         thumbnailUrl: product.thumbnailUrl,
         thumbnailAlt: product.thumbnailAlt,
       },

@@ -140,7 +140,7 @@ export async function createManualOrder(
   const productIds = parsed.data.items.map((item) => item.productId);
   const products = await prisma.product.findMany({
     where: { id: { in: productIds } },
-    select: { id: true, sku: true, isActive: true, name: true, nameAr: true, variantMode: true, colorOptions: { select: { colorId: true } }, variants: { where: { isActive: true }, select: { id: true, variantCode: true, color: { select: { name: true, nameAr: true } }, phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } } } } },
+    select: { id: true, sku: true, isActive: true, name: true, nameAr: true, variantMode: true, colorOptions: { select: { colorId: true, color: { select: { name: true, nameAr: true } } } }, variants: { where: { isActive: true }, select: { id: true, variantCode: true, phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } } } } },
   });
   const productById = new Map(products.map((product) => [product.id, product]));
 
@@ -163,14 +163,24 @@ export async function createManualOrder(
   const warehouse = await getMainWarehouse();
   const inventoryItems = await prisma.inventoryItem.findMany({
     where: { productId: { in: productIds }, locationId: warehouse.id },
-    select: { productId: true, colorId: true, variantId: true, quantity: true },
+    select: { productId: true, variantId: true, quantity: true },
   });
-  const stockByLineKey = new Map(inventoryItems.map((row) => [`${row.productId}:${row.variantId ?? `legacy:${row.colorId ?? ""}`}`, row.quantity]));
+  const stockByLineKey = new Map(inventoryItems.map((row) => [`${row.productId}:${row.variantId ?? ""}`, row.quantity]));
 
+  // Color no longer distinguishes a stock bucket, so two lines for the same
+  // product+variant but different colors draw from the same bucket — sum
+  // requested quantity per product+variant (ignoring color) before
+  // comparing against available stock.
+  const requestedByLineKey = new Map<string, number>();
+  for (const item of lines) {
+    const key = `${item.productId}:${item.variantId ?? ""}`;
+    requestedByLineKey.set(key, (requestedByLineKey.get(key) ?? 0) + item.quantity);
+  }
   for (const item of lines) {
     const product = productById.get(item.productId)!;
-    const available = stockByLineKey.get(`${item.productId}:${item.variantId ?? `legacy:${item.colorId ?? ""}`}`) ?? 0;
-    if (item.quantity > available) {
+    const key = `${item.productId}:${item.variantId ?? ""}`;
+    const available = stockByLineKey.get(key) ?? 0;
+    if (requestedByLineKey.get(key)! > available) {
       return {
         error: `الكمية المطلوبة من "${product.nameAr ?? product.name}" تتجاوز المخزون المتوفر (${available})`,
       };
@@ -189,7 +199,7 @@ export async function createManualOrder(
     variantCodeSnapshot: productById.get(item.productId)?.variants.find((variant) => variant.id === item.variantId)?.variantCode ?? null,
     phoneBrandSnapshot: (() => { const variant = productById.get(item.productId)?.variants.find((row) => row.id === item.variantId); return variant ? (variant.phoneModel.phoneBrand.nameAr ?? variant.phoneModel.phoneBrand.name) : null; })(),
     phoneModelSnapshot: (() => { const variant = productById.get(item.productId)?.variants.find((row) => row.id === item.variantId); return variant ? (variant.phoneModel.nameAr ?? variant.phoneModel.name) : null; })(),
-    colorNameSnapshot: (() => { const variant = productById.get(item.productId)?.variants.find((row) => row.id === item.variantId); return variant?.color ? (variant.color.nameAr ?? variant.color.name) : null; })(),
+    colorNameSnapshot: (() => { const option = productById.get(item.productId)?.colorOptions.find((row) => row.colorId === item.colorId); return option?.color ? (option.color.nameAr ?? option.color.name) : null; })(),
     quantity: item.quantity,
     unitPriceCents: item.unitPriceCents,
     totalCents: item.unitPriceCents * item.quantity,
@@ -284,14 +294,13 @@ export async function createManualOrder(
         for (const item of lines) {
           const change = await decrementInventoryAtomic(
             tx,
-            { productId: item.productId, colorId: item.colorId, variantId: item.variantId, locationId: warehouse.id },
+            { productId: item.productId, variantId: item.variantId, locationId: warehouse.id },
             item.quantity,
           );
 
           await recordStockMovement(tx, {
             type: STOCK_MOVEMENT_TYPES.SALE_OUT,
             productId: item.productId,
-            colorId: item.colorId,
             variantId: item.variantId,
             fromLocationId: warehouse.id,
             toLocationId: null,

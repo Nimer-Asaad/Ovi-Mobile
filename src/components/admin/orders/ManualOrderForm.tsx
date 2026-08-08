@@ -37,7 +37,6 @@ export interface ManualOrderColorOption {
   name: string;
   nameAr: string | null;
   hexCode: string | null;
-  stock: number;
 }
 
 export interface ManualOrderProductOption {
@@ -183,18 +182,19 @@ export function ManualOrderForm({
     const unitPriceCents = priceMode === "wholesale" ? product.wholesalePriceCents : product.retailPriceCents;
     const color = product.colorOptions?.find((option) => option.id === colorId) ?? null;
     const variant = product.variantOptions?.find((option) => option.id === variantId) ?? null;
+    const colorLabel = [variant?.label, color ? (color.nameAr ?? color.name) : null].filter(Boolean).join(" — ") || null;
     setLines((prev) => [
       ...prev,
       {
         productId: product.id,
         colorId,
         variantId,
-        colorLabel: variant?.label ?? (color ? (color.nameAr ?? color.name) : null),
+        colorLabel,
         sku: product.sku,
         label: product.nameAr ?? product.name,
         unitPriceCents,
         quantity: 1,
-        stock: variant ? variant.stock : color ? color.stock : product.stock,
+        stock: variant ? variant.stock : product.stock,
       },
     ]);
   }

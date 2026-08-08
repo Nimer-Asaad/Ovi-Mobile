@@ -7,7 +7,6 @@ export interface ColorSwatchOption {
   name: string;
   nameAr: string | null;
   hexCode: string | null;
-  stock: number;
 }
 
 interface ColorSwatchSelectorProps {
@@ -17,8 +16,8 @@ interface ColorSwatchSelectorProps {
 }
 
 /** Color picker for a product page — only rendered when the product has
- * color options (see ProductPurchasePanel). Out-of-stock colors are still
- * shown (so a shopper can see what exists) but not selectable. */
+ * color options (see ProductPurchasePanel). Purely a preference pick — color
+ * never affects stock/availability, so every option is always selectable. */
 export function ColorSwatchSelector({ colors, selectedColorId, onSelect }: ColorSwatchSelectorProps) {
   return (
     <div className="flex flex-col gap-2">
@@ -26,12 +25,10 @@ export function ColorSwatchSelector({ colors, selectedColorId, onSelect }: Color
       <div className="flex flex-wrap gap-2">
         {colors.map((color) => {
           const isSelected = color.id === selectedColorId;
-          const outOfStock = color.stock <= 0;
           return (
             <button
               key={color.id}
               type="button"
-              disabled={outOfStock}
               onClick={() => onSelect(color.id)}
               title={color.nameAr ?? color.name}
               className={cn(
@@ -39,7 +36,6 @@ export function ColorSwatchSelector({ colors, selectedColorId, onSelect }: Color
                 isSelected
                   ? "border-gold-champagne bg-gold-champagne/15 text-gold-light"
                   : "border-navy-soft text-neutral-bg/80 hover:border-gold-champagne/40",
-                outOfStock && "cursor-not-allowed opacity-40",
               )}
             >
               {color.hexCode && (
@@ -50,7 +46,6 @@ export function ColorSwatchSelector({ colors, selectedColorId, onSelect }: Color
                 />
               )}
               {color.nameAr ?? color.name}
-              {outOfStock && <span className="text-xs text-neutral-bg/50">(نفذ)</span>}
             </button>
           );
         })}

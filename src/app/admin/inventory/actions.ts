@@ -46,7 +46,6 @@ export async function createStockMovement(
 
   const parsed = stockAdjustmentSchema.safeParse({
     productId: formData.get("productId")?.toString() ?? "",
-    colorId: formData.get("colorId")?.toString() || undefined,
     movementType: formData.get("movementType")?.toString() ?? "",
     quantity: formData.get("quantity")?.toString() ?? "",
     notes: formData.get("notes")?.toString().trim() || undefined,
@@ -57,11 +56,10 @@ export async function createStockMovement(
   }
 
   const { productId, movementType, quantity, notes } = parsed.data;
-  const colorId = parsed.data.colorId ?? null;
 
   const product = await prisma.product.findUnique({
     where: { id: productId },
-    select: { id: true, isActive: true, variantMode: true, colorOptions: { select: { colorId: true } } },
+    select: { id: true, isActive: true, variantMode: true },
   });
   if (!product) {
     return { error: "المنتج غير موجود" };
@@ -70,16 +68,13 @@ export async function createStockMovement(
     return { error: "لا يمكن تعديل مخزون منتج غير مفعل" };
   }
   if (product.variantMode === "PHONE_COMPATIBILITY") return { error: "مخزون هذا المنتج يُدار من شاشة الـVariants والتوزيع اليدوي" };
-  if (colorId && !product.colorOptions.some((option) => option.colorId === colorId)) {
-    return { error: "اللون المحدد لا ينتمي لهذا المنتج" };
-  }
 
   if (movementType !== MANUAL_STOCK_MOVEMENT_TYPES.ADJUSTMENT && quantity <= 0) {
     return { error: POSITIVE_QUANTITY_MESSAGE };
   }
 
   const warehouse = await getMainWarehouse();
-  const key = { productId, colorId, locationId: warehouse.id };
+  const key = { productId, locationId: warehouse.id };
 
   try {
     await prisma.$transaction(async (tx) => {
@@ -96,7 +91,6 @@ export async function createStockMovement(
         await recordStockMovement(tx, {
           type: movementType,
           productId,
-          colorId,
           quantity: Math.abs(change.newQuantity - change.previousQuantity),
           previousQuantity: change.previousQuantity,
           newQuantity: change.newQuantity,
@@ -123,7 +117,6 @@ export async function createStockMovement(
       await recordStockMovement(tx, {
         type: movementType,
         productId,
-        colorId,
         quantity,
         previousQuantity: change.previousQuantity,
         newQuantity: change.newQuantity,

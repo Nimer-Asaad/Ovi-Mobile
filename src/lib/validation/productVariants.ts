@@ -3,7 +3,6 @@ import { z } from "zod";
 export const variantRowSchema = z.object({
   id: z.string().optional(),
   phoneModelId: z.string().min(1),
-  colorId: z.string().nullable().optional(),
   variantCode: z.string().trim().max(80).nullable().optional(),
   isActive: z.boolean(),
 });

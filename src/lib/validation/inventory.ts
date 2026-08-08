@@ -13,11 +13,12 @@ const nonNegativeIntString = z
   })
   .transform((v) => Number(v));
 
+/** A manual product-level stock adjustment has no customer/order context, so
+ * it has no colorId — see repStockTransferSchema for the same reasoning.
+ * PHONE_COMPATIBILITY products are excluded entirely (see actions.ts) and
+ * managed through the variant manager instead. */
 export const stockAdjustmentSchema = z.object({
   productId: z.string().min(1, "المنتج مطلوب"),
-  /** Empty string (no color picked) normalizes to undefined — a colorless
-   * adjustment. */
-  colorId: z.string().min(1).optional(),
   movementType: manualMovementTypeSchema,
   quantity: nonNegativeIntString,
   notes: z.string().max(500, "الملاحظات طويلة جداً").optional(),

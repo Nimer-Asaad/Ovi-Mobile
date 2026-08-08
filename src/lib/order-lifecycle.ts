@@ -51,7 +51,7 @@ const ORDER_SELECT = {
   source: true,
   stockLocationId: true,
   inventoryRestoredAt: true,
-  items: { select: { productId: true, colorId: true, variantId: true, quantity: true } },
+  items: { select: { productId: true, variantId: true, quantity: true } },
   inventoryCompensation: { select: { id: true, type: true } },
 } satisfies Prisma.OrderSelect;
 
@@ -152,7 +152,7 @@ export async function transitionOrderStatus(
               try {
                 change = await incrementInventoryExisting(
                   tx,
-                  { productId: item.productId, colorId: item.colorId, variantId: item.variantId, locationId: order.stockLocationId },
+                  { productId: item.productId, variantId: item.variantId, locationId: order.stockLocationId },
                   item.quantity,
                 );
               } catch (err) {
@@ -168,7 +168,6 @@ export async function transitionOrderStatus(
               await recordStockMovement(tx, {
                 type: movementType,
                 productId: item.productId,
-                colorId: item.colorId,
                 variantId: item.variantId,
                 fromLocationId: null,
                 toLocationId: order.stockLocationId,

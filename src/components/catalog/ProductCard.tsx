@@ -72,7 +72,10 @@ export function ProductCard({ product, cartEligibility = "ineligible" }: Product
               className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.035] group-focus-within:scale-[1.035]"
             />
           ) : requiresOptions ? (
-            <Link href={`/products/${encodeURIComponent(product.sku)}`} className="block min-h-10 rounded-card border border-gold-champagne/45 px-3 py-2 text-center text-sm font-semibold text-gold-dark">اختر الماركة والموديل واللون</Link>
+            // Not a nested <Link> — this already sits inside the card's
+            // outer <Link> (invalid HTML, breaks hydration), and the whole
+            // card is already clickable to the same destination.
+            <span className="block min-h-10 rounded-card border border-gold-champagne/45 px-3 py-2 text-center text-sm font-semibold text-gold-dark">اختر الماركة والموديل واللون</span>
           ) : (
             <ProductImagePlaceholder className="h-full w-full" />
           )}

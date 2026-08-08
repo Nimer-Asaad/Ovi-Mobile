@@ -25,25 +25,20 @@ export default async function NewRepStockRequestPage() {
         orderBy: [{ isMain: "desc" }, { sortOrder: "asc" }],
         take: 1,
       },
-      colorOptions: {
-        select: { color: { select: { id: true, name: true, nameAr: true, hexCode: true } } },
-        orderBy: { sortOrder: "asc" },
-      },
-      variants: { where: { isActive: true }, select: { id: true, color: { select: { name: true, nameAr: true } }, phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } } } },
+      variants: { where: { isActive: true }, select: { id: true, phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } } } },
       variantMode: true,
       variantAllocationStatus: true,
     },
   });
 
+  // No customer/order context here — a stock request has no color at all
+  // (see repStockTransferSchema for the same reasoning), only variantId.
   const productIds = products.map((product) => product.id);
   const warehouseInventory = await prisma.inventoryItem.findMany({
-    where: { productId: { in: productIds }, locationId: warehouse.id },
-    select: { productId: true, colorId: true, variantId: true, quantity: true },
+    where: { productId: { in: productIds }, locationId: warehouse.id, variantId: { not: null } },
+    select: { variantId: true, quantity: true },
   });
-  const warehouseStockByKey = new Map(
-    warehouseInventory.map((item) => [`${item.productId}:${item.colorId}`, item.quantity]),
-  );
-  const warehouseVariantStock = new Map(warehouseInventory.filter((item) => item.variantId).map((item) => [item.variantId as string, item.quantity]));
+  const warehouseVariantStock = new Map(warehouseInventory.map((item) => [item.variantId as string, item.quantity]));
 
   const options = products.map((product) => ({
     id: product.id,
@@ -54,14 +49,7 @@ export default async function NewRepStockRequestPage() {
     brandLabel: product.brand?.name ?? null,
     thumbnailUrl: product.images[0]?.url ?? null,
     thumbnailAlt: product.images[0]?.altText ?? null,
-    colorOptions: product.colorOptions.map((option) => ({
-      id: option.color.id,
-      name: option.color.name,
-      nameAr: option.color.nameAr,
-      hexCode: option.color.hexCode,
-      stock: warehouseStockByKey.get(`${product.id}:${option.color.id}`) ?? 0,
-    })),
-    variantOptions: product.variantMode === "PHONE_COMPATIBILITY" && product.variantAllocationStatus === "READY" ? product.variants.map((variant) => ({ id: variant.id, label: `${variant.phoneModel.phoneBrand.nameAr ?? variant.phoneModel.phoneBrand.name} / ${variant.phoneModel.nameAr ?? variant.phoneModel.name}${variant.color ? ` / ${variant.color.nameAr ?? variant.color.name}` : ""}`, stock: warehouseVariantStock.get(variant.id) ?? 0 })) : [],
+    variantOptions: product.variantMode === "PHONE_COMPATIBILITY" && product.variantAllocationStatus === "READY" ? product.variants.map((variant) => ({ id: variant.id, label: `${variant.phoneModel.phoneBrand.nameAr ?? variant.phoneModel.phoneBrand.name} / ${variant.phoneModel.nameAr ?? variant.phoneModel.name}`, stock: warehouseVariantStock.get(variant.id) ?? 0 })) : [],
   }));
 
   return (

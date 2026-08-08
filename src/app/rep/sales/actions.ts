@@ -80,19 +80,29 @@ export async function createRepSale(_prevState: RepSaleState, formData: FormData
   const productIds = saleItems.map((item) => item.productId);
   const products = await prisma.product.findMany({
     where: { id: { in: productIds } },
-    select: { id: true, sku: true, isActive: true, name: true, nameAr: true, variantMode: true, colorOptions: { select: { colorId: true } }, variants: { where: { isActive: true }, select: { id: true, variantCode: true, color: { select: { name: true, nameAr: true } }, phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } } } } },
+    select: { id: true, sku: true, isActive: true, name: true, nameAr: true, variantMode: true, colorOptions: { select: { colorId: true, color: { select: { name: true, nameAr: true } } } }, variants: { where: { isActive: true }, select: { id: true, variantCode: true, phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } } } } },
   });
   const productById = new Map(products.map((product) => [product.id, product]));
 
   const inventoryItems = await prisma.inventoryItem.findMany({
     where: { locationId, productId: { in: productIds } },
-    select: { productId: true, colorId: true, variantId: true, quantity: true },
+    select: { productId: true, variantId: true, quantity: true },
   });
   const stockByLineKey = new Map(
-    inventoryItems.map((item) => [`${item.productId}:${item.variantId ?? `legacy:${item.colorId ?? ""}`}`, item.quantity]),
+    inventoryItems.map((item) => [`${item.productId}:${item.variantId ?? ""}`, item.quantity]),
   );
 
   const lines = saleItems.map((item) => ({ ...item, colorId: item.colorId ?? null, variantId: item.variantId ?? null }));
+
+  // Color no longer distinguishes a stock bucket, so two lines for the same
+  // product+variant but different colors draw from the same bucket — sum
+  // requested quantity per product+variant (ignoring color) before
+  // comparing against available stock.
+  const requestedByLineKey = new Map<string, number>();
+  for (const item of lines) {
+    const key = `${item.productId}:${item.variantId ?? ""}`;
+    requestedByLineKey.set(key, (requestedByLineKey.get(key) ?? 0) + item.quantity);
+  }
 
   for (const item of lines) {
     const product = productById.get(item.productId);
@@ -107,11 +117,12 @@ export async function createRepSale(_prevState: RepSaleState, formData: FormData
     }
     if (product.variantMode === "PHONE_COMPATIBILITY" && (!item.variantId || !product.variants.some((variant) => variant.id === item.variantId))) return { error: `اختر Variant صالحاً للمنتج "${product.nameAr ?? product.name}"` };
     if (product.variantMode !== "PHONE_COMPATIBILITY" && item.variantId) return { error: "Variant لا يتبع المنتج المحدد" };
-    const available = stockByLineKey.get(`${item.productId}:${item.variantId ?? `legacy:${item.colorId ?? ""}`}`) ?? 0;
+    const key = `${item.productId}:${item.variantId ?? ""}`;
+    const available = stockByLineKey.get(key) ?? 0;
     if (available <= 0) {
       return { error: `المنتج "${product.nameAr ?? product.name}" غير موجود في مخزونك` };
     }
-    if (item.quantity > available) {
+    if (requestedByLineKey.get(key)! > available) {
       return { error: `الكمية المطلوبة لـ "${product.nameAr ?? product.name}" أكبر من مخزونك الحالي` };
     }
   }
@@ -158,7 +169,7 @@ export async function createRepSale(_prevState: RepSaleState, formData: FormData
                 variantCodeSnapshot: productById.get(item.productId)?.variants.find((variant) => variant.id === item.variantId)?.variantCode ?? null,
                 phoneBrandSnapshot: (() => { const variant = productById.get(item.productId)?.variants.find((row) => row.id === item.variantId); return variant ? (variant.phoneModel.phoneBrand.nameAr ?? variant.phoneModel.phoneBrand.name) : null; })(),
                 phoneModelSnapshot: (() => { const variant = productById.get(item.productId)?.variants.find((row) => row.id === item.variantId); return variant ? (variant.phoneModel.nameAr ?? variant.phoneModel.name) : null; })(),
-                colorNameSnapshot: (() => { const variant = productById.get(item.productId)?.variants.find((row) => row.id === item.variantId); return variant?.color ? (variant.color.nameAr ?? variant.color.name) : null; })(),
+                colorNameSnapshot: (() => { const option = productById.get(item.productId)?.colorOptions.find((row) => row.colorId === item.colorId); return option?.color ? (option.color.nameAr ?? option.color.name) : null; })(),
                 quantity: item.quantity,
                 unitPriceCents: item.unitPriceCents,
                 totalCents: item.unitPriceCents * item.quantity,
@@ -174,14 +185,13 @@ export async function createRepSale(_prevState: RepSaleState, formData: FormData
         for (const item of lines) {
           const change = await decrementInventoryAtomic(
             tx,
-            { productId: item.productId, colorId: item.colorId, variantId: item.variantId, locationId },
+            { productId: item.productId, variantId: item.variantId, locationId },
             item.quantity,
           );
 
           await recordStockMovement(tx, {
             type: STOCK_MOVEMENT_TYPES.SALE_OUT,
             productId: item.productId,
-            colorId: item.colorId,
             variantId: item.variantId,
             fromLocationId: locationId,
             toLocationId: null,

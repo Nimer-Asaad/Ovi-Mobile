@@ -124,10 +124,10 @@ export function InvoiceView({ order }: { order: InvoiceData }) {
               <tr key={item.id}>
                 <td className="py-2 text-neutral-900">
                   {item.product.nameAr ?? item.product.name}
-                  {item.color && (
-                    <span className="text-neutral-500"> — {item.color.nameAr ?? item.color.name}</span>
+                  {(item.color || item.colorNameSnapshot) && (
+                    <span className="text-neutral-500"> — {item.color ? (item.color.nameAr ?? item.color.name) : item.colorNameSnapshot}</span>
                   )}
-                  {item.phoneModelSnapshot && <span className="text-neutral-500"> — {item.phoneBrandSnapshot} / {item.phoneModelSnapshot}{item.colorNameSnapshot ? ` / ${item.colorNameSnapshot}` : ""}{item.variantCodeSnapshot ? ` (${item.variantCodeSnapshot})` : ""}</span>}
+                  {item.phoneModelSnapshot && <span className="text-neutral-500"> — {item.phoneBrandSnapshot} / {item.phoneModelSnapshot}{item.variantCodeSnapshot ? ` (${item.variantCodeSnapshot})` : ""}</span>}
                 </td>
                 <td className="py-2 text-neutral-500">{item.product.sku}</td>
                 <td className="py-2 text-neutral-700">{item.quantity}</td>

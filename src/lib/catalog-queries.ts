@@ -88,9 +88,9 @@ export const PUBLIC_PRODUCT_DETAIL_SELECT = {
   },
   /* Only Main Warehouse stock is shown/purchasable here — rep-assigned
    * stock is tracked separately and isn't part of public availability.
-   * colorId is included so per-color stock can be resolved (see
-   * getAvailableStock in src/lib/cart.ts). */
-  inventoryItems: { where: { location: { isDefault: true } }, select: { quantity: true, colorId: true, variantId: true } },
+   * Deliberately no colorId: stock is resolved by variantId only (see
+   * getAvailableStock in src/lib/cart.ts) — color never affects stock. */
+  inventoryItems: { where: { location: { isDefault: true } }, select: { quantity: true, variantId: true } },
   colorOptions: {
     select: { color: { select: { id: true, name: true, nameAr: true, hexCode: true } } },
     orderBy: { sortOrder: "asc" },
@@ -100,7 +100,6 @@ export const PUBLIC_PRODUCT_DETAIL_SELECT = {
     select: {
       id: true,
       variantCode: true,
-      color: { select: { id: true, name: true, nameAr: true, hexCode: true } },
       phoneModel: { select: { id: true, name: true, nameAr: true, phoneBrand: { select: { id: true, name: true, nameAr: true } } } },
       inventoryItems: { where: { location: { isDefault: true } }, select: { quantity: true } },
     },
@@ -130,9 +129,9 @@ export const MERCHANT_PRODUCT_DETAIL_SELECT = {
   },
   /* Only Main Warehouse stock is shown/purchasable here — rep-assigned
    * stock is tracked separately and isn't part of public availability.
-   * colorId is included so per-color stock can be resolved (see
-   * getAvailableStock in src/lib/cart.ts). */
-  inventoryItems: { where: { location: { isDefault: true } }, select: { quantity: true, colorId: true, variantId: true } },
+   * Deliberately no colorId: stock is resolved by variantId only (see
+   * getAvailableStock in src/lib/cart.ts) — color never affects stock. */
+  inventoryItems: { where: { location: { isDefault: true } }, select: { quantity: true, variantId: true } },
   colorOptions: {
     select: { color: { select: { id: true, name: true, nameAr: true, hexCode: true } } },
     orderBy: { sortOrder: "asc" },
@@ -142,7 +141,6 @@ export const MERCHANT_PRODUCT_DETAIL_SELECT = {
     select: {
       id: true,
       variantCode: true,
-      color: { select: { id: true, name: true, nameAr: true, hexCode: true } },
       phoneModel: { select: { id: true, name: true, nameAr: true, phoneBrand: { select: { id: true, name: true, nameAr: true } } } },
       inventoryItems: { where: { location: { isDefault: true } }, select: { quantity: true } },
     },

@@ -10,7 +10,7 @@ import { ProductInfoTabs } from "@/components/catalog/ProductInfoTabs";
 import { ProductViewTracker } from "@/components/catalog/ProductViewTracker";
 import { WishlistButton } from "@/components/wishlist/WishlistButton";
 import { getSession } from "@/lib/auth/session";
-import { getCartEligibility, getAvailableStock } from "@/lib/cart";
+import { getCartEligibility } from "@/lib/cart";
 import { isProductWishlisted } from "@/lib/wishlist";
 import {
   getPriceModeForUser,
@@ -64,12 +64,13 @@ export default async function ProductDetailPage({ params }: ProductDetailPagePro
   if (!product) notFound();
 
   const legacyTotalStock = product.inventoryItems.filter((item) => !item.variantId).reduce((sum, item) => sum + item.quantity, 0);
+  // Colors carry no stock — they're a pure preference pick-list, never a
+  // stock dimension (see the InventoryItem doc comment in schema.prisma).
   const colorOptions = product.colorOptions.map((option) => ({
     id: option.color.id,
     name: option.color.name,
     nameAr: option.color.nameAr,
     hexCode: option.color.hexCode,
-    stock: getAvailableStock(product, option.color.id),
   }));
   const variants = product.variants.map((variant) => ({
     id: variant.id,
@@ -77,7 +78,6 @@ export default async function ProductDetailPage({ params }: ProductDetailPagePro
     stock: variant.inventoryItems.reduce((sum, item) => sum + item.quantity, 0),
     brand: variant.phoneModel.phoneBrand,
     model: { id: variant.phoneModel.id, name: variant.phoneModel.name, nameAr: variant.phoneModel.nameAr },
-    color: variant.color,
   }));
   const totalStock = product.variantMode === "PHONE_COMPATIBILITY"
     ? product.variantAllocationStatus === "READY" ? variants.reduce((sum, variant) => sum + variant.stock, 0) : 0

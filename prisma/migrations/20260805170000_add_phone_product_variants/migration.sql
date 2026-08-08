@@ -51,11 +51,13 @@ ALTER TABLE "products" ADD CONSTRAINT "products_variantMode_check"
 ALTER TABLE "products" ADD CONSTRAINT "products_variantAllocationStatus_check"
   CHECK ("variantAllocationStatus" IN ('NOT_REQUIRED', 'PENDING', 'READY'));
 
+-- product_variants identity is product + phone model ONLY. Color is
+-- deliberately not part of a variant: it never determines the stock
+-- bucket, it's purely descriptive on cart/order/request/return lines.
 CREATE TABLE "product_variants" (
     "id" TEXT NOT NULL,
     "productId" TEXT NOT NULL,
     "phoneModelId" TEXT NOT NULL,
-    "colorId" TEXT,
     "variantCode" TEXT,
     "isActive" BOOLEAN NOT NULL DEFAULT true,
     "sortOrder" INTEGER NOT NULL DEFAULT 0,
@@ -65,19 +67,15 @@ CREATE TABLE "product_variants" (
 );
 
 CREATE UNIQUE INDEX "product_variants_variantCode_key" ON "product_variants"("variantCode");
-CREATE UNIQUE INDEX "product_variants_productId_phoneModelId_colorId_key"
-  ON "product_variants"("productId", "phoneModelId", "colorId");
+CREATE UNIQUE INDEX "product_variants_productId_phoneModelId_key"
+  ON "product_variants"("productId", "phoneModelId");
 CREATE UNIQUE INDEX "product_variants_id_productId_key" ON "product_variants"("id", "productId");
 CREATE INDEX "product_variants_productId_isActive_idx" ON "product_variants"("productId", "isActive");
 CREATE INDEX "product_variants_phoneModelId_idx" ON "product_variants"("phoneModelId");
-CREATE UNIQUE INDEX "product_variants_productId_phoneModelId_null_color_key"
-  ON "product_variants"("productId", "phoneModelId") WHERE "colorId" IS NULL;
 ALTER TABLE "product_variants" ADD CONSTRAINT "product_variants_productId_fkey"
   FOREIGN KEY ("productId") REFERENCES "products"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 ALTER TABLE "product_variants" ADD CONSTRAINT "product_variants_phoneModelId_fkey"
   FOREIGN KEY ("phoneModelId") REFERENCES "phone_models"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
-ALTER TABLE "product_variants" ADD CONSTRAINT "product_variants_colorId_fkey"
-  FOREIGN KEY ("colorId") REFERENCES "colors"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 CREATE TABLE "product_variant_allocation_batches" (
     "id" TEXT NOT NULL,
@@ -136,10 +134,16 @@ ALTER TABLE "stock_movements" ADD CONSTRAINT "stock_movements_allocationBatchId_
 
 -- Preflight: fail before replacing the old indexes if any target uniqueness
 -- namespace already contains duplicates. No rows are changed by this block.
+-- cart_items: colorId and variantId are independent, non-exclusive
+-- attributes now, so uniqueness must cover all four null/non-null
+-- combinations of the two columns separately.
 DO $$
 BEGIN
   IF EXISTS (
-    SELECT 1 FROM "cart_items" WHERE "variantId" IS NOT NULL
+    SELECT 1 FROM "cart_items" WHERE "variantId" IS NOT NULL AND "colorId" IS NOT NULL
+    GROUP BY "cartId", "productId", "variantId", "colorId" HAVING COUNT(*) > 1
+  ) OR EXISTS (
+    SELECT 1 FROM "cart_items" WHERE "variantId" IS NOT NULL AND "colorId" IS NULL
     GROUP BY "cartId", "productId", "variantId" HAVING COUNT(*) > 1
   ) OR EXISTS (
     SELECT 1 FROM "cart_items" WHERE "variantId" IS NULL AND "colorId" IS NOT NULL
@@ -147,42 +151,38 @@ BEGIN
   ) OR EXISTS (
     SELECT 1 FROM "cart_items" WHERE "variantId" IS NULL AND "colorId" IS NULL
     GROUP BY "cartId", "productId" HAVING COUNT(*) > 1
-  ) THEN RAISE EXCEPTION 'cart_items contains duplicates for variant-aware uniqueness'; END IF;
+  ) THEN RAISE EXCEPTION 'cart_items contains duplicates for variant/color-aware uniqueness'; END IF;
 
   IF EXISTS (
     SELECT 1 FROM "inventory_items" WHERE "variantId" IS NOT NULL
     GROUP BY "variantId", "locationId" HAVING COUNT(*) > 1
   ) OR EXISTS (
-    SELECT 1 FROM "inventory_items" WHERE "variantId" IS NULL AND "colorId" IS NOT NULL
-    GROUP BY "productId", "locationId", "colorId" HAVING COUNT(*) > 1
-  ) OR EXISTS (
-    SELECT 1 FROM "inventory_items" WHERE "variantId" IS NULL AND "colorId" IS NULL
+    SELECT 1 FROM "inventory_items" WHERE "variantId" IS NULL
     GROUP BY "productId", "locationId" HAVING COUNT(*) > 1
   ) THEN RAISE EXCEPTION 'inventory_items contains duplicates for variant-aware uniqueness'; END IF;
 END $$;
 
 DROP INDEX "cart_items_cartId_productId_colorId_key";
 DROP INDEX "cart_items_cartId_productId_null_color_key";
+-- Four partial indexes cover every combination of the two independent
+-- nullable columns — see the CartItem doc comment in schema.prisma.
+CREATE UNIQUE INDEX "cart_items_cart_product_variant_color_key"
+  ON "cart_items"("cartId", "productId", "variantId", "colorId") WHERE "variantId" IS NOT NULL AND "colorId" IS NOT NULL;
 CREATE UNIQUE INDEX "cart_items_cart_product_variant_key"
-  ON "cart_items"("cartId", "productId", "variantId") WHERE "variantId" IS NOT NULL;
-CREATE UNIQUE INDEX "cart_items_cart_product_legacy_color_key"
+  ON "cart_items"("cartId", "productId", "variantId") WHERE "variantId" IS NOT NULL AND "colorId" IS NULL;
+CREATE UNIQUE INDEX "cart_items_cart_product_color_key"
   ON "cart_items"("cartId", "productId", "colorId") WHERE "variantId" IS NULL AND "colorId" IS NOT NULL;
 CREATE UNIQUE INDEX "cart_items_cart_product_plain_key"
   ON "cart_items"("cartId", "productId") WHERE "variantId" IS NULL AND "colorId" IS NULL;
 
-DROP INDEX "inventory_items_productId_locationId_colorId_key";
-DROP INDEX "inventory_items_productId_locationId_null_color_key";
+-- inventory_items never had a colorId column (see migration
+-- 20260805130000) — the stock bucket is variant-or-plain only, a simple
+-- two-tier partial-unique scheme.
+DROP INDEX "inventory_items_productId_locationId_key";
 CREATE UNIQUE INDEX "inventory_items_variant_location_key"
   ON "inventory_items"("variantId", "locationId") WHERE "variantId" IS NOT NULL;
-CREATE UNIQUE INDEX "inventory_items_product_location_legacy_color_key"
-  ON "inventory_items"("productId", "locationId", "colorId") WHERE "variantId" IS NULL AND "colorId" IS NOT NULL;
 CREATE UNIQUE INDEX "inventory_items_product_location_plain_key"
-  ON "inventory_items"("productId", "locationId") WHERE "variantId" IS NULL AND "colorId" IS NULL;
-
-CREATE UNIQUE INDEX "cart_items_cartId_productId_colorId_variantId_key"
-  ON "cart_items"("cartId", "productId", "colorId", "variantId");
-CREATE UNIQUE INDEX "inventory_items_productId_locationId_colorId_variantId_key"
-  ON "inventory_items"("productId", "locationId", "colorId", "variantId");
+  ON "inventory_items"("productId", "locationId") WHERE "variantId" IS NULL;
 
 CREATE INDEX "order_items_variantId_idx" ON "order_items"("variantId");
 CREATE INDEX "stock_movements_variantId_idx" ON "stock_movements"("variantId");
@@ -190,18 +190,11 @@ CREATE INDEX "stock_movements_allocationBatchId_idx" ON "stock_movements"("alloc
 CREATE INDEX "stock_request_items_variantId_idx" ON "stock_request_items"("variantId");
 CREATE INDEX "stock_return_items_variantId_idx" ON "stock_return_items"("variantId");
 
-ALTER TABLE "inventory_items" ADD CONSTRAINT "inventory_variant_excludes_legacy_color"
-  CHECK ("variantId" IS NULL OR "colorId" IS NULL);
-ALTER TABLE "cart_items" ADD CONSTRAINT "cart_variant_excludes_legacy_color"
-  CHECK ("variantId" IS NULL OR "colorId" IS NULL);
-ALTER TABLE "order_items" ADD CONSTRAINT "order_variant_excludes_legacy_color"
-  CHECK ("variantId" IS NULL OR "colorId" IS NULL);
-ALTER TABLE "stock_movements" ADD CONSTRAINT "movement_variant_excludes_legacy_color"
-  CHECK ("variantId" IS NULL OR "colorId" IS NULL);
-ALTER TABLE "stock_request_items" ADD CONSTRAINT "request_variant_excludes_legacy_color"
-  CHECK ("variantId" IS NULL OR "colorId" IS NULL);
-ALTER TABLE "stock_return_items" ADD CONSTRAINT "return_variant_excludes_legacy_color"
-  CHECK ("variantId" IS NULL OR "colorId" IS NULL);
+-- No "variant excludes color" CHECK constraints: colorId and variantId are
+-- independent, non-exclusive attributes on every operational table — a line
+-- can legitimately carry both (e.g. a specific phone model in a specific
+-- color) or either alone. inventory_items/stock_movements have no colorId
+-- column at all, so the question doesn't even arise there.
 
 -- Preflight for non-negative/positive quantity constraints. This aborts the
 -- whole transaction and reports the affected table without changing data.
@@ -223,13 +216,12 @@ ALTER TABLE "stock_request_items" ADD CONSTRAINT "stock_request_items_quantity_c
 ALTER TABLE "stock_return_items" ADD CONSTRAINT "stock_return_items_quantity_positive_check" CHECK ("quantity" > 0);
 
 -- Database-level identity lock: after any operational table references a
--- Variant, its product/model/color/code identity is immutable. isActive and
+-- Variant, its product/model/code identity is immutable. isActive and
 -- sortOrder remain editable so the Variant can be archived safely.
 CREATE FUNCTION prevent_used_product_variant_identity_change() RETURNS trigger AS $$
 BEGIN
   IF NEW."productId" IS DISTINCT FROM OLD."productId"
      OR NEW."phoneModelId" IS DISTINCT FROM OLD."phoneModelId"
-     OR NEW."colorId" IS DISTINCT FROM OLD."colorId"
      OR NEW."variantCode" IS DISTINCT FROM OLD."variantCode" THEN
     IF EXISTS (SELECT 1 FROM "inventory_items" WHERE "variantId" = OLD."id")
        OR EXISTS (SELECT 1 FROM "cart_items" WHERE "variantId" = OLD."id")
@@ -244,7 +236,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 CREATE TRIGGER "product_variants_identity_immutable_when_used"
-  BEFORE UPDATE OF "productId", "phoneModelId", "colorId", "variantCode" ON "product_variants"
+  BEFORE UPDATE OF "productId", "phoneModelId", "variantCode" ON "product_variants"
   FOR EACH ROW EXECUTE FUNCTION prevent_used_product_variant_identity_change();
 
 CREATE FUNCTION prevent_completed_variant_allocation_batch_reopen() RETURNS trigger AS $$

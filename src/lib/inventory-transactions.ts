@@ -5,18 +5,19 @@ type Tx = Prisma.TransactionClient;
 
 export interface InventoryKey {
   productId: string;
-  /** Null for colorless products — see the Color model doc comment in
-   * prisma/schema.prisma. Every function here deliberately uses plain
-   * `where` filters (never the `productId_locationId_colorId` compound-key
-   * shorthand) because Prisma's generated type for that shorthand
-   * disallows `null` on a nullable compound field — SQL unique constraints
-   * treat NULL as distinct from every other NULL, so uniqueness for the
-   * colorless case is instead enforced by a hand-authored partial unique
-   * index (`... WHERE "colorId" IS NULL`, see the migration), which only a
-   * plain filter can query against. */
-  colorId: string | null;
-  /** True ProductVariant identity. Omitted/null keeps legacy and ordinary
-   * product inventory fully compatible during the transition. */
+  /** ProductVariant identity (product + phone model). Null for products with
+   * no phone-variant tracking, which keep a single plain stock bucket per
+   * location. Every function here deliberately uses plain `where` filters
+   * (never the `productId_locationId_variantId` compound-key shorthand)
+   * because Prisma's generated type for that shorthand disallows `null` on
+   * a nullable compound field — SQL unique constraints treat NULL as
+   * distinct from every other NULL, so uniqueness for the variant-less case
+   * is instead enforced by a hand-authored partial unique index
+   * (`... WHERE "variantId" IS NULL`, see the migration), which only a
+   * plain filter can query against. Deliberately has no colorId: color is a
+   * pure display attribute on cart/order/request/return lines and never
+   * determines the stock bucket — see the InventoryItem doc comment in
+   * prisma/schema.prisma. */
   variantId?: string | null;
   locationId: string;
 }
@@ -54,7 +55,7 @@ function requireNonnegativeQuantity(quantity: number): void {
 }
 
 function keyFilter(key: InventoryKey) {
-  return { productId: key.productId, colorId: key.colorId, variantId: key.variantId ?? null, locationId: key.locationId };
+  return { productId: key.productId, variantId: key.variantId ?? null, locationId: key.locationId };
 }
 
 async function readQuantity(tx: Tx, key: InventoryKey): Promise<number> {
@@ -66,8 +67,8 @@ async function readQuantity(tx: Tx, key: InventoryKey): Promise<number> {
 }
 
 /** Creates the row if it doesn't exist yet, race-safe against a concurrent
- * creator: relies on the DB unique index (full compound for a real color,
- * partial `WHERE colorId IS NULL` for a colorless product — see the
+ * creator: relies on the DB unique index (full compound for a variant,
+ * partial `WHERE variantId IS NULL` for a plain product — see the
  * migration) to reject a duplicate with P2002, then falls back to the
  * caller-supplied update. */
 async function createOrElse(
@@ -78,7 +79,7 @@ async function createOrElse(
 ): Promise<void> {
   try {
     await tx.inventoryItem.create({
-      data: { productId: key.productId, locationId: key.locationId, colorId: key.colorId, variantId: key.variantId ?? null, quantity: initialQuantity },
+      data: { productId: key.productId, locationId: key.locationId, variantId: key.variantId ?? null, quantity: initialQuantity },
     });
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
@@ -91,7 +92,7 @@ async function createOrElse(
 
 /** Atomic conditional decrement — `quantity: { gte }` in the `where` makes
  * this a single conditional UPDATE, never a stale read-then-write, so a
- * concurrent decrement on the same product+color+location can never both
+ * concurrent decrement on the same product+variant+location can never both
  * succeed and drive stock negative. Throws InsufficientInventoryError if
  * the row didn't have enough stock (or didn't exist). */
 export async function decrementInventoryAtomic(
@@ -112,8 +113,8 @@ export async function decrementInventoryAtomic(
 }
 
 /** Atomic increment — safe even if two writes to the same
- * product+color+location land at the same moment. Creates the row if it
- * doesn't exist yet (e.g. a rep's car has never held this product/color
+ * product+variant+location land at the same moment. Creates the row if it
+ * doesn't exist yet (e.g. a rep's car has never held this product/variant
  * before). */
 export async function incrementInventoryUpsert(
   tx: Tx,
@@ -185,7 +186,6 @@ export async function setInventoryAbsolute(
 export interface StockMovementInput {
   type: string;
   productId: string;
-  colorId: string | null;
   variantId?: string | null;
   allocationBatchId?: string | null;
   fromLocationId?: string | null;

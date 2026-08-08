@@ -367,11 +367,11 @@ async function main() {
       },
     });
 
-    // Not the productId_locationId_colorId compound-key shorthand — these
-    // seed products are colorless (colorId: null), and Prisma's generated
+    // Not the productId_locationId_variantId compound-key shorthand — these
+    // seed products are plain (variantId: null), and Prisma's generated
     // type for that shorthand disallows null on a nullable compound field.
     const existingInventoryItem = await prisma.inventoryItem.findFirst({
-      where: { productId: product.id, locationId: mainWarehouse.id, colorId: null },
+      where: { productId: product.id, locationId: mainWarehouse.id, variantId: null },
       select: { id: true },
     });
     if (existingInventoryItem) {
