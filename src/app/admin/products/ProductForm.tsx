@@ -81,7 +81,16 @@ export function ProductForm({
   const sortedImages = [...images].sort((a, b) => (a.isMain === b.isMain ? a.sortOrder - b.sortOrder : a.isMain ? -1 : 1));
 
   return (
-    <form action={formAction} className="flex max-w-5xl flex-col gap-5">
+    <div className="flex max-w-5xl flex-col gap-5">
+      {/* This <form> uses display:contents (see className) so its children
+       * lay out exactly as if this wrapper weren't here — it exists only to
+       * scope which fields submit via formAction. TrackingModeConversionForm
+       * below renders its own independent <form> for a different action; it
+       * must never be a descendant of this one, since HTML doesn't allow
+       * nested <form> elements (React throws "A React form was unexpectedly
+       * submitted" at runtime when it happens) — see the standalone section
+       * after this form closes. */}
+      <form action={formAction} className="contents">
       <FormSection title="المعلومات الأساسية">
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <Input name="name" label="اسم المنتج" defaultValue={product?.name} required error={state.fieldErrors?.name} />
@@ -228,63 +237,43 @@ export function ProductForm({
         )}
       </FormSection>
 
-      <FormSection title="طريقة تتبّع المخزون">
-        {!product ? (
-          <>
-            <p className="text-sm text-neutral-bg/60">
-              اختر كيف يُدار مخزون هذا المنتج. مخزون إجمالي: كمية واحدة عادية (شواحن، كوابل، سماعات...). مخزون حسب
-              الجهاز واللون: كمية مستقلة لكل تركيبة ماركة + موديل + لون (جفرات ومنتجات مشابهة). لا يمكن الجمع بينه
-              وبين نظام توافق الهواتف القديم أدناه.
-            </p>
-            <div className="flex flex-col gap-2">
-              <label className="flex items-center gap-2 text-sm text-neutral-bg/80">
-                <input
-                  type="radio"
-                  name="inventoryTrackingMode"
-                  value={PRODUCT_INVENTORY_TRACKING_MODES.TOTAL_STOCK}
-                  checked={newProductTrackingMode === PRODUCT_INVENTORY_TRACKING_MODES.TOTAL_STOCK}
-                  onChange={() => setNewProductTrackingMode(PRODUCT_INVENTORY_TRACKING_MODES.TOTAL_STOCK)}
-                  className="h-4 w-4"
-                />
-                {TRACKING_MODE_LABELS[PRODUCT_INVENTORY_TRACKING_MODES.TOTAL_STOCK]}
-              </label>
-              <label className="flex items-center gap-2 text-sm text-neutral-bg/80">
-                <input
-                  type="radio"
-                  name="inventoryTrackingMode"
-                  value={PRODUCT_INVENTORY_TRACKING_MODES.DEVICE_MODEL_COLOR}
-                  checked={newProductTrackingMode === PRODUCT_INVENTORY_TRACKING_MODES.DEVICE_MODEL_COLOR}
-                  disabled={usesPhoneVariants}
-                  onChange={() => setNewProductTrackingMode(PRODUCT_INVENTORY_TRACKING_MODES.DEVICE_MODEL_COLOR)}
-                  className="h-4 w-4"
-                />
-                {TRACKING_MODE_LABELS[PRODUCT_INVENTORY_TRACKING_MODES.DEVICE_MODEL_COLOR]}
-                {newProductTrackingMode === PRODUCT_INVENTORY_TRACKING_MODES.DEVICE_MODEL_COLOR && (
-                  <span className="text-xs text-neutral-bg/50">(سيتم فتح شاشة تركيبات المخزون بعد الحفظ)</span>
-                )}
-              </label>
-            </div>
-          </>
-        ) : (
-          <>
-            {product.variantMode === "PHONE_COMPATIBILITY" ? (
-              <p className="text-sm text-neutral-bg/60">
-                هذا المنتج يستخدم نظام توافق الهواتف القديم (Variants) — لا يمكن تحويله إلى مخزون الجهاز واللون في
-                هذه المرحلة.
-              </p>
-            ) : (
-              <>
-                <TrackingModeConversionForm productId={product.id} currentMode={product.inventoryTrackingMode} />
-                {product.inventoryTrackingMode === PRODUCT_INVENTORY_TRACKING_MODES.DEVICE_MODEL_COLOR && (
-                  <Link href={`/admin/products/${product.id}/device-inventory`}>
-                    <Button type="button" variant="secondary">إدارة تركيبات مخزون الجهاز واللون</Button>
-                  </Link>
-                )}
-              </>
-            )}
-          </>
-        )}
-      </FormSection>
+      {!product && (
+        <FormSection title="طريقة تتبّع المخزون">
+          <p className="text-sm text-neutral-bg/60">
+            اختر كيف يُدار مخزون هذا المنتج. مخزون إجمالي: كمية واحدة عادية (شواحن، كوابل، سماعات...). مخزون حسب
+            الجهاز واللون: كمية مستقلة لكل تركيبة ماركة + موديل + لون (جفرات ومنتجات مشابهة). لا يمكن الجمع بينه
+            وبين نظام توافق الهواتف القديم أدناه.
+          </p>
+          <div className="flex flex-col gap-2">
+            <label className="flex items-center gap-2 text-sm text-neutral-bg/80">
+              <input
+                type="radio"
+                name="inventoryTrackingMode"
+                value={PRODUCT_INVENTORY_TRACKING_MODES.TOTAL_STOCK}
+                checked={newProductTrackingMode === PRODUCT_INVENTORY_TRACKING_MODES.TOTAL_STOCK}
+                onChange={() => setNewProductTrackingMode(PRODUCT_INVENTORY_TRACKING_MODES.TOTAL_STOCK)}
+                className="h-4 w-4"
+              />
+              {TRACKING_MODE_LABELS[PRODUCT_INVENTORY_TRACKING_MODES.TOTAL_STOCK]}
+            </label>
+            <label className="flex items-center gap-2 text-sm text-neutral-bg/80">
+              <input
+                type="radio"
+                name="inventoryTrackingMode"
+                value={PRODUCT_INVENTORY_TRACKING_MODES.DEVICE_MODEL_COLOR}
+                checked={newProductTrackingMode === PRODUCT_INVENTORY_TRACKING_MODES.DEVICE_MODEL_COLOR}
+                disabled={usesPhoneVariants}
+                onChange={() => setNewProductTrackingMode(PRODUCT_INVENTORY_TRACKING_MODES.DEVICE_MODEL_COLOR)}
+                className="h-4 w-4"
+              />
+              {TRACKING_MODE_LABELS[PRODUCT_INVENTORY_TRACKING_MODES.DEVICE_MODEL_COLOR]}
+              {newProductTrackingMode === PRODUCT_INVENTORY_TRACKING_MODES.DEVICE_MODEL_COLOR && (
+                <span className="text-xs text-neutral-bg/50">(سيتم فتح شاشة تركيبات المخزون بعد الحفظ)</span>
+              )}
+            </label>
+          </div>
+        </FormSection>
+      )}
 
       {product && product.inventoryTrackingMode !== PRODUCT_INVENTORY_TRACKING_MODES.DEVICE_MODEL_COLOR && (
         <FormSection title="التوافق مع موديلات الهواتف والـVariants">
@@ -335,6 +324,30 @@ export function ProductForm({
       <Button type="submit" disabled={isPending} className="self-start">
         {isPending ? "جارٍ الحفظ..." : product ? "حفظ التعديلات" : "إضافة المنتج"}
       </Button>
-    </form>
+      </form>
+
+      {/* Deliberately outside the <form> above — see the comment on that
+       * form's opening tag. TrackingModeConversionForm below renders its
+       * own independent <form>, which must never nest inside another one. */}
+      {product && (
+        <FormSection title="طريقة تتبّع المخزون">
+          {product.variantMode === "PHONE_COMPATIBILITY" ? (
+            <p className="text-sm text-neutral-bg/60">
+              هذا المنتج يستخدم نظام توافق الهواتف القديم (Variants) — لا يمكن تحويله إلى مخزون الجهاز واللون في
+              هذه المرحلة.
+            </p>
+          ) : (
+            <>
+              <TrackingModeConversionForm productId={product.id} currentMode={product.inventoryTrackingMode} />
+              {product.inventoryTrackingMode === PRODUCT_INVENTORY_TRACKING_MODES.DEVICE_MODEL_COLOR && (
+                <Link href={`/admin/products/${product.id}/device-inventory`}>
+                  <Button type="button" variant="secondary">إدارة تركيبات مخزون الجهاز واللون</Button>
+                </Link>
+              )}
+            </>
+          )}
+        </FormSection>
+      )}
+    </div>
   );
 }
