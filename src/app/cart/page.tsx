@@ -64,7 +64,7 @@ export default async function CartPage() {
         {items.map((item) => {
           const unitPriceCents = readCatalogPriceCents(item.product);
           const isWholesale = isWholesalePriced(item.product);
-          const availableStock = getAvailableStock(item.product, item.variantId);
+          const availableStock = getAvailableStock(item.product, item.variantId, item.deviceColorVariantId);
           const thumbnail = item.product.images[0];
 
           return (
@@ -94,6 +94,12 @@ export default async function CartPage() {
                   {item.product.sku}
                   {item.color && <span> — {item.color.nameAr ?? item.color.name}</span>}
                   {item.variant && <span> — {item.variant.phoneModel.phoneBrand.nameAr ?? item.variant.phoneModel.phoneBrand.name} / {item.variant.phoneModel.nameAr ?? item.variant.phoneModel.name}</span>}
+                  {item.deviceColorVariant && (
+                    <span>
+                      {" "}
+                      — {item.deviceColorVariant.phoneModel.phoneBrand.nameAr ?? item.deviceColorVariant.phoneModel.phoneBrand.name} / {item.deviceColorVariant.phoneModel.nameAr ?? item.deviceColorVariant.phoneModel.name} / {item.deviceColorVariant.color.nameAr ?? item.deviceColorVariant.color.name}
+                    </span>
+                  )}
                 </p>
                 <div className="mt-1 flex items-center gap-2">
                   <span className="text-sm text-gold-champagne">{formatCurrencyFromCents(unitPriceCents)}</span>

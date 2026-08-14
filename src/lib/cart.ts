@@ -27,24 +27,41 @@ export const STOCK_CHECK_PRODUCT_SELECT = {
   isActive: true,
   /* Only Main Warehouse stock counts toward cart/checkout availability —
    * stock assigned to a sales rep isn't purchasable through the cart. */
-  inventoryItems: { where: { location: { isDefault: true } }, select: { quantity: true, variantId: true } },
+  inventoryItems: { where: { location: { isDefault: true } }, select: { quantity: true, variantId: true, deviceColorVariantId: true } },
   variantMode: true,
   variantAllocationStatus: true,
   inventoryTrackingMode: true,
+  /* Active combinations only — an inactive one is never a valid add-to-cart
+   * target, even if it still has an inventory row (see getAvailableStock's
+   * caller-side isActive re-check in addToCart). */
+  deviceColorVariants: {
+    where: { isActive: true },
+    select: {
+      id: true,
+      phoneModelId: true,
+      colorId: true,
+      phoneModel: { select: { id: true, name: true, nameAr: true, phoneBrandId: true } },
+      color: { select: { id: true, name: true, nameAr: true } },
+    },
+  },
 } satisfies Prisma.ProductSelect;
 
 export type StockCheckProduct = Prisma.ProductGetPayload<{ select: typeof STOCK_CHECK_PRODUCT_SELECT }>;
 
-/** Stock available for this product — filtered to a specific variant (phone
- * model) when `variantId` is given, or the plain product-wide bucket
- * otherwise. Color never affects the result: it's a display attribute only,
- * never a stock dimension — see the InventoryItem doc comment. */
+/** Stock available for this product — filtered to a specific phone-model
+ * variant, a specific device+color combination, or the plain product-wide
+ * bucket when both are null. Exactly one of variantId/deviceColorVariantId
+ * is ever non-null for a given call (mirrors the DB's mutual-exclusivity
+ * CHECK constraint). A bare colorId never affects the result on its own —
+ * it's a display attribute only, never a stock dimension by itself — see
+ * the InventoryItem doc comment. */
 export function getAvailableStock(
-  product: { inventoryItems: { quantity: number; variantId: string | null }[] },
+  product: { inventoryItems: { quantity: number; variantId: string | null; deviceColorVariantId: string | null }[] },
   variantId: string | null = null,
+  deviceColorVariantId: string | null = null,
 ): number {
   return product.inventoryItems
-    .filter((item) => item.variantId === variantId)
+    .filter((item) => item.variantId === variantId && item.deviceColorVariantId === deviceColorVariantId)
     .reduce((sum, item) => sum + item.quantity, 0);
 }
 
@@ -65,7 +82,7 @@ const CART_PRODUCT_RETAIL_SELECT = {
   },
   /* Only Main Warehouse stock counts toward cart/checkout availability —
    * stock assigned to a sales rep isn't purchasable through the cart. */
-  inventoryItems: { where: { location: { isDefault: true } }, select: { quantity: true, variantId: true } },
+  inventoryItems: { where: { location: { isDefault: true } }, select: { quantity: true, variantId: true, deviceColorVariantId: true } },
 } satisfies Prisma.ProductSelect;
 
 const CART_PRODUCT_WHOLESALE_SELECT = {
@@ -85,7 +102,7 @@ const CART_PRODUCT_WHOLESALE_SELECT = {
   },
   /* Only Main Warehouse stock counts toward cart/checkout availability —
    * stock assigned to a sales rep isn't purchasable through the cart. */
-  inventoryItems: { where: { location: { isDefault: true } }, select: { quantity: true, variantId: true } },
+  inventoryItems: { where: { location: { isDefault: true } }, select: { quantity: true, variantId: true, deviceColorVariantId: true } },
 } satisfies Prisma.ProductSelect;
 
 export type CartProductRetail = Prisma.ProductGetPayload<{ select: typeof CART_PRODUCT_RETAIL_SELECT }>;
@@ -93,18 +110,29 @@ export type CartProductWholesale = Prisma.ProductGetPayload<{ select: typeof CAR
 
 const CART_ITEM_COLOR_SELECT = { id: true, name: true, nameAr: true } satisfies Prisma.ColorSelect;
 
+const CART_ITEM_VARIANT_SELECT = {
+  id: true,
+  isActive: true,
+  variantCode: true,
+  phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } },
+} satisfies Prisma.ProductVariantSelect;
+
+const CART_ITEM_DEVICE_COLOR_VARIANT_SELECT = {
+  id: true,
+  isActive: true,
+  phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } },
+  color: { select: { name: true, nameAr: true } },
+} satisfies Prisma.DeviceColorVariantSelect;
+
 interface CartItemWithProduct<TProduct> {
   id: string;
   quantity: number;
   colorId: string | null;
   color: Prisma.ColorGetPayload<{ select: typeof CART_ITEM_COLOR_SELECT }> | null;
   variantId: string | null;
-  variant: {
-    id: string;
-    isActive: boolean;
-    variantCode: string | null;
-    phoneModel: { name: string; nameAr: string | null; phoneBrand: { name: string; nameAr: string | null } };
-  } | null;
+  variant: Prisma.ProductVariantGetPayload<{ select: typeof CART_ITEM_VARIANT_SELECT }> | null;
+  deviceColorVariantId: string | null;
+  deviceColorVariant: Prisma.DeviceColorVariantGetPayload<{ select: typeof CART_ITEM_DEVICE_COLOR_VARIANT_SELECT }> | null;
   product: TProduct;
 }
 
@@ -126,7 +154,8 @@ export async function getCurrentUserCart(user: SessionUser): Promise<CartWithIte
           include: {
             product: { select: CART_PRODUCT_WHOLESALE_SELECT },
             color: { select: CART_ITEM_COLOR_SELECT },
-            variant: { select: { id: true, isActive: true, variantCode: true, phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } } } },
+            variant: { select: CART_ITEM_VARIANT_SELECT },
+            deviceColorVariant: { select: CART_ITEM_DEVICE_COLOR_VARIANT_SELECT },
           },
           orderBy: { createdAt: "asc" },
         },
@@ -140,8 +169,9 @@ export async function getCurrentUserCart(user: SessionUser): Promise<CartWithIte
       items: {
         include: {
           product: { select: CART_PRODUCT_RETAIL_SELECT },
-            color: { select: CART_ITEM_COLOR_SELECT },
-            variant: { select: { id: true, isActive: true, variantCode: true, phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } } } },
+          color: { select: CART_ITEM_COLOR_SELECT },
+          variant: { select: CART_ITEM_VARIANT_SELECT },
+          deviceColorVariant: { select: CART_ITEM_DEVICE_COLOR_VARIANT_SELECT },
         },
         orderBy: { createdAt: "asc" },
       },

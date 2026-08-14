@@ -418,6 +418,8 @@ model DeviceColorVariant {
 
   inventoryItems InventoryItem[]
   stockMovements StockMovement[]
+  cartItems      CartItem[]
+  orderItems     OrderItem[]
 
   @@unique([productId, phoneModelId, colorId])
   @@unique([id, productId])
@@ -498,25 +500,32 @@ model Cart {
 /// colorId and variantId are independent, non-exclusive attributes of a
 /// line: colorId is purely descriptive (what the customer picked, never
 /// affects stock); variantId is the only thing that determines the stock
-/// bucket. A line can carry either, both, or neither. Uniqueness across the
-/// four null/non-null combinations of the two columns is enforced by four
+/// bucket for a PHONE_COMPATIBILITY product. deviceColorVariantId is the
+/// stock-bucket dimension for a DEVICE_MODEL_COLOR product instead — it is
+/// mutually exclusive with variantId (CHECK constraint, see the migration)
+/// and colorId is always left null on a deviceColorVariantId line (the
+/// combination's color is already encoded in the DeviceColorVariant itself,
+/// so a separate descriptive colorId would be redundant). Uniqueness across
+/// the null/non-null combinations of these columns is enforced by
 /// hand-authored partial unique indexes (not representable in schema.prisma
 /// — see the migration), so application code must use plain `where` filters
 /// here too, never the compound-key shorthand (same rule as documented in
 /// src/lib/inventory-transactions.ts).
 model CartItem {
-  id        String          @id @default(cuid())
-  cartId    String
-  cart      Cart            @relation(fields: [cartId], references: [id], onDelete: Cascade)
-  productId String
-  product   Product         @relation(fields: [productId], references: [id])
-  colorId   String?
-  color     Color?          @relation(fields: [colorId], references: [id])
-  variantId String?
-  variant   ProductVariant? @relation(fields: [variantId, productId], references: [id, productId])
-  quantity  Int
-  createdAt DateTime        @default(now())
-  updatedAt DateTime        @updatedAt
+  id                   String              @id @default(cuid())
+  cartId               String
+  cart                 Cart                @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  productId            String
+  product              Product             @relation(fields: [productId], references: [id])
+  colorId              String?
+  color                Color?              @relation(fields: [colorId], references: [id])
+  variantId            String?
+  variant              ProductVariant?     @relation(fields: [variantId, productId], references: [id, productId])
+  deviceColorVariantId String?
+  deviceColorVariant   DeviceColorVariant? @relation(fields: [deviceColorVariantId, productId], references: [id, productId])
+  quantity             Int
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
 
   @@map("cart_items")
 }
@@ -722,29 +731,42 @@ model Order {
 }
 
 model OrderItem {
-  id                  String          @id @default(cuid())
-  orderId             String
-  order               Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  productId           String
-  product             Product         @relation(fields: [productId], references: [id])
+  id                   String              @id @default(cuid())
+  orderId              String
+  order                Order               @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId            String
+  product              Product             @relation(fields: [productId], references: [id])
   /// Pure descriptive attribute — never affects which InventoryItem bucket
   /// is decremented (see InventoryItem doc comment). colorNameSnapshot below
   /// preserves the display name even if the color is later renamed/removed.
-  colorId             String?
-  color               Color?          @relation(fields: [colorId], references: [id])
-  variantId           String?
-  variant             ProductVariant? @relation(fields: [variantId, productId], references: [id, productId])
-  productNameSnapshot String?
-  productSkuSnapshot  String?
-  variantCodeSnapshot String?
-  phoneBrandSnapshot  String?
-  phoneModelSnapshot  String?
-  colorNameSnapshot   String?
-  quantity            Int
-  unitPriceCents      Int
-  totalCents          Int
+  /// Always null on a deviceColorVariantId line — that combination's color
+  /// is already captured in colorNameSnapshot/phoneModelSnapshot/
+  /// phoneBrandSnapshot below, reused as-is from the PHONE_COMPATIBILITY
+  /// system since the display shape (brand + model + color) is identical.
+  colorId              String?
+  color                Color?              @relation(fields: [colorId], references: [id])
+  variantId            String?
+  variant              ProductVariant?     @relation(fields: [variantId, productId], references: [id, productId])
+  /// The DEVICE_MODEL_COLOR stock bucket this line decremented from —
+  /// mutually exclusive with variantId (CHECK constraint, see the
+  /// migration). Snapshots below are populated from this combination's
+  /// brand/model/color at order time, same fields the PHONE_COMPATIBILITY
+  /// system already uses, so every existing order-display component renders
+  /// it with no changes.
+  deviceColorVariantId String?
+  deviceColorVariant   DeviceColorVariant? @relation(fields: [deviceColorVariantId, productId], references: [id, productId])
+  productNameSnapshot  String?
+  productSkuSnapshot   String?
+  variantCodeSnapshot  String?
+  phoneBrandSnapshot   String?
+  phoneModelSnapshot   String?
+  colorNameSnapshot    String?
+  quantity             Int
+  unitPriceCents       Int
+  totalCents           Int
 
   @@index([variantId])
+  @@index([deviceColorVariantId])
   @@map("order_items")
 }
 

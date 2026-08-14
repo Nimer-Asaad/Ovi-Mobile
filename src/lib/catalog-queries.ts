@@ -22,6 +22,7 @@ export const PUBLIC_PRODUCT_CARD_SELECT = {
   isFeatured: true,
   variantMode: true,
   variantAllocationStatus: true,
+  inventoryTrackingMode: true,
   colorOptions: { select: { id: true }, take: 1 },
   createdAt: true,
   category: { select: { name: true, nameAr: true } },
@@ -51,6 +52,7 @@ export const MERCHANT_PRODUCT_CARD_SELECT = {
   isFeatured: true,
   variantMode: true,
   variantAllocationStatus: true,
+  inventoryTrackingMode: true,
   colorOptions: { select: { id: true }, take: 1 },
   createdAt: true,
   category: { select: { name: true, nameAr: true } },
@@ -77,6 +79,7 @@ export const PUBLIC_PRODUCT_DETAIL_SELECT = {
   isFeatured: true,
   variantMode: true,
   variantAllocationStatus: true,
+  inventoryTrackingMode: true,
   categoryId: true,
   category: { select: { name: true, nameAr: true, slug: true } },
   brand: { select: { name: true, slug: true } },
@@ -88,9 +91,10 @@ export const PUBLIC_PRODUCT_DETAIL_SELECT = {
   },
   /* Only Main Warehouse stock is shown/purchasable here — rep-assigned
    * stock is tracked separately and isn't part of public availability.
-   * Deliberately no colorId: stock is resolved by variantId only (see
-   * getAvailableStock in src/lib/cart.ts) — color never affects stock. */
-  inventoryItems: { where: { location: { isDefault: true } }, select: { quantity: true, variantId: true } },
+   * Deliberately no colorId: stock is resolved by variantId/
+   * deviceColorVariantId only (see getAvailableStock in src/lib/cart.ts) —
+   * a bare color never affects stock on its own. */
+  inventoryItems: { where: { location: { isDefault: true } }, select: { quantity: true, variantId: true, deviceColorVariantId: true } },
   colorOptions: {
     select: { color: { select: { id: true, name: true, nameAr: true, hexCode: true } } },
     orderBy: { sortOrder: "asc" },
@@ -101,6 +105,21 @@ export const PUBLIC_PRODUCT_DETAIL_SELECT = {
       id: true,
       variantCode: true,
       phoneModel: { select: { id: true, name: true, nameAr: true, phoneBrand: { select: { id: true, name: true, nameAr: true } } } },
+      inventoryItems: { where: { location: { isDefault: true } }, select: { quantity: true } },
+    },
+    orderBy: { sortOrder: "asc" },
+  },
+  // Active device+color combinations for a DEVICE_MODEL_COLOR product —
+  // the storefront brand/model/color picker's data source. Each carries its
+  // own Main Warehouse stock, independent of every other combination.
+  deviceColorVariants: {
+    where: { isActive: true },
+    select: {
+      id: true,
+      phoneModelId: true,
+      colorId: true,
+      phoneModel: { select: { id: true, name: true, nameAr: true, phoneBrandId: true, phoneBrand: { select: { id: true, name: true, nameAr: true } } } },
+      color: { select: { id: true, name: true, nameAr: true, hexCode: true } },
       inventoryItems: { where: { location: { isDefault: true } }, select: { quantity: true } },
     },
     orderBy: { sortOrder: "asc" },
@@ -120,6 +139,7 @@ export const MERCHANT_PRODUCT_DETAIL_SELECT = {
   isFeatured: true,
   variantMode: true,
   variantAllocationStatus: true,
+  inventoryTrackingMode: true,
   categoryId: true,
   category: { select: { name: true, nameAr: true, slug: true } },
   brand: { select: { name: true, slug: true } },
@@ -129,9 +149,10 @@ export const MERCHANT_PRODUCT_DETAIL_SELECT = {
   },
   /* Only Main Warehouse stock is shown/purchasable here — rep-assigned
    * stock is tracked separately and isn't part of public availability.
-   * Deliberately no colorId: stock is resolved by variantId only (see
-   * getAvailableStock in src/lib/cart.ts) — color never affects stock. */
-  inventoryItems: { where: { location: { isDefault: true } }, select: { quantity: true, variantId: true } },
+   * Deliberately no colorId: stock is resolved by variantId/
+   * deviceColorVariantId only (see getAvailableStock in src/lib/cart.ts) —
+   * a bare color never affects stock on its own. */
+  inventoryItems: { where: { location: { isDefault: true } }, select: { quantity: true, variantId: true, deviceColorVariantId: true } },
   colorOptions: {
     select: { color: { select: { id: true, name: true, nameAr: true, hexCode: true } } },
     orderBy: { sortOrder: "asc" },
@@ -142,6 +163,21 @@ export const MERCHANT_PRODUCT_DETAIL_SELECT = {
       id: true,
       variantCode: true,
       phoneModel: { select: { id: true, name: true, nameAr: true, phoneBrand: { select: { id: true, name: true, nameAr: true } } } },
+      inventoryItems: { where: { location: { isDefault: true } }, select: { quantity: true } },
+    },
+    orderBy: { sortOrder: "asc" },
+  },
+  // Active device+color combinations for a DEVICE_MODEL_COLOR product —
+  // the storefront brand/model/color picker's data source. Each carries its
+  // own Main Warehouse stock, independent of every other combination.
+  deviceColorVariants: {
+    where: { isActive: true },
+    select: {
+      id: true,
+      phoneModelId: true,
+      colorId: true,
+      phoneModel: { select: { id: true, name: true, nameAr: true, phoneBrandId: true, phoneBrand: { select: { id: true, name: true, nameAr: true } } } },
+      color: { select: { id: true, name: true, nameAr: true, hexCode: true } },
       inventoryItems: { where: { location: { isDefault: true } }, select: { quantity: true } },
     },
     orderBy: { sortOrder: "asc" },

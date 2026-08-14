@@ -14,6 +14,9 @@ interface AddToCartButtonProps {
    * colorless product, or before the shopper has picked one yet. */
   colorId?: string | null;
   variantId?: string | null;
+  /** Chosen device+color combination, for a DEVICE_MODEL_COLOR product —
+   * mutually exclusive with variantId. */
+  deviceColorVariantId?: string | null;
   maxQuantity?: number;
   showQuantityInput?: boolean;
   /** Optional display data for the post-add success drawer. All optional —
@@ -31,6 +34,7 @@ export function AddToCartButton({
   productId,
   colorId = null,
   variantId = null,
+  deviceColorVariantId = null,
   maxQuantity,
   showQuantityInput = false,
   productName,
@@ -38,7 +42,7 @@ export function AddToCartButton({
   productImageUrl,
   unitPriceCents,
 }: AddToCartButtonProps) {
-  const action = addToCart.bind(null, productId, colorId, variantId);
+  const action = addToCart.bind(null, productId, colorId, variantId, deviceColorVariantId);
   const [state, formAction, isPending] = useActionState(action, initialState);
   const [quantity, setQuantity] = useState(1);
   const [drawerOpen, setDrawerOpen] = useState(false);

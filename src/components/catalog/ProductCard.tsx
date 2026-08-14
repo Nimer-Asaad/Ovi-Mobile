@@ -33,7 +33,7 @@ export function ProductCard({ product, cartEligibility = "ineligible" }: Product
   const isWholesale = isWholesalePriced(product);
   const totalStock = product.inventoryItems.reduce((sum, item) => sum + item.quantity, 0);
   const variantPending = product.variantMode === "PHONE_COMPATIBILITY" && product.variantAllocationStatus !== "READY";
-  const requiresOptions = product.variantMode === "PHONE_COMPATIBILITY" || product.colorOptions.length > 0;
+  const requiresOptions = product.variantMode === "PHONE_COMPATIBILITY" || product.inventoryTrackingMode === "DEVICE_MODEL_COLOR" || product.colorOptions.length > 0;
   const isOutOfStock = totalStock === 0 || variantPending;
   const isLowStock = totalStock > 0 && totalStock < LOW_STOCK_THRESHOLD;
   const productAgeMs = Date.now() - product.createdAt.getTime();

@@ -63,7 +63,7 @@ export default async function ProductDetailPage({ params }: ProductDetailPagePro
 
   if (!product) notFound();
 
-  const legacyTotalStock = product.inventoryItems.filter((item) => !item.variantId).reduce((sum, item) => sum + item.quantity, 0);
+  const plainTotalStock = product.inventoryItems.filter((item) => !item.variantId && !item.deviceColorVariantId).reduce((sum, item) => sum + item.quantity, 0);
   // Colors carry no stock — they're a pure preference pick-list, never a
   // stock dimension (see the InventoryItem doc comment in schema.prisma).
   const colorOptions = product.colorOptions.map((option) => ({
@@ -79,9 +79,18 @@ export default async function ProductDetailPage({ params }: ProductDetailPagePro
     brand: variant.phoneModel.phoneBrand,
     model: { id: variant.phoneModel.id, name: variant.phoneModel.name, nameAr: variant.phoneModel.nameAr },
   }));
+  const deviceColorVariants = product.deviceColorVariants.map((combo) => ({
+    id: combo.id,
+    stock: combo.inventoryItems.reduce((sum, item) => sum + item.quantity, 0),
+    brand: combo.phoneModel.phoneBrand,
+    model: { id: combo.phoneModel.id, name: combo.phoneModel.name, nameAr: combo.phoneModel.nameAr },
+    color: combo.color,
+  }));
   const totalStock = product.variantMode === "PHONE_COMPATIBILITY"
     ? product.variantAllocationStatus === "READY" ? variants.reduce((sum, variant) => sum + variant.stock, 0) : 0
-    : legacyTotalStock;
+    : product.inventoryTrackingMode === "DEVICE_MODEL_COLOR"
+      ? deviceColorVariants.reduce((sum, combo) => sum + combo.stock, 0)
+      : plainTotalStock;
   // Main is always enforced IMAGE on save, but this stays defensive since
   // the gallery's images list here is unfiltered (it also carries videos).
   const mainImageUrl = product.images.find((image) => image.mediaType === "IMAGE")?.url ?? null;
@@ -138,6 +147,8 @@ export default async function ProductDetailPage({ params }: ProductDetailPagePro
                 variantMode={product.variantMode}
                 variantAllocationStatus={product.variantAllocationStatus}
                 variants={variants}
+                inventoryTrackingMode={product.inventoryTrackingMode}
+                deviceColorVariants={deviceColorVariants}
                 cartEligibility={cartEligibility}
                 imageUrl={mainImageUrl}
               />

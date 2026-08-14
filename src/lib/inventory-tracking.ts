@@ -128,11 +128,16 @@ export async function removeOrDeactivateDeviceColorCombo(tx: Tx, comboId: string
     select: {
       id: true,
       inventoryItems: { select: { quantity: true } },
-      _count: { select: { stockMovements: true } },
+      _count: { select: { stockMovements: true, cartItems: true, orderItems: true } },
     },
   });
   const totalQuantity = combo.inventoryItems.reduce((sum, item) => sum + item.quantity, 0);
-  const hasHistory = combo._count.stockMovements > 0;
+  // A combo referenced by any cart or order line can never be hard-deleted
+  // — deleting it would either orphan a shopper's cart line (the FK is
+  // RESTRICT, so this would fail anyway) or, worse, erase the ability to
+  // resolve a past order's stock provenance. Deactivating instead keeps it
+  // fully intact for both.
+  const hasHistory = combo._count.stockMovements > 0 || combo._count.cartItems > 0 || combo._count.orderItems > 0;
 
   if (totalQuantity === 0 && !hasHistory) {
     await tx.inventoryItem.deleteMany({ where: { deviceColorVariantId: comboId } });

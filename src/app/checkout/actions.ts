@@ -65,29 +65,27 @@ export async function placeOrder(_prevState: CheckoutState, formData: FormData):
     if (item.product.variantMode === "PHONE_COMPATIBILITY" && (!item.variant || !item.variant.isActive || item.product.variantAllocationStatus !== "READY")) {
       return { error: `يرجى إعادة اختيار موديل ولون المنتج "${item.product.name}" قبل إتمام الطلب` };
     }
-    // Defense in depth — addToCart already blocks DEVICE_MODEL_COLOR
-    // products, but a cart line could predate that guard or be added
-    // through a stale client. See the addToCart comment for why this must
-    // fail closed rather than decrement the wrong bucket.
-    if (item.product.inventoryTrackingMode === "DEVICE_MODEL_COLOR") {
-      return { error: `المنتج "${item.product.name}" غير متاح للشراء عبر المتجر حالياً` };
+    // Defense in depth — addToCart already validates the combination, but a
+    // cart line could predate a combo being deactivated after it was added.
+    if (item.product.inventoryTrackingMode === "DEVICE_MODEL_COLOR" && (!item.deviceColorVariant || !item.deviceColorVariant.isActive)) {
+      return { error: `يرجى إعادة اختيار الماركة والموديل واللون للمنتج "${item.product.name}" قبل إتمام الطلب` };
     }
   }
 
-  // Color no longer distinguishes a stock bucket, so two cart lines for the
-  // same product+variant but different colors draw from the same bucket —
-  // sum requested quantity per product+variant (ignoring color) before
-  // comparing against available stock, not line-by-line, so an oversell
-  // across colors is caught with one clear error up front rather than a
-  // confusing mid-transaction failure.
+  // Color no longer distinguishes a stock bucket on its own, so two cart
+  // lines for the same product+variant but different colors draw from the
+  // same bucket — sum requested quantity per product+variant+combination
+  // (ignoring the purely-descriptive colorId) before comparing against
+  // available stock, not line-by-line, so an oversell is caught with one
+  // clear error up front rather than a confusing mid-transaction failure.
   const requestedByVariant = new Map<string, number>();
   for (const item of cart.items) {
-    const key = `${item.product.id}:${item.variantId ?? ""}`;
+    const key = `${item.product.id}:${item.variantId ?? ""}:${item.deviceColorVariantId ?? ""}`;
     requestedByVariant.set(key, (requestedByVariant.get(key) ?? 0) + item.quantity);
   }
   for (const item of cart.items) {
-    const key = `${item.product.id}:${item.variantId ?? ""}`;
-    const availableStock = getAvailableStock(item.product, item.variantId);
+    const key = `${item.product.id}:${item.variantId ?? ""}:${item.deviceColorVariantId ?? ""}`;
+    const availableStock = getAvailableStock(item.product, item.variantId, item.deviceColorVariantId);
     if (requestedByVariant.get(key)! > availableStock) {
       return {
         error: `الكمية المطلوبة من "${item.product.name}" تتجاوز المخزون المتوفر (${availableStock})`,
@@ -107,12 +105,27 @@ export async function placeOrder(_prevState: CheckoutState, formData: FormData):
       productId: item.product.id,
       colorId: item.colorId,
       variantId: item.variantId,
+      deviceColorVariantId: item.deviceColorVariantId,
       productNameSnapshot: item.product.nameAr ?? item.product.name,
       productSkuSnapshot: item.product.sku,
       variantCodeSnapshot: item.variant?.variantCode ?? null,
-      phoneBrandSnapshot: item.variant ? (item.variant.phoneModel.phoneBrand.nameAr ?? item.variant.phoneModel.phoneBrand.name) : null,
-      phoneModelSnapshot: item.variant ? (item.variant.phoneModel.nameAr ?? item.variant.phoneModel.name) : null,
-      colorNameSnapshot: item.color ? (item.color.nameAr ?? item.color.name) : null,
+      // Same snapshot fields either way — a device+color combination and a
+      // phone-model variant both resolve to a brand/model(/color) triple.
+      phoneBrandSnapshot: item.variant
+        ? (item.variant.phoneModel.phoneBrand.nameAr ?? item.variant.phoneModel.phoneBrand.name)
+        : item.deviceColorVariant
+          ? (item.deviceColorVariant.phoneModel.phoneBrand.nameAr ?? item.deviceColorVariant.phoneModel.phoneBrand.name)
+          : null,
+      phoneModelSnapshot: item.variant
+        ? (item.variant.phoneModel.nameAr ?? item.variant.phoneModel.name)
+        : item.deviceColorVariant
+          ? (item.deviceColorVariant.phoneModel.nameAr ?? item.deviceColorVariant.phoneModel.name)
+          : null,
+      colorNameSnapshot: item.color
+        ? (item.color.nameAr ?? item.color.name)
+        : item.deviceColorVariant
+          ? (item.deviceColorVariant.color.nameAr ?? item.deviceColorVariant.color.name)
+          : null,
       quantity: item.quantity,
       unitPriceCents,
       totalCents: unitPriceCents * item.quantity,
@@ -161,6 +174,13 @@ export async function placeOrder(_prevState: CheckoutState, formData: FormData):
           });
           if (activeVariants !== new Set(requestedVariantIds).size) throw new Error("INACTIVE_VARIANT");
         }
+        const requestedComboIds = cart.items.flatMap((item) => item.deviceColorVariantId ? [item.deviceColorVariantId] : []);
+        if (requestedComboIds.length > 0) {
+          const activeCombos = await tx.deviceColorVariant.count({
+            where: { id: { in: requestedComboIds }, isActive: true },
+          });
+          if (activeCombos !== new Set(requestedComboIds).size) throw new Error("INACTIVE_VARIANT");
+        }
         // Wholesale orders always roll up into the merchant's debt ledger
         // account (lazily created on first need). Ordinary retail orders
         // only attach if this customer already has an account — most retail
@@ -184,7 +204,7 @@ export async function placeOrder(_prevState: CheckoutState, formData: FormData):
         for (const item of cart.items) {
           const change = await decrementInventoryAtomic(
             tx,
-            { productId: item.product.id, variantId: item.variantId, locationId: warehouse.id },
+            { productId: item.product.id, variantId: item.variantId, deviceColorVariantId: item.deviceColorVariantId, locationId: warehouse.id },
             item.quantity,
           );
 
@@ -192,6 +212,7 @@ export async function placeOrder(_prevState: CheckoutState, formData: FormData):
             type: STOCK_MOVEMENT_TYPES.SALE_OUT,
             productId: item.product.id,
             variantId: item.variantId,
+            deviceColorVariantId: item.deviceColorVariantId,
             fromLocationId: warehouse.id,
             toLocationId: null,
             quantity: item.quantity,

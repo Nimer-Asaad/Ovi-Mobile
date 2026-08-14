@@ -270,6 +270,82 @@ try {
     assert(movementCount > 0, "ledger history was lost for a deactivated combo");
   });
 
+  await check("cart_items: one line per combination, duplicate combination rejected", async () => {
+    const product = await createProduct(PRODUCT_INVENTORY_TRACKING_MODES.DEVICE_MODEL_COLOR);
+    const comboBlack = await prisma.$transaction((tx) => createDeviceColorCombo(tx, { productId: product.id, phoneModelId: modelA.id, colorId: colorBlack.id, locationId: warehouse.id, initialQuantity: 5, actorId: admin.id }));
+    const comboBrown = await prisma.$transaction((tx) => createDeviceColorCombo(tx, { productId: product.id, phoneModelId: modelA.id, colorId: colorBrown.id, locationId: warehouse.id, initialQuantity: 5, actorId: admin.id }));
+
+    const customer = await prisma.user.create({ data: { role: "RETAIL_CUSTOMER", name: `${runId}-customer`, email: `${runId}-customer@example.invalid`, isActive: true } });
+    const cart = await prisma.cart.create({ data: { userId: customer.id } });
+
+    await prisma.cartItem.create({ data: { cartId: cart.id, productId: product.id, deviceColorVariantId: comboBlack.id, quantity: 1 } });
+    await prisma.cartItem.create({ data: { cartId: cart.id, productId: product.id, deviceColorVariantId: comboBrown.id, quantity: 1 } });
+    const lineCount = await prisma.cartItem.count({ where: { cartId: cart.id } });
+    assert(lineCount === 2, "two different combinations of the same product did not coexist as separate cart lines");
+
+    let duplicateThrew = false;
+    try {
+      await prisma.cartItem.create({ data: { cartId: cart.id, productId: product.id, deviceColorVariantId: comboBlack.id, quantity: 1 } });
+    } catch {
+      duplicateThrew = true;
+    }
+    assert(duplicateThrew, "a second cart line for the same combination was allowed");
+  });
+
+  await check("cart_items/order_items: variantId and deviceColorVariantId are mutually exclusive (XOR constraint)", async () => {
+    const product = await createProduct(PRODUCT_INVENTORY_TRACKING_MODES.DEVICE_MODEL_COLOR);
+    const combo = await prisma.$transaction((tx) => createDeviceColorCombo(tx, { productId: product.id, phoneModelId: modelA.id, colorId: colorBlack.id, locationId: warehouse.id, initialQuantity: 0, actorId: admin.id }));
+    // A ProductVariant row for the same product — the app layer never lets a
+    // DEVICE_MODEL_COLOR product reach saveProductVariants (see the guard in
+    // src/app/admin/products/[id]/variants/actions.ts), but the DB-level
+    // XOR CHECK must hold regardless of how a row was written.
+    const variant = await prisma.productVariant.create({ data: { productId: product.id, phoneModelId: modelA.id } });
+
+    const customer = await prisma.user.create({ data: { role: "RETAIL_CUSTOMER", name: `${runId}-customer2`, email: `${runId}-customer2@example.invalid`, isActive: true } });
+    const cart = await prisma.cart.create({ data: { userId: customer.id } });
+
+    let cartXorThrew = false;
+    try {
+      await prisma.cartItem.create({ data: { cartId: cart.id, productId: product.id, variantId: variant.id, deviceColorVariantId: combo.id, quantity: 1 } });
+    } catch {
+      cartXorThrew = true;
+    }
+    assert(cartXorThrew, "cart_items allowed a row with both variantId and deviceColorVariantId set");
+
+    const order = await prisma.order.create({ data: { orderNumber: `${runId}-order-xor`, source: "RETAIL", subtotalCents: 1000, totalCents: 1000 } });
+    let orderXorThrew = false;
+    try {
+      await prisma.orderItem.create({ data: { orderId: order.id, productId: product.id, variantId: variant.id, deviceColorVariantId: combo.id, quantity: 1, unitPriceCents: 1000, totalCents: 1000 } });
+    } catch {
+      orderXorThrew = true;
+    }
+    assert(orderXorThrew, "order_items allowed a row with both variantId and deviceColorVariantId set");
+  });
+
+  await check("order_items: a device+color combination line stores and links back correctly", async () => {
+    const product = await createProduct(PRODUCT_INVENTORY_TRACKING_MODES.DEVICE_MODEL_COLOR);
+    const combo = await prisma.$transaction((tx) => createDeviceColorCombo(tx, { productId: product.id, phoneModelId: modelA.id, colorId: colorBlack.id, locationId: warehouse.id, initialQuantity: 10, actorId: admin.id }));
+
+    const order = await prisma.order.create({ data: { orderNumber: `${runId}-order-combo`, source: "RETAIL", subtotalCents: 2000, totalCents: 2000 } });
+    const orderItem = await prisma.orderItem.create({
+      data: {
+        orderId: order.id,
+        productId: product.id,
+        deviceColorVariantId: combo.id,
+        phoneBrandSnapshot: brand.nameAr ?? brand.name,
+        phoneModelSnapshot: modelA.nameAr ?? modelA.name,
+        colorNameSnapshot: colorBlack.nameAr ?? colorBlack.name,
+        quantity: 2,
+        unitPriceCents: 1000,
+        totalCents: 2000,
+      },
+    });
+
+    const reloaded = await prisma.orderItem.findUniqueOrThrow({ where: { id: orderItem.id }, include: { deviceColorVariant: { include: { phoneModel: true, color: true } } } });
+    assert(reloaded.deviceColorVariant?.id === combo.id, "order item did not link back to the combination");
+    assert(reloaded.deviceColorVariant?.phoneModel.id === modelA.id && reloaded.deviceColorVariant?.color.id === colorBlack.id, "linked combination resolved to the wrong model/color");
+  });
+
   await check("existing plain products are unaffected by the DeviceColorVariant machinery", async () => {
     const product = await createProduct();
     await prisma.$transaction(async (tx) => {
@@ -280,6 +356,12 @@ try {
     assert(row.quantity === 42 && row.deviceColorVariantId === null, "plain product behavior changed");
   });
 } finally {
+  // Orders/OrderItems and Users/Carts/CartItems first — both OrderItem and
+  // CartItem have a RESTRICT foreign key to device_color_variants, which
+  // the deviceColorVariant/product cleanup below would otherwise violate.
+  // Order->OrderItem and User->Cart->CartItem are all ON DELETE CASCADE.
+  await prisma.order.deleteMany({ where: { orderNumber: { startsWith: runId } } });
+  await prisma.user.deleteMany({ where: { email: { startsWith: runId, contains: "customer" } } });
   await prisma.stockMovement.deleteMany({ where: { product: { sku: { startsWith: runId } } } });
   await prisma.inventoryItem.deleteMany({ where: { product: { sku: { startsWith: runId } } } });
   await prisma.deviceColorVariant.deleteMany({ where: { product: { sku: { startsWith: runId } } } });

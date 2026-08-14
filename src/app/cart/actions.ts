@@ -27,6 +27,7 @@ export async function addToCart(
   productId: string,
   colorId: string | null,
   variantId: string | null,
+  deviceColorVariantId: string | null,
   _prevState: CartActionState,
   formData: FormData,
 ): Promise<CartActionState> {
@@ -46,20 +47,8 @@ export async function addToCart(
     return { error: OUT_OF_STOCK_MESSAGE };
   }
 
-  // DEVICE_MODEL_COLOR products track stock per brand+model+color
-  // combination (DeviceColorVariant) — cart/checkout only knows how to
-  // decrement the plain or phone-model-variant bucket, so selling one here
-  // would either wrongly decrement an unrelated bucket or silently fail.
-  // Blocked until the storefront cart/checkout flow is wired to that
-  // dimension in a future phase.
-  if (product.inventoryTrackingMode === "DEVICE_MODEL_COLOR") {
-    return { error: "هذا المنتج غير متاح للشراء عبر المتجر حالياً" };
-  }
-
-  // Never trust the client's colorId/variantId — each is validated
-  // independently against what this product actually offers. Color is a
-  // pure descriptive attribute (never affects stock) and can be picked
-  // alongside a variant, on its own, or not at all.
+  // Never trust the client's colorId/variantId/deviceColorVariantId — each
+  // is validated independently against what this product actually offers.
   const usesVariants = product.variantMode === "PHONE_COMPATIBILITY";
   if (usesVariants) {
     if (product.variantAllocationStatus !== "READY") return { error: "مخزون هذا المنتج ما زال قيد المراجعة" };
@@ -67,16 +56,38 @@ export async function addToCart(
   } else if (variantId) return { error: "هذا المنتج لا يستخدم Variants" };
   const resolvedVariantId = usesVariants ? variantId : null;
 
-  const hasColorOptions = product.colorOptions.length > 0;
-  if (hasColorOptions && (!colorId || !product.colorOptions.some((option) => option.colorId === colorId))) {
-    return { error: "اختر لوناً متوفراً لهذا المنتج" };
+  // DEVICE_MODEL_COLOR products track stock per brand+model+color
+  // combination (DeviceColorVariant) instead of a phone-model variant —
+  // mutually exclusive with usesVariants above (DB CHECK constraint on
+  // products enforces a product never uses both systems).
+  const usesDeviceColor = product.inventoryTrackingMode === "DEVICE_MODEL_COLOR";
+  if (usesDeviceColor) {
+    if (!deviceColorVariantId || !product.deviceColorVariants.some((combo) => combo.id === deviceColorVariantId)) {
+      return { error: "اختر الماركة والموديل واللون بشكل صحيح" };
+    }
+  } else if (deviceColorVariantId) {
+    return { error: "هذا المنتج لا يستخدم تركيبات الجهاز واللون" };
   }
-  if (!hasColorOptions && colorId) {
-    return { error: "هذا المنتج لا يتوفر بألوان" };
-  }
-  const resolvedColorId = hasColorOptions ? colorId : null;
+  const resolvedDeviceColorVariantId = usesDeviceColor ? deviceColorVariantId : null;
 
-  const availableStock = getAvailableStock(product, resolvedVariantId);
+  // colorId is a separate, purely descriptive pick-list (see the CartItem
+  // doc comment) — it never applies to a DEVICE_MODEL_COLOR product, whose
+  // color is already encoded in the chosen combination above.
+  let resolvedColorId: string | null = null;
+  if (usesDeviceColor) {
+    if (colorId) return { error: "لون هذا المنتج محدد ضمن التركيبة المختارة" };
+  } else {
+    const hasColorOptions = product.colorOptions.length > 0;
+    if (hasColorOptions && (!colorId || !product.colorOptions.some((option) => option.colorId === colorId))) {
+      return { error: "اختر لوناً متوفراً لهذا المنتج" };
+    }
+    if (!hasColorOptions && colorId) {
+      return { error: "هذا المنتج لا يتوفر بألوان" };
+    }
+    resolvedColorId = hasColorOptions ? colorId : null;
+  }
+
+  const availableStock = getAvailableStock(product, resolvedVariantId, resolvedDeviceColorVariantId);
 
   const cart = await prisma.cart.upsert({
     where: { userId: user.id },
@@ -87,10 +98,10 @@ export async function addToCart(
   // Never the cartId_productId_colorId_variantId-style compound-key
   // shorthand — Prisma's generated type for it disallows `null`, and SQL
   // unique constraints treat NULL as distinct from every other NULL anyway,
-  // so uniqueness across every null/non-null combination of colorId and
-  // variantId is enforced by four hand-authored partial indexes instead
-  // (see the migration) — only a plain filter can query them.
-  const itemFilter = { cartId: cart.id, productId, colorId: resolvedColorId, variantId: resolvedVariantId };
+  // so uniqueness across every null/non-null combination of these columns
+  // is enforced by hand-authored partial indexes instead (see the
+  // migrations) — only a plain filter can query them.
+  const itemFilter = { cartId: cart.id, productId, colorId: resolvedColorId, variantId: resolvedVariantId, deviceColorVariantId: resolvedDeviceColorVariantId };
   const existingItem = await prisma.cartItem.findFirst({ where: itemFilter });
 
   const newQuantity = (existingItem?.quantity ?? 0) + parsedQuantity.quantity;
@@ -140,7 +151,7 @@ export async function updateCartItemQuantity(
     return { error: CART_ITEM_NOT_FOUND_MESSAGE };
   }
 
-  const availableStock = getAvailableStock(item.product, item.variantId);
+  const availableStock = getAvailableStock(item.product, item.variantId, item.deviceColorVariantId);
   if (parsedQuantity.quantity > availableStock) {
     return { error: `الكمية المتوفرة في المخزون هي ${availableStock} فقط` };
   }
