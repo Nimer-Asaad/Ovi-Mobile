@@ -25,16 +25,22 @@ export default async function AdminRepTransferInvoicePage({ params }: AdminRepTr
       product: { select: { sku: true, name: true, nameAr: true } },
       variant: { select: { phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } } } },
       deviceColorVariant: { select: { phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } }, color: { select: { name: true, nameAr: true } } } },
-      fromLocation: { select: { name: true } },
+      fromLocation: { select: { name: true, salesRepId: true } },
       toLocation: { select: { name: true, salesRepId: true } },
       createdBy: { select: { name: true } },
     },
   });
 
-  // Read-only lookup — a transfer invoice may only be viewed for a
-  // REP_ASSIGNMENT movement whose destination is this exact rep's car
-  // location, so one rep's URL can never leak another rep's transfer.
-  if (!movement || movement.type !== STOCK_MOVEMENT_TYPES.REP_ASSIGNMENT || movement.toLocation?.salesRepId !== id) {
+  // Legacy per-movement invoice — kept working for REP_ASSIGNMENT/REP_RETURN
+  // rows created before batching existed (transferBatchId null). New
+  // transfers all go through the combined batch invoice route instead (see
+  // transfer-batches/[batchId]/invoice). Read-only lookup — a rep's own
+  // location (source for a return, destination for an assignment) must
+  // match this exact rep, so one rep's URL can never leak another rep's
+  // transfer.
+  const isAssignment = movement?.type === STOCK_MOVEMENT_TYPES.REP_ASSIGNMENT && movement.toLocation?.salesRepId === id;
+  const isReturn = movement?.type === STOCK_MOVEMENT_TYPES.REP_RETURN && movement.fromLocation?.salesRepId === id;
+  if (!movement || (!isAssignment && !isReturn)) {
     notFound();
   }
 
@@ -60,16 +66,21 @@ export default async function AdminRepTransferInvoicePage({ params }: AdminRepTr
         movement={{
           id: movement.id,
           createdAt: movement.createdAt,
-          quantity: movement.quantity,
-          previousQuantity: movement.previousQuantity,
-          newQuantity: movement.newQuantity,
+          typeLabel: isAssignment ? "تخصيص مخزون لمندوب" : "إرجاع مخزون من مندوب",
           note: movement.note,
-          product: movement.product,
-          variantLabel: movement.variant
-            ? `${movement.variant.phoneModel.phoneBrand.nameAr ?? movement.variant.phoneModel.phoneBrand.name} / ${movement.variant.phoneModel.nameAr ?? movement.variant.phoneModel.name}`
-            : movement.deviceColorVariant
-              ? `${movement.deviceColorVariant.phoneModel.phoneBrand.nameAr ?? movement.deviceColorVariant.phoneModel.phoneBrand.name} / ${movement.deviceColorVariant.phoneModel.nameAr ?? movement.deviceColorVariant.phoneModel.name} / ${movement.deviceColorVariant.color.nameAr ?? movement.deviceColorVariant.color.name}`
-              : null,
+          items: [
+            {
+              product: movement.product,
+              optionLabel: movement.variant
+                ? `${movement.variant.phoneModel.phoneBrand.nameAr ?? movement.variant.phoneModel.phoneBrand.name} / ${movement.variant.phoneModel.nameAr ?? movement.variant.phoneModel.name}`
+                : movement.deviceColorVariant
+                  ? `${movement.deviceColorVariant.phoneModel.phoneBrand.nameAr ?? movement.deviceColorVariant.phoneModel.phoneBrand.name} / ${movement.deviceColorVariant.phoneModel.nameAr ?? movement.deviceColorVariant.phoneModel.name} / ${movement.deviceColorVariant.color.nameAr ?? movement.deviceColorVariant.color.name}`
+                  : null,
+              quantity: movement.quantity,
+              previousQuantity: movement.previousQuantity,
+              newQuantity: movement.newQuantity,
+            },
+          ],
           fromLocationName: movement.fromLocation?.name ?? null,
           toLocationName: movement.toLocation?.name ?? null,
           repName: rep.user.name,

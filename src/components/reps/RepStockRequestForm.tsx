@@ -33,7 +33,7 @@ const initialState: RepStockRequestState = {};
 
 /** Rep-facing restock request form — deliberately never fetches or shows
  * any price/cost field. No customer/order context either, so no color at
- * all (see repStockTransferSchema for the same reasoning) — only variantId.
+ * all (see repStockTransferBatchSchema for the same reasoning) — only variantId.
  * Lines are held in client state and serialized to a hidden JSON input on
  * submit, mirroring the Phase 25 manual-order-form pattern, since native
  * FormData can't carry a dynamic array of objects. */

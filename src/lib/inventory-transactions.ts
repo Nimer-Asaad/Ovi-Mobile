@@ -216,6 +216,7 @@ export interface StockMovementInput {
   variantId?: string | null;
   deviceColorVariantId?: string | null;
   allocationBatchId?: string | null;
+  transferBatchId?: string | null;
   fromLocationId?: string | null;
   toLocationId?: string | null;
   quantity: number;

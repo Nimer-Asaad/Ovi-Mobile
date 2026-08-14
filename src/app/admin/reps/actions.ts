@@ -7,7 +7,7 @@ import { requireRole } from "@/lib/auth/guards";
 import { ROLES, STOCK_MOVEMENT_TYPES } from "@/lib/constants";
 import { getMainWarehouse } from "@/lib/inventory";
 import { getOrCreateRepLocation } from "@/lib/reps";
-import { repStockTransferSchema } from "@/lib/validation/reps";
+import { repStockTransferBatchSchema } from "@/lib/validation/reps";
 import {
   decrementInventoryAtomic,
   incrementInventoryUpsert,
@@ -34,14 +34,71 @@ function revalidateRepPaths(repId: string): void {
   revalidatePath("/rep/movements");
 }
 
-function parseTransferForm(formData: FormData) {
-  return repStockTransferSchema.safeParse({
-    productId: formData.get("productId")?.toString() ?? "",
-    variantId: formData.get("variantId")?.toString() || undefined,
-    deviceColorVariantId: formData.get("deviceColorVariantId")?.toString() || undefined,
-    quantity: formData.get("quantity")?.toString() ?? "",
+function parseTransferBatchForm(formData: FormData) {
+  let items: unknown;
+  try {
+    items = JSON.parse(formData.get("items")?.toString() ?? "[]");
+  } catch {
+    return null;
+  }
+  return repStockTransferBatchSchema.safeParse({
+    items,
     notes: formData.get("notes")?.toString().trim() || undefined,
   });
+}
+
+/** Shared product-select shape for validating every line in a transfer
+ * batch — one query for all products in the batch rather than one per
+ * line. */
+const TRANSFER_PRODUCT_SELECT = {
+  id: true,
+  name: true,
+  nameAr: true,
+  isActive: true,
+  variantMode: true,
+  variantAllocationStatus: true,
+  inventoryTrackingMode: true,
+  variants: { where: { isActive: true }, select: { id: true } },
+  deviceColorVariants: { where: { isActive: true }, select: { id: true } },
+} as const;
+
+type TransferProduct = Awaited<ReturnType<typeof prisma.product.findMany<{ where: { id: { in: string[] } }; select: typeof TRANSFER_PRODUCT_SELECT }>>>[number];
+
+interface TransferLine {
+  productId: string;
+  variantId: string | null;
+  deviceColorVariantId: string | null;
+  quantity: number;
+}
+
+/** Validates every line against its product in one pass — shared by both
+ * assign and return, since the product-side rules (active, variant/combo
+ * membership) don't depend on transfer direction. */
+function validateTransferLines(lines: TransferLine[], productById: Map<string, TransferProduct>): string | null {
+  for (const line of lines) {
+    const product = productById.get(line.productId);
+    if (!product) {
+      return "أحد المنتجات المحددة غير موجود";
+    }
+    if (!product.isActive) {
+      return `المنتج "${product.nameAr ?? product.name}" غير مفعّل`;
+    }
+    const usesDeviceColor = product.inventoryTrackingMode === "DEVICE_MODEL_COLOR";
+    if (usesDeviceColor) {
+      if (!line.deviceColorVariantId || !product.deviceColorVariants.some((combo) => combo.id === line.deviceColorVariantId)) {
+        return `اختر الماركة والموديل واللون للمنتج "${product.nameAr ?? product.name}"`;
+      }
+    } else if (line.deviceColorVariantId) {
+      return `المنتج "${product.nameAr ?? product.name}" لا يستخدم تركيبات الجهاز واللون`;
+    }
+    if (product.variantMode === "PHONE_COMPATIBILITY" && (!line.variantId || !product.variants.some((variant) => variant.id === line.variantId))) {
+      return `اختر Variant صالحاً للمنتج "${product.nameAr ?? product.name}"`;
+    }
+    if (product.variantMode !== "PHONE_COMPATIBILITY" && line.variantId) {
+      return `Variant لا يتبع المنتج "${product.nameAr ?? product.name}"`;
+    }
+  }
+  return null;
 }
 
 export async function assignStockToRep(
@@ -51,13 +108,17 @@ export async function assignStockToRep(
 ): Promise<RepStockTransferState> {
   const admin = await requireRole([ROLES.ADMIN]);
 
-  const parsed = parseTransferForm(formData);
-  if (!parsed.success) {
+  const parsed = parseTransferBatchForm(formData);
+  if (!parsed || !parsed.success) {
     return { error: PARSE_ERROR_MESSAGE };
   }
-  const { productId, quantity, notes } = parsed.data;
-  const variantId = parsed.data.variantId ?? null;
-  const deviceColorVariantId = parsed.data.deviceColorVariantId ?? null;
+  const { notes } = parsed.data;
+  const lines: TransferLine[] = parsed.data.items.map((item) => ({
+    productId: item.productId,
+    variantId: item.variantId ?? null,
+    deviceColorVariantId: item.deviceColorVariantId ?? null,
+    quantity: item.quantity,
+  }));
 
   const rep = await prisma.salesRepresentative.findUnique({
     where: { id: repId },
@@ -70,68 +131,88 @@ export async function assignStockToRep(
     return { error: "لا يمكن تخصيص مخزون لمندوب غير مفعل" };
   }
 
-  const product = await prisma.product.findUnique({
-    where: { id: productId },
-    select: {
-      id: true,
-      isActive: true,
-      variantMode: true,
-      variantAllocationStatus: true,
-      inventoryTrackingMode: true,
-      variants: { where: { isActive: true }, select: { id: true } },
-      deviceColorVariants: { where: { isActive: true }, select: { id: true } },
-    },
+  const products = await prisma.product.findMany({
+    where: { id: { in: lines.map((line) => line.productId) } },
+    select: TRANSFER_PRODUCT_SELECT,
   });
-  if (!product) {
-    return { error: "المنتج غير موجود" };
+  const productById = new Map(products.map((product) => [product.id, product]));
+  const validationError = validateTransferLines(lines, productById);
+  if (validationError) {
+    return { error: validationError };
   }
-  if (!product.isActive) {
-    return { error: "لا يمكن تخصيص منتج غير مفعل" };
+  if (products.some((product) => product.variantMode === "PHONE_COMPATIBILITY" && product.variantAllocationStatus !== "READY")) {
+    return { error: "أحد المنتجات ينتظر تجهيز مخزون الـVariants قبل تخصيصه" };
   }
-  const usesDeviceColor = product.inventoryTrackingMode === "DEVICE_MODEL_COLOR";
-  if (usesDeviceColor) {
-    if (!deviceColorVariantId || !product.deviceColorVariants.some((combo) => combo.id === deviceColorVariantId)) {
-      return { error: "اختر الماركة والموديل واللون بشكل صحيح" };
-    }
-  } else if (deviceColorVariantId) {
-    return { error: "هذا المنتج لا يستخدم تركيبات الجهاز واللون" };
-  }
-  if (product.variantMode === "PHONE_COMPATIBILITY" && (product.variantAllocationStatus !== "READY" || !variantId || !product.variants.some((variant) => variant.id === variantId))) return { error: "اختر Variant صالحاً وجاهز المخزون" };
-  if (product.variantMode !== "PHONE_COMPATIBILITY" && variantId) return { error: "Variant لا يتبع المنتج" };
 
   const warehouse = await getMainWarehouse();
   const repLocation = await getOrCreateRepLocation(rep.id, rep.user.name);
 
+  let batchId = "";
   try {
-    await prisma.$transaction(async (tx) => {
-      // Atomic conditional decrement on the source (warehouse) — never a
-      // stale read-then-write. Insufficient stock rolls back the whole
-      // transfer.
-      await decrementInventoryAtomic(tx, { productId, variantId, deviceColorVariantId, locationId: warehouse.id }, quantity);
+    const batch = await prisma.$transaction(async (tx) => {
+      const requestedVariantIds = lines.flatMap((line) => (line.variantId ? [line.variantId] : []));
+      if (requestedVariantIds.length > 0) {
+        const activeVariants = await tx.productVariant.count({ where: { id: { in: requestedVariantIds }, isActive: true } });
+        if (activeVariants !== new Set(requestedVariantIds).size) throw new Error("INACTIVE_VARIANT");
+      }
+      const requestedComboIds = lines.flatMap((line) => (line.deviceColorVariantId ? [line.deviceColorVariantId] : []));
+      if (requestedComboIds.length > 0) {
+        const activeCombos = await tx.deviceColorVariant.count({ where: { id: { in: requestedComboIds }, isActive: true } });
+        if (activeCombos !== new Set(requestedComboIds).size) throw new Error("INACTIVE_VARIANT");
+      }
 
-      // Atomic increment on the destination (rep car) — safe even if two
-      // transfers to the same rep/product land at the same moment.
-      const change = await incrementInventoryUpsert(
-        tx,
-        { productId, variantId, deviceColorVariantId, locationId: repLocation.id },
-        quantity,
-      );
-
-      await recordStockMovement(tx, {
-        type: STOCK_MOVEMENT_TYPES.REP_ASSIGNMENT,
-        productId,
-        variantId,
-        deviceColorVariantId,
-        fromLocationId: warehouse.id,
-        toLocationId: repLocation.id,
-        quantity,
-        previousQuantity: change.previousQuantity,
-        newQuantity: change.newQuantity,
-        note: notes,
-        createdById: admin.id,
+      const createdBatch = await tx.repStockTransferBatch.create({
+        data: {
+          type: STOCK_MOVEMENT_TYPES.REP_ASSIGNMENT,
+          salesRepId: rep.id,
+          fromLocationId: warehouse.id,
+          toLocationId: repLocation.id,
+          note: notes,
+          createdById: admin.id,
+        },
       });
+
+      for (const line of lines) {
+        // Atomic conditional decrement on the source (warehouse) — never a
+        // stale read-then-write. Insufficient stock rolls back the whole
+        // batch.
+        await decrementInventoryAtomic(
+          tx,
+          { productId: line.productId, variantId: line.variantId, deviceColorVariantId: line.deviceColorVariantId, locationId: warehouse.id },
+          line.quantity,
+        );
+
+        // Atomic increment on the destination (rep car) — safe even if two
+        // transfers to the same rep/product land at the same moment.
+        const change = await incrementInventoryUpsert(
+          tx,
+          { productId: line.productId, variantId: line.variantId, deviceColorVariantId: line.deviceColorVariantId, locationId: repLocation.id },
+          line.quantity,
+        );
+
+        await recordStockMovement(tx, {
+          type: STOCK_MOVEMENT_TYPES.REP_ASSIGNMENT,
+          productId: line.productId,
+          variantId: line.variantId,
+          deviceColorVariantId: line.deviceColorVariantId,
+          transferBatchId: createdBatch.id,
+          fromLocationId: warehouse.id,
+          toLocationId: repLocation.id,
+          quantity: line.quantity,
+          previousQuantity: change.previousQuantity,
+          newQuantity: change.newQuantity,
+          note: notes,
+          createdById: admin.id,
+        });
+      }
+
+      return createdBatch;
     });
+    batchId = batch.id;
   } catch (err) {
+    if (err instanceof Error && err.message === "INACTIVE_VARIANT") {
+      return { error: "أحد خيارات المنتج لم يعد فعالاً؛ أعد اختيار الخيار" };
+    }
     if (err instanceof InsufficientInventoryError) {
       return { error: "الكمية المطلوبة أكبر من المخزون المتوفر في المستودع الرئيسي" };
     }
@@ -139,7 +220,7 @@ export async function assignStockToRep(
   }
 
   revalidateRepPaths(repId);
-  redirect(`/admin/reps/${repId}`);
+  redirect(`/admin/reps/${repId}/transfer-batches/${batchId}/invoice`);
 }
 
 export async function returnStockFromRep(
@@ -149,13 +230,17 @@ export async function returnStockFromRep(
 ): Promise<RepStockTransferState> {
   const admin = await requireRole([ROLES.ADMIN]);
 
-  const parsed = parseTransferForm(formData);
-  if (!parsed.success) {
+  const parsed = parseTransferBatchForm(formData);
+  if (!parsed || !parsed.success) {
     return { error: PARSE_ERROR_MESSAGE };
   }
-  const { productId, quantity, notes } = parsed.data;
-  const variantId = parsed.data.variantId ?? null;
-  const deviceColorVariantId = parsed.data.deviceColorVariantId ?? null;
+  const { notes } = parsed.data;
+  const lines: TransferLine[] = parsed.data.items.map((item) => ({
+    productId: item.productId,
+    variantId: item.variantId ?? null,
+    deviceColorVariantId: item.deviceColorVariantId ?? null,
+    quantity: item.quantity,
+  }));
 
   const rep = await prisma.salesRepresentative.findUnique({
     where: { id: repId },
@@ -165,22 +250,15 @@ export async function returnStockFromRep(
     return { error: "المندوب غير موجود" };
   }
 
-  const product = await prisma.product.findUnique({
-    where: { id: productId },
-    select: { id: true, variantMode: true, inventoryTrackingMode: true, variants: { select: { id: true } }, deviceColorVariants: { select: { id: true } } },
+  const products = await prisma.product.findMany({
+    where: { id: { in: lines.map((line) => line.productId) } },
+    select: TRANSFER_PRODUCT_SELECT,
   });
-  if (!product) {
-    return { error: "المنتج غير موجود" };
+  const productById = new Map(products.map((product) => [product.id, product]));
+  const validationError = validateTransferLines(lines, productById);
+  if (validationError) {
+    return { error: validationError };
   }
-  const usesDeviceColor = product.inventoryTrackingMode === "DEVICE_MODEL_COLOR";
-  if (usesDeviceColor) {
-    if (!deviceColorVariantId || !product.deviceColorVariants.some((combo) => combo.id === deviceColorVariantId)) {
-      return { error: "اختر الماركة والموديل واللون بشكل صحيح" };
-    }
-  } else if (deviceColorVariantId) {
-    return { error: "هذا المنتج لا يستخدم تركيبات الجهاز واللون" };
-  }
-  if (product.variantMode === "PHONE_COMPATIBILITY" && (!variantId || !product.variants.some((variant) => variant.id === variantId))) return { error: "اختر Variant صالحاً" };
 
   const warehouse = await getMainWarehouse();
   const repLocation = await prisma.stockLocation.findUnique({ where: { salesRepId: rep.id } });
@@ -189,35 +267,71 @@ export async function returnStockFromRep(
     return { error: "المندوب لا يملك مخزوناً لإرجاعه" };
   }
 
+  let batchId = "";
   try {
-    await prisma.$transaction(async (tx) => {
-      // Atomic conditional decrement on the source (rep car) — never a
-      // stale read-then-write. Insufficient stock rolls back the whole
-      // return.
-      const change = await decrementInventoryAtomic(
-        tx,
-        { productId, variantId, deviceColorVariantId, locationId: repLocation.id },
-        quantity,
-      );
+    const batch = await prisma.$transaction(async (tx) => {
+      const requestedVariantIds = lines.flatMap((line) => (line.variantId ? [line.variantId] : []));
+      if (requestedVariantIds.length > 0) {
+        const activeVariants = await tx.productVariant.count({ where: { id: { in: requestedVariantIds }, isActive: true } });
+        if (activeVariants !== new Set(requestedVariantIds).size) throw new Error("INACTIVE_VARIANT");
+      }
+      const requestedComboIds = lines.flatMap((line) => (line.deviceColorVariantId ? [line.deviceColorVariantId] : []));
+      if (requestedComboIds.length > 0) {
+        const activeCombos = await tx.deviceColorVariant.count({ where: { id: { in: requestedComboIds }, isActive: true } });
+        if (activeCombos !== new Set(requestedComboIds).size) throw new Error("INACTIVE_VARIANT");
+      }
 
-      // Atomic increment on the destination (warehouse).
-      await incrementInventoryUpsert(tx, { productId, variantId, deviceColorVariantId, locationId: warehouse.id }, quantity);
-
-      await recordStockMovement(tx, {
-        type: STOCK_MOVEMENT_TYPES.REP_RETURN,
-        productId,
-        variantId,
-        deviceColorVariantId,
-        fromLocationId: repLocation.id,
-        toLocationId: warehouse.id,
-        quantity,
-        previousQuantity: change.previousQuantity,
-        newQuantity: change.newQuantity,
-        note: notes,
-        createdById: admin.id,
+      const createdBatch = await tx.repStockTransferBatch.create({
+        data: {
+          type: STOCK_MOVEMENT_TYPES.REP_RETURN,
+          salesRepId: rep.id,
+          fromLocationId: repLocation.id,
+          toLocationId: warehouse.id,
+          note: notes,
+          createdById: admin.id,
+        },
       });
+
+      for (const line of lines) {
+        // Atomic conditional decrement on the source (rep car) — never a
+        // stale read-then-write. Insufficient stock rolls back the whole
+        // batch.
+        const change = await decrementInventoryAtomic(
+          tx,
+          { productId: line.productId, variantId: line.variantId, deviceColorVariantId: line.deviceColorVariantId, locationId: repLocation.id },
+          line.quantity,
+        );
+
+        // Atomic increment on the destination (warehouse).
+        await incrementInventoryUpsert(
+          tx,
+          { productId: line.productId, variantId: line.variantId, deviceColorVariantId: line.deviceColorVariantId, locationId: warehouse.id },
+          line.quantity,
+        );
+
+        await recordStockMovement(tx, {
+          type: STOCK_MOVEMENT_TYPES.REP_RETURN,
+          productId: line.productId,
+          variantId: line.variantId,
+          deviceColorVariantId: line.deviceColorVariantId,
+          transferBatchId: createdBatch.id,
+          fromLocationId: repLocation.id,
+          toLocationId: warehouse.id,
+          quantity: line.quantity,
+          previousQuantity: change.previousQuantity,
+          newQuantity: change.newQuantity,
+          note: notes,
+          createdById: admin.id,
+        });
+      }
+
+      return createdBatch;
     });
+    batchId = batch.id;
   } catch (err) {
+    if (err instanceof Error && err.message === "INACTIVE_VARIANT") {
+      return { error: "أحد خيارات المنتج لم يعد فعالاً؛ أعد اختيار الخيار" };
+    }
     if (err instanceof InsufficientInventoryError) {
       return { error: "الكمية المطلوبة أكبر من مخزون المندوب الحالي" };
     }
@@ -225,5 +339,5 @@ export async function returnStockFromRep(
   }
 
   revalidateRepPaths(repId);
-  redirect(`/admin/reps/${repId}`);
+  redirect(`/admin/reps/${repId}/transfer-batches/${batchId}/invoice`);
 }

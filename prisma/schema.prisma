@@ -58,19 +58,20 @@ model User {
   merchantProfile            Merchant?
   salesRepresentativeProfile SalesRepresentative?
 
-  ordersPlaced                Order[]                         @relation("OrderCustomer")
-  stockMovements              StockMovement[]                 @relation("StockMovementCreatedBy")
-  sessions                    Session[]
-  cart                        Cart?
-  wishlistItems               WishlistItem[]
-  orderStatusChanges          OrderStatusHistory[]            @relation("OrderStatusChangedBy")
-  orderCompensations          OrderInventoryCompensation[]    @relation("OrderCompensationCreatedBy")
-  activityEvents              UserActivityEvent[]
-  auditLogsAsAdmin            AdminAuditLog[]                 @relation("AuditLogAdmin")
-  auditLogsAsTarget           AdminAuditLog[]                 @relation("AuditLogTarget")
-  accountAsCustomer           CustomerAccount?                @relation("AccountCustomer")
-  accountPaymentsRecorded     AccountPayment[]                @relation("AccountPaymentCreatedBy")
-  completedVariantAllocations ProductVariantAllocationBatch[] @relation("VariantAllocationCompletedBy")
+  ordersPlaced                   Order[]                         @relation("OrderCustomer")
+  stockMovements                 StockMovement[]                 @relation("StockMovementCreatedBy")
+  sessions                       Session[]
+  cart                           Cart?
+  wishlistItems                  WishlistItem[]
+  orderStatusChanges             OrderStatusHistory[]            @relation("OrderStatusChangedBy")
+  orderCompensations             OrderInventoryCompensation[]    @relation("OrderCompensationCreatedBy")
+  activityEvents                 UserActivityEvent[]
+  auditLogsAsAdmin               AdminAuditLog[]                 @relation("AuditLogAdmin")
+  auditLogsAsTarget              AdminAuditLog[]                 @relation("AuditLogTarget")
+  accountAsCustomer              CustomerAccount?                @relation("AccountCustomer")
+  accountPaymentsRecorded        AccountPayment[]                @relation("AccountPaymentCreatedBy")
+  completedVariantAllocations    ProductVariantAllocationBatch[] @relation("VariantAllocationCompletedBy")
+  repStockTransferBatchesCreated RepStockTransferBatch[]         @relation("RepStockTransferBatchCreatedBy")
 
   @@map("users")
 }
@@ -109,11 +110,12 @@ model SalesRepresentative {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  assignedMerchants Merchant[]     @relation("RepMerchants")
-  carStockLocation  StockLocation?
-  ordersCreated     Order[]        @relation("OrderCreatedByRep")
-  stockRequests     StockRequest[]
-  stockReturns      StockReturn[]
+  assignedMerchants    Merchant[]              @relation("RepMerchants")
+  carStockLocation     StockLocation?
+  ordersCreated        Order[]                 @relation("OrderCreatedByRep")
+  stockRequests        StockRequest[]
+  stockReturns         StockReturn[]
+  stockTransferBatches RepStockTransferBatch[]
 
   @@map("sales_representatives")
 }
@@ -585,11 +587,13 @@ model StockLocation {
   createdAt  DateTime             @default(now())
   updatedAt  DateTime             @updatedAt
 
-  inventoryItems     InventoryItem[]
-  movementsFrom      StockMovement[]              @relation("MovementFromLocation")
-  movementsTo        StockMovement[]              @relation("MovementToLocation")
-  fulfilledOrders    Order[]
-  orderCompensations OrderInventoryCompensation[]
+  inventoryItems      InventoryItem[]
+  movementsFrom       StockMovement[]              @relation("MovementFromLocation")
+  movementsTo         StockMovement[]              @relation("MovementToLocation")
+  fulfilledOrders     Order[]
+  orderCompensations  OrderInventoryCompensation[]
+  transferBatchesFrom RepStockTransferBatch[]      @relation("RepTransferBatchFromLocation")
+  transferBatchesTo   RepStockTransferBatch[]      @relation("RepTransferBatchToLocation")
 
   @@map("stock_locations")
 }
@@ -643,6 +647,12 @@ model StockMovement {
   deviceColorVariant   DeviceColorVariant?            @relation(fields: [deviceColorVariantId, productId], references: [id, productId])
   allocationBatchId    String?
   allocationBatch      ProductVariantAllocationBatch? @relation(fields: [allocationBatchId], references: [id])
+  /// Groups this row with the other lines created by the same multi-product
+  /// admin quick-transfer submission — see RepStockTransferBatch. Null for
+  /// every movement type other than REP_ASSIGNMENT/REP_RETURN, and for
+  /// REP_ASSIGNMENT/REP_RETURN rows created before this batching existed.
+  transferBatchId      String?
+  transferBatch        RepStockTransferBatch?         @relation(fields: [transferBatchId], references: [id])
   fromLocationId       String?
   fromLocation         StockLocation?                 @relation("MovementFromLocation", fields: [fromLocationId], references: [id])
   toLocationId         String?
@@ -658,7 +668,33 @@ model StockMovement {
   @@index([variantId])
   @@index([deviceColorVariantId])
   @@index([allocationBatchId])
+  @@index([transferBatchId])
   @@map("stock_movements")
+}
+
+/// Groups the per-product StockMovement rows created by one multi-product
+/// admin quick-transfer submission (assignStockToRep/returnStockFromRep),
+/// purely so the whole car-load can be printed as one combined invoice
+/// instead of one per product. type mirrors the STOCK_MOVEMENT_TYPES value
+/// ("REP_ASSIGNMENT" | "REP_RETURN") shared by every movement in the batch.
+model RepStockTransferBatch {
+  id             String              @id @default(cuid())
+  type           String
+  salesRepId     String
+  salesRep       SalesRepresentative @relation(fields: [salesRepId], references: [id], onDelete: Restrict)
+  fromLocationId String
+  fromLocation   StockLocation       @relation("RepTransferBatchFromLocation", fields: [fromLocationId], references: [id], onDelete: Restrict)
+  toLocationId   String
+  toLocation     StockLocation       @relation("RepTransferBatchToLocation", fields: [toLocationId], references: [id], onDelete: Restrict)
+  note           String?
+  createdById    String?
+  createdBy      User?               @relation("RepStockTransferBatchCreatedBy", fields: [createdById], references: [id])
+  createdAt      DateTime            @default(now())
+
+  stockMovements StockMovement[]
+
+  @@index([salesRepId])
+  @@map("rep_stock_transfer_batches")
 }
 
 // ---------------------------------------------------------------------------

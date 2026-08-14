@@ -14,7 +14,7 @@ const nonNegativeIntString = z
   .transform((v) => Number(v));
 
 /** A manual product-level stock adjustment has no customer/order context, so
- * it has no colorId — see repStockTransferSchema for the same reasoning.
+ * it has no colorId — see repStockTransferBatchSchema for the same reasoning.
  * PHONE_COMPATIBILITY products are excluded entirely (see actions.ts) and
  * managed through the variant manager instead. */
 export const stockAdjustmentSchema = z.object({

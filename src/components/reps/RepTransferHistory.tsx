@@ -4,75 +4,67 @@ import { Badge } from "@/components/ui/Badge";
 import { getMovementTypeLabel, getMovementTypeBadgeVariant } from "@/lib/inventory-labels";
 import { STOCK_MOVEMENT_TYPES } from "@/lib/constants";
 
-export interface RepTransferHistoryItem {
-  id: string;
+export interface RepTransferHistoryRow {
+  key: string;
   type: string;
   quantity: number;
   note: string | null;
   createdAt: Date;
-  product: { sku: string; name: string; nameAr: string | null };
-  variant?: { phoneModel: { name: string; nameAr: string | null; phoneBrand: { name: string; nameAr: string | null } } } | null;
-  deviceColorVariant?: { phoneModel: { name: string; nameAr: string | null; phoneBrand: { name: string; nameAr: string | null } }; color: { name: string; nameAr: string | null } } | null;
+  /** The single product's name (+ variant/combo label) for an ungrouped
+   * movement, or "N منتجات" for a grouped multi-product transfer batch —
+   * resolved by the caller so this component stays a pure renderer. */
+  productLabel: string;
+  /** Link to this row's printable invoice (single-movement or combined
+   * batch invoice) — null for movement types with no invoice (e.g.
+   * SALE_OUT). */
+  invoiceHref: string | null;
 }
 
 export interface RepTransferHistoryProps {
-  movements: RepTransferHistoryItem[];
-  /** When provided, REP_ASSIGNMENT rows link to the printable transfer
-   * invoice for that rep. Omit on rep-facing pages — invoices are
-   * admin-only. */
-  repIdForInvoiceLinks?: string;
+  rows: RepTransferHistoryRow[];
   emptyMessage?: string;
 }
 
-/** Rep-car-scoped movement list. Distinguishes the three movement types a
- * car location can see: REP_ASSIGNMENT (stock loaded in), REP_RETURN (stock
- * sent back to the warehouse), and SALE_OUT (sold from the car to a
- * customer) — purely via label/color/sign, the underlying stored `type`
- * values are untouched. */
-export function RepTransferHistory({
-  movements,
-  repIdForInvoiceLinks,
-  emptyMessage = "لا توجد حركات مخزون بعد",
-}: RepTransferHistoryProps) {
+/** Rep-car-scoped movement/transfer-batch history list. Distinguishes the
+ * three movement types a car location can see: REP_ASSIGNMENT (stock loaded
+ * in), REP_RETURN (stock sent back to the warehouse), and SALE_OUT (sold
+ * from the car to a customer) — purely via label/color/sign, the underlying
+ * stored `type` values are untouched. Multi-product transfers created in one
+ * admin submission already arrive here pre-grouped into a single row (see
+ * RepStockTransferBatch). */
+export function RepTransferHistory({ rows, emptyMessage = "لا توجد حركات مخزون بعد" }: RepTransferHistoryProps) {
   return (
     <Card>
       <CardHeader>
         <CardTitle>سجل حركات السيارة</CardTitle>
       </CardHeader>
       <CardContent>
-        {movements.length === 0 ? (
+        {rows.length === 0 ? (
           <p className="py-6 text-center text-sm text-neutral-bg/50">{emptyMessage}</p>
         ) : (
           <div className="flex flex-col divide-y divide-navy-soft">
-            {movements.map((movement) => {
-              const isIncoming = movement.type === STOCK_MOVEMENT_TYPES.REP_ASSIGNMENT;
+            {rows.map((row) => {
+              const isIncoming = row.type === STOCK_MOVEMENT_TYPES.REP_ASSIGNMENT;
               return (
                 <div
-                  key={movement.id}
+                  key={row.key}
                   className="flex flex-wrap items-center justify-between gap-3 py-3 first:pt-0 last:pb-0"
                 >
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm text-neutral-bg">{movement.product.nameAr ?? movement.product.name}</p>
-                    {movement.variant && <p className="text-xs text-gold-champagne">{movement.variant.phoneModel.phoneBrand.nameAr ?? movement.variant.phoneModel.phoneBrand.name} / {movement.variant.phoneModel.nameAr ?? movement.variant.phoneModel.name}</p>}
-                    {movement.deviceColorVariant && <p className="text-xs text-gold-champagne">{movement.deviceColorVariant.phoneModel.phoneBrand.nameAr ?? movement.deviceColorVariant.phoneModel.phoneBrand.name} / {movement.deviceColorVariant.phoneModel.nameAr ?? movement.deviceColorVariant.phoneModel.name} / {movement.deviceColorVariant.color.nameAr ?? movement.deviceColorVariant.color.name}</p>}
-                    <p className="text-xs text-neutral-bg/50">
-                      {movement.product.sku} — {new Date(movement.createdAt).toLocaleString("ar")}
-                    </p>
-                    {movement.note && <p className="mt-0.5 text-xs text-neutral-bg/60">{movement.note}</p>}
+                    <p className="text-sm text-neutral-bg">{row.productLabel}</p>
+                    <p className="text-xs text-neutral-bg/50">{new Date(row.createdAt).toLocaleString("ar")}</p>
+                    {row.note && <p className="mt-0.5 text-xs text-neutral-bg/60">{row.note}</p>}
                   </div>
                   <div className="flex items-center gap-2">
-                    <Badge variant={getMovementTypeBadgeVariant(movement.type)}>
-                      {getMovementTypeLabel(movement.type)}
+                    <Badge variant={getMovementTypeBadgeVariant(row.type)}>
+                      {getMovementTypeLabel(row.type)}
                     </Badge>
                     <span className={isIncoming ? "text-sm text-emerald-700" : "text-sm text-neutral-bg/70"}>
                       {isIncoming ? "+" : "-"}
-                      {movement.quantity}
+                      {row.quantity}
                     </span>
-                    {repIdForInvoiceLinks && isIncoming && (
-                      <Link
-                        href={`/admin/reps/${repIdForInvoiceLinks}/transfers/${movement.id}/invoice`}
-                        className="text-xs text-gold-champagne hover:underline"
-                      >
+                    {row.invoiceHref && (
+                      <Link href={row.invoiceHref} className="text-xs text-gold-champagne hover:underline">
                         طباعة الفاتورة
                       </Link>
                     )}

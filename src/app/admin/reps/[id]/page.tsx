@@ -13,8 +13,9 @@ import { RepCarProductGrid } from "@/components/reps/RepCarProductGrid";
 import { RepTransferHistory } from "@/components/reps/RepTransferHistory";
 import { RepStockRequestStatusBadge } from "@/components/reps/RepStockRequestStatusBadge";
 import { getActiveRequestCountForRep, getLatestRequestsForRep } from "@/lib/rep-stock-requests";
-import { ORDER_SOURCES } from "@/lib/constants";
+import { ORDER_SOURCES, STOCK_MOVEMENT_TYPES } from "@/lib/constants";
 import { formatCurrencyFromCents } from "@/lib/utils";
+import type { RepTransferHistoryRow } from "@/components/reps/RepTransferHistory";
 
 interface AdminRepDetailPageProps {
   params: Promise<{ id: string }>;
@@ -86,13 +87,14 @@ export default async function AdminRepDetailPage({ params }: AdminRepDetailPageP
       ? prisma.stockMovement.findMany({
           where: { OR: [{ fromLocationId: locationId }, { toLocationId: locationId }] },
           orderBy: { createdAt: "desc" },
-          take: 20,
+          take: 40,
           select: {
             id: true,
             type: true,
             quantity: true,
             note: true,
             createdAt: true,
+            transferBatchId: true,
             product: { select: { sku: true, name: true, nameAr: true } },
             variant: { select: { phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } } } },
             deviceColorVariant: { select: { phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } }, color: { select: { name: true, nameAr: true } } } },
@@ -111,6 +113,61 @@ export default async function AdminRepDetailPage({ params }: AdminRepDetailPageP
       _sum: { totalCents: true },
     }),
   ]);
+
+  // Movements sharing a transferBatchId were all created by the same
+  // multi-product admin submission (see RepStockTransferBatch) — collapse
+  // them into a single history row linking to the combined batch invoice,
+  // instead of one row per product. Movements without a batch (SALE_OUT,
+  // and any REP_ASSIGNMENT/REP_RETURN row created before batching existed)
+  // keep their own row, linking to the legacy single-movement invoice.
+  const historyRows: RepTransferHistoryRow[] = (() => {
+    const batchRows = new Map<string, RepTransferHistoryRow & { productCount: number }>();
+    const rows: (RepTransferHistoryRow & { productCount: number })[] = [];
+    for (const movement of movements) {
+      const optionLabel = movement.variant
+        ? `${movement.variant.phoneModel.phoneBrand.nameAr ?? movement.variant.phoneModel.phoneBrand.name} / ${movement.variant.phoneModel.nameAr ?? movement.variant.phoneModel.name}`
+        : movement.deviceColorVariant
+          ? `${movement.deviceColorVariant.phoneModel.phoneBrand.nameAr ?? movement.deviceColorVariant.phoneModel.phoneBrand.name} / ${movement.deviceColorVariant.phoneModel.nameAr ?? movement.deviceColorVariant.phoneModel.name} / ${movement.deviceColorVariant.color.nameAr ?? movement.deviceColorVariant.color.name}`
+          : null;
+      const productLabel = `${movement.product.nameAr ?? movement.product.name}${optionLabel ? ` — ${optionLabel}` : ""}`;
+      const isTransfer = movement.type === STOCK_MOVEMENT_TYPES.REP_ASSIGNMENT || movement.type === STOCK_MOVEMENT_TYPES.REP_RETURN;
+
+      if (movement.transferBatchId) {
+        const existing = batchRows.get(movement.transferBatchId);
+        if (existing) {
+          existing.quantity += movement.quantity;
+          existing.productCount += 1;
+          existing.productLabel = `${existing.productCount} منتجات`;
+        } else {
+          const row = {
+            key: movement.transferBatchId,
+            type: movement.type,
+            quantity: movement.quantity,
+            note: movement.note,
+            createdAt: movement.createdAt,
+            productLabel,
+            productCount: 1,
+            invoiceHref: `/admin/reps/${rep.id}/transfer-batches/${movement.transferBatchId}/invoice`,
+          };
+          batchRows.set(movement.transferBatchId, row);
+          rows.push(row);
+        }
+        continue;
+      }
+
+      rows.push({
+        key: movement.id,
+        type: movement.type,
+        quantity: movement.quantity,
+        note: movement.note,
+        createdAt: movement.createdAt,
+        productLabel,
+        productCount: 1,
+        invoiceHref: isTransfer ? `/admin/reps/${rep.id}/transfers/${movement.id}/invoice` : null,
+      });
+    }
+    return rows.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  })();
 
   const gridItems = stockItems.map((item) => ({
     productId: item.product.id,
@@ -251,7 +308,7 @@ export default async function AdminRepDetailPage({ params }: AdminRepDetailPageP
 
       <RepCarProductGrid items={gridItems} />
 
-      <RepTransferHistory movements={movements} repIdForInvoiceLinks={rep.id} />
+      <RepTransferHistory rows={historyRows} />
     </div>
   );
 }

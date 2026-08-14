@@ -32,7 +32,7 @@ export default async function NewRepStockRequestPage() {
   });
 
   // No customer/order context here — a stock request has no color at all
-  // (see repStockTransferSchema for the same reasoning), only variantId.
+  // (see repStockTransferBatchSchema for the same reasoning), only variantId.
   const productIds = products.map((product) => product.id);
   const warehouseInventory = await prisma.inventoryItem.findMany({
     where: { productId: { in: productIds }, locationId: warehouse.id, variantId: { not: null } },

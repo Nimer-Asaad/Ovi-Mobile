@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 /** A rep requesting stock to be loaded into their car has no customer/order
- * context, so a request line has no colorId — see repStockTransferSchema
+ * context, so a request line has no colorId — see repStockTransferBatchSchema
  * for the same reasoning. */
 const requestItemSchema = z.object({
   productId: z.string().min(1, "المنتج مطلوب"),
