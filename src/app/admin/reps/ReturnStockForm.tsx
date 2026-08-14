@@ -29,7 +29,7 @@ const initialState: RepStockTransferState = {};
 export function ReturnStockForm({ repId, products }: ReturnStockFormProps) {
   const action = returnStockFromRep.bind(null, repId);
   const [state, formAction, isPending] = useActionState(action, initialState);
-  const [selected, setSelected] = useState<{ product: ReturnStockProductOption; variantId: string | null } | null>(
+  const [selected, setSelected] = useState<{ product: ReturnStockProductOption; variantId: string | null; deviceColorVariantId: string | null } | null>(
     null,
   );
 
@@ -37,17 +37,19 @@ export function ReturnStockForm({ repId, products }: ReturnStockFormProps) {
     return <p className="text-sm text-neutral-bg/60">لا يملك هذا المندوب أي مخزون قابل للإرجاع حالياً.</p>;
   }
 
-  function handlePick(product: ReturnStockProductOption, _colorId: string | null, variantId: string | null) {
-    setSelected({ product, variantId });
+  function handlePick(product: ReturnStockProductOption, _colorId: string | null, variantId: string | null, deviceColorVariantId: string | null) {
+    setSelected({ product, variantId, deviceColorVariantId });
   }
 
   const selectedVariant = selected?.variantId ? selected.product.variantOptions?.find((variant) => variant.id === selected.variantId) : null;
-  const resolvedStock = selectedVariant ? (selectedVariant.stock ?? 0) : (selected?.product.repStock ?? 0);
+  const selectedCombo = selected?.deviceColorVariantId ? selected.product.deviceColorVariantOptions?.find((combo) => combo.id === selected.deviceColorVariantId) : null;
+  const resolvedStock = selectedVariant ? (selectedVariant.stock ?? 0) : selectedCombo ? (selectedCombo.stock ?? 0) : (selected?.product.repStock ?? 0);
 
   return (
     <form action={formAction} className="flex max-w-xl flex-col gap-4">
       <input type="hidden" name="productId" value={selected?.product.id ?? ""} />
       <input type="hidden" name="variantId" value={selected?.variantId ?? ""} />
+      <input type="hidden" name="deviceColorVariantId" value={selected?.deviceColorVariantId ?? ""} />
 
       {!selected ? (
         <ProductQuickPicker products={products} excludeIds={new Set()} onPick={handlePick} placeholder="ابحث عن منتج لإرجاعه..." />
@@ -59,6 +61,7 @@ export function ReturnStockForm({ repId, products }: ReturnStockFormProps) {
               <p className="text-sm text-neutral-bg">
                 {selected.product.nameAr ?? selected.product.name}
                 {selectedVariant && <span> — {selectedVariant.label}</span>}
+                {selectedCombo && <span> — {selectedCombo.label}</span>}
               </p>
               <p className="text-xs text-neutral-bg/50">
                 {selected.product.sku} — مخزون المندوب الحالي: {resolvedStock}

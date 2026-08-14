@@ -14,6 +14,8 @@ const REP_STOCK_ITEM_SELECT = {
   quantity: true,
   variantId: true,
   variant: { select: { phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } } } },
+  deviceColorVariantId: true,
+  deviceColorVariant: { select: { phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } }, color: { select: { name: true, nameAr: true } } } },
   product: {
     select: {
       id: true,
@@ -56,6 +58,8 @@ export default async function RepStockPage() {
     productId: item.product.id,
     variantId: item.variantId,
     variantLabel: item.variant ? `${item.variant.phoneModel.phoneBrand.nameAr ?? item.variant.phoneModel.phoneBrand.name} / ${item.variant.phoneModel.nameAr ?? item.variant.phoneModel.name}` : null,
+    deviceColorVariantId: item.deviceColorVariantId,
+    deviceColorVariantLabel: item.deviceColorVariant ? `${item.deviceColorVariant.phoneModel.phoneBrand.nameAr ?? item.deviceColorVariant.phoneModel.phoneBrand.name} / ${item.deviceColorVariant.phoneModel.nameAr ?? item.deviceColorVariant.phoneModel.name} / ${item.deviceColorVariant.color.nameAr ?? item.deviceColorVariant.color.name}` : null,
     sku: item.product.sku,
     name: item.product.name,
     nameAr: item.product.nameAr,

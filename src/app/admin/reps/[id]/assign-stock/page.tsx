@@ -30,7 +30,7 @@ export default async function AdminRepAssignStockPage({ params }: AdminRepAssign
       sku: true,
       name: true,
       nameAr: true,
-      inventoryItems: { where: { locationId: warehouse.id }, select: { quantity: true, variantId: true } },
+      inventoryItems: { where: { locationId: warehouse.id }, select: { quantity: true, variantId: true, deviceColorVariantId: true } },
       images: {
         select: { url: true, altText: true },
         orderBy: [{ isMain: "desc" }, { sortOrder: "asc" }],
@@ -39,6 +39,8 @@ export default async function AdminRepAssignStockPage({ params }: AdminRepAssign
       variants: { where: { isActive: true }, select: { id: true, phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } } } },
       variantMode: true,
       variantAllocationStatus: true,
+      inventoryTrackingMode: true,
+      deviceColorVariants: { where: { isActive: true }, select: { id: true, phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } }, color: { select: { name: true, nameAr: true } } } },
     },
   });
 
@@ -52,9 +54,10 @@ export default async function AdminRepAssignStockPage({ params }: AdminRepAssign
     thumbnailUrl: product.images[0]?.url ?? null,
     thumbnailAlt: product.images[0]?.altText ?? null,
     warehouseStock: product.inventoryItems
-      .filter((item) => !item.variantId)
+      .filter((item) => !item.variantId && !item.deviceColorVariantId)
       .reduce((sum, item) => sum + item.quantity, 0),
     variantOptions: product.variantMode === "PHONE_COMPATIBILITY" && product.variantAllocationStatus === "READY" ? product.variants.map((variant) => ({ id: variant.id, label: `${variant.phoneModel.phoneBrand.nameAr ?? variant.phoneModel.phoneBrand.name} / ${variant.phoneModel.nameAr ?? variant.phoneModel.name}`, stock: product.inventoryItems.find((item) => item.variantId === variant.id)?.quantity ?? 0 })) : [],
+    deviceColorVariantOptions: product.inventoryTrackingMode === "DEVICE_MODEL_COLOR" ? product.deviceColorVariants.map((combo) => ({ id: combo.id, label: `${combo.phoneModel.phoneBrand.nameAr ?? combo.phoneModel.phoneBrand.name} / ${combo.phoneModel.nameAr ?? combo.phoneModel.name} / ${combo.color.nameAr ?? combo.color.name}`, stock: product.inventoryItems.find((item) => item.deviceColorVariantId === combo.id)?.quantity ?? 0 })) : [],
   }));
 
   return (

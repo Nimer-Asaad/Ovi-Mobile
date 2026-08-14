@@ -29,6 +29,7 @@ interface SaleLine {
   productId: string;
   colorId: string | null;
   variantId: string | null;
+  deviceColorVariantId: string | null;
   colorLabel: string | null;
   sku: string;
   label: string;
@@ -51,7 +52,8 @@ function centsToInputValue(cents: number): string {
   return (cents / 100).toFixed(2);
 }
 
-function lineKey(productId: string, colorId: string | null, variantId: string | null = null): string {
+function lineKey(productId: string, colorId: string | null, variantId: string | null = null, deviceColorVariantId: string | null = null): string {
+  if (deviceColorVariantId) return `${productId}:combo:${deviceColorVariantId}`;
   return `${productId}:${variantId ?? `legacy:${colorId ?? ""}`}`;
 }
 
@@ -75,9 +77,14 @@ export function NewSaleForm({ products, customers }: NewSaleFormProps) {
   // (each defaulting to a single "none" slot when the product has no
   // options on that axis).
   const excludeIds = useMemo(() => {
-    const usedKeys = new Set(lines.map((line) => lineKey(line.productId, line.colorId, line.variantId)));
+    const usedKeys = new Set(lines.map((line) => lineKey(line.productId, line.colorId, line.variantId, line.deviceColorVariantId)));
     const ids = new Set<string>();
     for (const product of products) {
+      if (product.deviceColorVariantOptions?.length) {
+        const allUsed = product.deviceColorVariantOptions.every((combo) => usedKeys.has(lineKey(product.id, null, null, combo.id)));
+        if (allUsed) ids.add(product.id);
+        continue;
+      }
       const variantIds: (string | null)[] = product.variantOptions?.length ? product.variantOptions.map((variant) => variant.id) : [null];
       const colorIds: (string | null)[] = product.colorOptions?.length ? product.colorOptions.map((color) => color.id) : [null];
       const allUsed = variantIds.every((variantId) => colorIds.every((colorId) => usedKeys.has(lineKey(product.id, colorId, variantId))));
@@ -86,45 +93,47 @@ export function NewSaleForm({ products, customers }: NewSaleFormProps) {
     return ids;
   }, [lines, products]);
 
-  function handleAddProduct(product: SaleProductOption, colorId: string | null, variantId: string | null) {
+  function handleAddProduct(product: SaleProductOption, colorId: string | null, variantId: string | null, deviceColorVariantId: string | null) {
     const color = product.colorOptions?.find((option) => option.id === colorId) ?? null;
     const variant = product.variantOptions?.find((option) => option.id === variantId) ?? null;
-    const colorLabel = [variant?.label, color ? (color.nameAr ?? color.name) : null].filter(Boolean).join(" — ") || null;
+    const combo = product.deviceColorVariantOptions?.find((option) => option.id === deviceColorVariantId) ?? null;
+    const colorLabel = combo ? combo.label : [variant?.label, color ? (color.nameAr ?? color.name) : null].filter(Boolean).join(" — ") || null;
     setLines((prev) => [
       ...prev,
       {
         productId: product.id,
         colorId,
         variantId,
+        deviceColorVariantId,
         colorLabel,
         sku: product.sku,
         label: product.nameAr ?? product.name,
         quantity: 1,
         unitPrice: centsToInputValue(product.retailPriceCents),
-        repStock: variant ? (variant.stock ?? 0) : product.repStock,
+        repStock: variant ? (variant.stock ?? 0) : combo ? (combo.stock ?? 0) : product.repStock,
         thumbnailUrl: product.thumbnailUrl,
         thumbnailAlt: product.thumbnailAlt,
       },
     ]);
   }
 
-  function handleRemoveLine(productId: string, colorId: string | null, variantId: string | null) {
-    setLines((prev) => prev.filter((line) => lineKey(line.productId, line.colorId, line.variantId) !== lineKey(productId, colorId, variantId)));
+  function handleRemoveLine(productId: string, colorId: string | null, variantId: string | null, deviceColorVariantId: string | null) {
+    setLines((prev) => prev.filter((line) => lineKey(line.productId, line.colorId, line.variantId, line.deviceColorVariantId) !== lineKey(productId, colorId, variantId, deviceColorVariantId)));
   }
 
-  function handleQuantityChange(productId: string, colorId: string | null, variantId: string | null, value: string) {
+  function handleQuantityChange(productId: string, colorId: string | null, variantId: string | null, deviceColorVariantId: string | null, value: string) {
     const quantity = Math.max(1, Math.floor(Number(value) || 1));
     setLines((prev) =>
       prev.map((line) =>
-        lineKey(line.productId, line.colorId, line.variantId) === lineKey(productId, colorId, variantId) ? { ...line, quantity } : line,
+        lineKey(line.productId, line.colorId, line.variantId, line.deviceColorVariantId) === lineKey(productId, colorId, variantId, deviceColorVariantId) ? { ...line, quantity } : line,
       ),
     );
   }
 
-  function handlePriceChange(productId: string, colorId: string | null, variantId: string | null, value: string) {
+  function handlePriceChange(productId: string, colorId: string | null, variantId: string | null, deviceColorVariantId: string | null, value: string) {
     setLines((prev) =>
       prev.map((line) =>
-        lineKey(line.productId, line.colorId, line.variantId) === lineKey(productId, colorId, variantId) ? { ...line, unitPrice: value } : line,
+        lineKey(line.productId, line.colorId, line.variantId, line.deviceColorVariantId) === lineKey(productId, colorId, variantId, deviceColorVariantId) ? { ...line, unitPrice: value } : line,
       ),
     );
   }
@@ -163,6 +172,7 @@ export function NewSaleForm({ products, customers }: NewSaleFormProps) {
           productId: line.productId,
           colorId: line.colorId,
           variantId: line.variantId,
+          deviceColorVariantId: line.deviceColorVariantId,
           quantity: line.quantity,
           unitPriceCents: Math.round(Number(line.unitPrice || 0) * 100),
         })),
@@ -198,7 +208,7 @@ export function NewSaleForm({ products, customers }: NewSaleFormProps) {
             <div className="flex flex-col divide-y divide-navy-soft">
               {lines.map((line) => (
                 <div
-                  key={lineKey(line.productId, line.colorId, line.variantId)}
+                  key={lineKey(line.productId, line.colorId, line.variantId, line.deviceColorVariantId)}
                   className="flex flex-wrap items-center gap-3 py-3 first:pt-0 last:pb-0"
                 >
                   <ProductThumb product={{ ...line, name: line.label }} className="h-10 w-10" />
@@ -215,7 +225,7 @@ export function NewSaleForm({ products, customers }: NewSaleFormProps) {
                       min={1}
                       max={line.repStock}
                       value={line.quantity}
-                      onChange={(event) => handleQuantityChange(line.productId, line.colorId, line.variantId, event.target.value)}
+                      onChange={(event) => handleQuantityChange(line.productId, line.colorId, line.variantId, line.deviceColorVariantId, event.target.value)}
                       aria-label="الكمية"
                     />
                   </div>
@@ -225,7 +235,7 @@ export function NewSaleForm({ products, customers }: NewSaleFormProps) {
                       min={0.01}
                       step={0.01}
                       value={line.unitPrice}
-                      onChange={(event) => handlePriceChange(line.productId, line.colorId, line.variantId, event.target.value)}
+                      onChange={(event) => handlePriceChange(line.productId, line.colorId, line.variantId, line.deviceColorVariantId, event.target.value)}
                       aria-label="سعر البيع"
                     />
                   </div>
@@ -233,7 +243,7 @@ export function NewSaleForm({ products, customers }: NewSaleFormProps) {
                     type="button"
                     variant="ghost"
                     size="sm"
-                    onClick={() => handleRemoveLine(line.productId, line.colorId, line.variantId)}
+                    onClick={() => handleRemoveLine(line.productId, line.colorId, line.variantId, line.deviceColorVariantId)}
                   >
                     حذف
                   </Button>

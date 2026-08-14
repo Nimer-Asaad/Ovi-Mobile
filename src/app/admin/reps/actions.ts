@@ -38,6 +38,7 @@ function parseTransferForm(formData: FormData) {
   return repStockTransferSchema.safeParse({
     productId: formData.get("productId")?.toString() ?? "",
     variantId: formData.get("variantId")?.toString() || undefined,
+    deviceColorVariantId: formData.get("deviceColorVariantId")?.toString() || undefined,
     quantity: formData.get("quantity")?.toString() ?? "",
     notes: formData.get("notes")?.toString().trim() || undefined,
   });
@@ -56,6 +57,7 @@ export async function assignStockToRep(
   }
   const { productId, quantity, notes } = parsed.data;
   const variantId = parsed.data.variantId ?? null;
+  const deviceColorVariantId = parsed.data.deviceColorVariantId ?? null;
 
   const rep = await prisma.salesRepresentative.findUnique({
     where: { id: repId },
@@ -70,7 +72,15 @@ export async function assignStockToRep(
 
   const product = await prisma.product.findUnique({
     where: { id: productId },
-    select: { id: true, isActive: true, variantMode: true, variantAllocationStatus: true, inventoryTrackingMode: true, variants: { where: { isActive: true }, select: { id: true } } },
+    select: {
+      id: true,
+      isActive: true,
+      variantMode: true,
+      variantAllocationStatus: true,
+      inventoryTrackingMode: true,
+      variants: { where: { isActive: true }, select: { id: true } },
+      deviceColorVariants: { where: { isActive: true }, select: { id: true } },
+    },
   });
   if (!product) {
     return { error: "المنتج غير موجود" };
@@ -78,11 +88,13 @@ export async function assignStockToRep(
   if (!product.isActive) {
     return { error: "لا يمكن تخصيص منتج غير مفعل" };
   }
-  // DEVICE_MODEL_COLOR products track stock per brand+model+color
-  // combination, which car-stock assignment doesn't decrement from yet —
-  // see the same guard in src/app/cart/actions.ts.
-  if (product.inventoryTrackingMode === "DEVICE_MODEL_COLOR") {
-    return { error: "هذا المنتج يُدار من شاشة تركيبات المخزون ولا يمكن تخصيصه لمخزون سيارة حالياً" };
+  const usesDeviceColor = product.inventoryTrackingMode === "DEVICE_MODEL_COLOR";
+  if (usesDeviceColor) {
+    if (!deviceColorVariantId || !product.deviceColorVariants.some((combo) => combo.id === deviceColorVariantId)) {
+      return { error: "اختر الماركة والموديل واللون بشكل صحيح" };
+    }
+  } else if (deviceColorVariantId) {
+    return { error: "هذا المنتج لا يستخدم تركيبات الجهاز واللون" };
   }
   if (product.variantMode === "PHONE_COMPATIBILITY" && (product.variantAllocationStatus !== "READY" || !variantId || !product.variants.some((variant) => variant.id === variantId))) return { error: "اختر Variant صالحاً وجاهز المخزون" };
   if (product.variantMode !== "PHONE_COMPATIBILITY" && variantId) return { error: "Variant لا يتبع المنتج" };
@@ -95,13 +107,13 @@ export async function assignStockToRep(
       // Atomic conditional decrement on the source (warehouse) — never a
       // stale read-then-write. Insufficient stock rolls back the whole
       // transfer.
-      await decrementInventoryAtomic(tx, { productId, variantId, locationId: warehouse.id }, quantity);
+      await decrementInventoryAtomic(tx, { productId, variantId, deviceColorVariantId, locationId: warehouse.id }, quantity);
 
       // Atomic increment on the destination (rep car) — safe even if two
       // transfers to the same rep/product land at the same moment.
       const change = await incrementInventoryUpsert(
         tx,
-        { productId, variantId, locationId: repLocation.id },
+        { productId, variantId, deviceColorVariantId, locationId: repLocation.id },
         quantity,
       );
 
@@ -109,6 +121,7 @@ export async function assignStockToRep(
         type: STOCK_MOVEMENT_TYPES.REP_ASSIGNMENT,
         productId,
         variantId,
+        deviceColorVariantId,
         fromLocationId: warehouse.id,
         toLocationId: repLocation.id,
         quantity,
@@ -142,6 +155,7 @@ export async function returnStockFromRep(
   }
   const { productId, quantity, notes } = parsed.data;
   const variantId = parsed.data.variantId ?? null;
+  const deviceColorVariantId = parsed.data.deviceColorVariantId ?? null;
 
   const rep = await prisma.salesRepresentative.findUnique({
     where: { id: repId },
@@ -153,13 +167,18 @@ export async function returnStockFromRep(
 
   const product = await prisma.product.findUnique({
     where: { id: productId },
-    select: { id: true, variantMode: true, inventoryTrackingMode: true, variants: { select: { id: true } } },
+    select: { id: true, variantMode: true, inventoryTrackingMode: true, variants: { select: { id: true } }, deviceColorVariants: { select: { id: true } } },
   });
   if (!product) {
     return { error: "المنتج غير موجود" };
   }
-  if (product.inventoryTrackingMode === "DEVICE_MODEL_COLOR") {
-    return { error: "هذا المنتج يُدار من شاشة تركيبات المخزون ولا يمكن إرجاعه من مخزون سيارة حالياً" };
+  const usesDeviceColor = product.inventoryTrackingMode === "DEVICE_MODEL_COLOR";
+  if (usesDeviceColor) {
+    if (!deviceColorVariantId || !product.deviceColorVariants.some((combo) => combo.id === deviceColorVariantId)) {
+      return { error: "اختر الماركة والموديل واللون بشكل صحيح" };
+    }
+  } else if (deviceColorVariantId) {
+    return { error: "هذا المنتج لا يستخدم تركيبات الجهاز واللون" };
   }
   if (product.variantMode === "PHONE_COMPATIBILITY" && (!variantId || !product.variants.some((variant) => variant.id === variantId))) return { error: "اختر Variant صالحاً" };
 
@@ -177,17 +196,18 @@ export async function returnStockFromRep(
       // return.
       const change = await decrementInventoryAtomic(
         tx,
-        { productId, variantId, locationId: repLocation.id },
+        { productId, variantId, deviceColorVariantId, locationId: repLocation.id },
         quantity,
       );
 
       // Atomic increment on the destination (warehouse).
-      await incrementInventoryUpsert(tx, { productId, variantId, locationId: warehouse.id }, quantity);
+      await incrementInventoryUpsert(tx, { productId, variantId, deviceColorVariantId, locationId: warehouse.id }, quantity);
 
       await recordStockMovement(tx, {
         type: STOCK_MOVEMENT_TYPES.REP_RETURN,
         productId,
         variantId,
+        deviceColorVariantId,
         fromLocationId: repLocation.id,
         toLocationId: warehouse.id,
         quantity,

@@ -8,6 +8,11 @@ export interface RepCarProductGridItem {
   /** Null for a non-variant product — one card per productId+variantId. */
   variantId: string | null;
   variantLabel: string | null;
+  /** Null unless the product uses DEVICE_MODEL_COLOR tracking — one card per
+   * productId+deviceColorVariantId in that case, mutually exclusive with
+   * variantId (see the CHECK constraint on inventory_items). */
+  deviceColorVariantId: string | null;
+  deviceColorVariantLabel: string | null;
   sku: string;
   name: string;
   nameAr: string | null;
@@ -47,7 +52,7 @@ export function RepCarProductGrid({
               const lowStock = isLowStock(item.quantity);
               return (
                 <div
-                  key={`${item.productId}:${item.variantId ?? ""}`}
+                  key={`${item.productId}:${item.variantId ?? ""}:${item.deviceColorVariantId ?? ""}`}
                   className="flex flex-col overflow-hidden rounded-card border border-navy-soft bg-navy-deep"
                 >
                   <div className="relative aspect-square w-full overflow-hidden bg-navy-soft">
@@ -73,6 +78,7 @@ export function RepCarProductGrid({
                     <p className="text-[11px] text-neutral-bg/50">
                       {item.sku}
                       {item.variantLabel && <span> — {item.variantLabel}</span>}
+                      {item.deviceColorVariantLabel && <span> — {item.deviceColorVariantLabel}</span>}
                     </p>
                     {lowStock && (
                       <Badge variant="warning" className="mt-auto self-start">

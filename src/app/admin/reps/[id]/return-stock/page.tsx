@@ -29,6 +29,8 @@ export default async function AdminRepReturnStockPage({ params }: AdminRepReturn
           quantity: true,
           variantId: true,
           variant: { select: { id: true, phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } } } },
+          deviceColorVariantId: true,
+          deviceColorVariant: { select: { id: true, phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } }, color: { select: { name: true, nameAr: true } } } },
           product: {
             select: {
               id: true,
@@ -59,9 +61,12 @@ export default async function AdminRepReturnStockPage({ params }: AdminRepReturn
       thumbnailAlt: item.product.images[0]?.altText ?? null,
       repStock: 0,
       variantOptions: [],
+      deviceColorVariantOptions: [],
     };
     if (item.variantId && item.variant) {
       existing.variantOptions!.push({ id: item.variant.id, label: `${item.variant.phoneModel.phoneBrand.nameAr ?? item.variant.phoneModel.phoneBrand.name} / ${item.variant.phoneModel.nameAr ?? item.variant.phoneModel.name}`, stock: item.quantity });
+    } else if (item.deviceColorVariantId && item.deviceColorVariant) {
+      existing.deviceColorVariantOptions!.push({ id: item.deviceColorVariant.id, label: `${item.deviceColorVariant.phoneModel.phoneBrand.nameAr ?? item.deviceColorVariant.phoneModel.phoneBrand.name} / ${item.deviceColorVariant.phoneModel.nameAr ?? item.deviceColorVariant.phoneModel.name} / ${item.deviceColorVariant.color.nameAr ?? item.deviceColorVariant.color.name}`, stock: item.quantity });
     } else {
       existing.repStock = item.quantity;
     }

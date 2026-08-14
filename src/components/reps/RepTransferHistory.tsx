@@ -12,6 +12,7 @@ export interface RepTransferHistoryItem {
   createdAt: Date;
   product: { sku: string; name: string; nameAr: string | null };
   variant?: { phoneModel: { name: string; nameAr: string | null; phoneBrand: { name: string; nameAr: string | null } } } | null;
+  deviceColorVariant?: { phoneModel: { name: string; nameAr: string | null; phoneBrand: { name: string; nameAr: string | null } }; color: { name: string; nameAr: string | null } } | null;
 }
 
 export interface RepTransferHistoryProps {
@@ -53,6 +54,7 @@ export function RepTransferHistory({
                   <div className="min-w-0 flex-1">
                     <p className="text-sm text-neutral-bg">{movement.product.nameAr ?? movement.product.name}</p>
                     {movement.variant && <p className="text-xs text-gold-champagne">{movement.variant.phoneModel.phoneBrand.nameAr ?? movement.variant.phoneModel.phoneBrand.name} / {movement.variant.phoneModel.nameAr ?? movement.variant.phoneModel.name}</p>}
+                    {movement.deviceColorVariant && <p className="text-xs text-gold-champagne">{movement.deviceColorVariant.phoneModel.phoneBrand.nameAr ?? movement.deviceColorVariant.phoneModel.phoneBrand.name} / {movement.deviceColorVariant.phoneModel.nameAr ?? movement.deviceColorVariant.phoneModel.name} / {movement.deviceColorVariant.color.nameAr ?? movement.deviceColorVariant.color.name}</p>}
                     <p className="text-xs text-neutral-bg/50">
                       {movement.product.sku} — {new Date(movement.createdAt).toLocaleString("ar")}
                     </p>

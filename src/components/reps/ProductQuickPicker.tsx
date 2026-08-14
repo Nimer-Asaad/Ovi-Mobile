@@ -26,6 +26,10 @@ export interface PickableProduct {
   /** Empty/omitted for a colorless product. */
   colorOptions?: PickableColorOption[];
   variantOptions?: { id: string; label: string; stock?: number }[];
+  /** Active brand+model+color combinations for a DEVICE_MODEL_COLOR product
+   * — mutually exclusive with variantOptions (a product uses one variant
+   * system or the other). label is the full "Brand / Model / Color" text. */
+  deviceColorVariantOptions?: { id: string; label: string; stock?: number }[];
 }
 
 /** Small inline thumbnail shared by every rep product list (search results,
@@ -97,8 +101,9 @@ export interface ProductQuickPickerProps<T extends PickableProduct> {
    * this should be the productId alone (all its colors are still offered
    * as separate picks) unless every one of its colors is already a line. */
   excludeIds: Set<string>;
-  /** colorId is null for a colorless product/pick. */
-  onPick: (product: T, colorId: string | null, variantId: string | null) => void;
+  /** colorId is null for a colorless product/pick; deviceColorVariantId is
+   * null unless the shopper picked a DEVICE_MODEL_COLOR combination. */
+  onPick: (product: T, colorId: string | null, variantId: string | null, deviceColorVariantId: string | null) => void;
   placeholder?: string;
 }
 
@@ -145,15 +150,15 @@ export function ProductQuickPicker<T extends PickableProduct>({
     setPendingVariantId(null);
   }
 
-  function handlePick(product: T, colorId: string | null, variantId: string | null = null) {
-    onPick(product, colorId, variantId);
+  function handlePick(product: T, colorId: string | null, variantId: string | null = null, deviceColorVariantId: string | null = null) {
+    onPick(product, colorId, variantId, deviceColorVariantId);
     setSearch("");
     setDetailProduct(null);
     setPendingVariantId(null);
   }
 
   function handleRowClick(product: T) {
-    if ((product.variantOptions?.length ?? 0) > 0 || (product.colorOptions?.length ?? 0) > 0) {
+    if ((product.variantOptions?.length ?? 0) > 0 || (product.colorOptions?.length ?? 0) > 0 || (product.deviceColorVariantOptions?.length ?? 0) > 0) {
       openDetail(product);
     } else {
       handlePick(product, null);
@@ -166,6 +171,10 @@ export function ProductQuickPicker<T extends PickableProduct>({
     } else {
       handlePick(product, null, variantId);
     }
+  }
+
+  function handlePickDeviceColorVariant(product: T, deviceColorVariantId: string) {
+    handlePick(product, null, null, deviceColorVariantId);
   }
 
   return (
@@ -247,6 +256,14 @@ export function ProductQuickPicker<T extends PickableProduct>({
                 {detailProduct.variantOptions.map((variant) => {
                   const outOfStock = variant.stock !== undefined && variant.stock <= 0;
                   return <button key={variant.id} type="button" disabled={outOfStock} onClick={() => handlePickVariant(detailProduct, variant.id)} className={cn("rounded-card border border-navy-soft px-3 py-2 text-sm text-neutral-bg/80 hover:border-gold-champagne/40", outOfStock && "cursor-not-allowed opacity-40")}>{variant.label}{outOfStock && " (نفد)"}</button>;
+                })}
+              </div>
+            ) : detailProduct.deviceColorVariantOptions && detailProduct.deviceColorVariantOptions.length > 0 ? (
+              <div className="mt-5 flex flex-col gap-2">
+                <p className="text-center text-xs text-neutral-bg/50">اختر الماركة والموديل واللون</p>
+                {detailProduct.deviceColorVariantOptions.map((combo) => {
+                  const outOfStock = combo.stock !== undefined && combo.stock <= 0;
+                  return <button key={combo.id} type="button" disabled={outOfStock} onClick={() => handlePickDeviceColorVariant(detailProduct, combo.id)} className={cn("rounded-card border border-navy-soft px-3 py-2 text-sm text-neutral-bg/80 hover:border-gold-champagne/40", outOfStock && "cursor-not-allowed opacity-40")}>{combo.label}{combo.stock !== undefined && ` (${combo.stock})`}{outOfStock && " — نفد"}</button>;
                 })}
               </div>
             ) : detailProduct.colorOptions && detailProduct.colorOptions.length > 0 ? (

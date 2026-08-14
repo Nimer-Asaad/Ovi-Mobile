@@ -15,6 +15,7 @@ const positiveIntString = z
 export const repStockTransferSchema = z.object({
   productId: z.string().min(1, "المنتج مطلوب"),
   variantId: z.string().min(1).optional(),
+  deviceColorVariantId: z.string().min(1).optional(),
   quantity: positiveIntString,
   notes: z.string().max(500, "الملاحظات طويلة جداً").optional(),
 });

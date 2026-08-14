@@ -31,6 +31,7 @@ export default async function RepMovementsPage() {
           createdAt: true,
           product: { select: { sku: true, name: true, nameAr: true } },
           variant: { select: { phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } } } },
+          deviceColorVariant: { select: { phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } }, color: { select: { name: true, nameAr: true } } } },
           fromLocation: { select: { name: true } },
           toLocation: { select: { name: true } },
         },
@@ -66,6 +67,7 @@ export default async function RepMovementsPage() {
                     {movement.product.nameAr ?? movement.product.name}
                     <span className="ms-2 text-xs text-neutral-bg/50">{movement.product.sku}</span>
                     {movement.variant && <span className="block text-xs text-gold-champagne">{movement.variant.phoneModel.phoneBrand.nameAr ?? movement.variant.phoneModel.phoneBrand.name} / {movement.variant.phoneModel.nameAr ?? movement.variant.phoneModel.name}</span>}
+                    {movement.deviceColorVariant && <span className="block text-xs text-gold-champagne">{movement.deviceColorVariant.phoneModel.phoneBrand.nameAr ?? movement.deviceColorVariant.phoneModel.phoneBrand.name} / {movement.deviceColorVariant.phoneModel.nameAr ?? movement.deviceColorVariant.phoneModel.name} / {movement.deviceColorVariant.color.nameAr ?? movement.deviceColorVariant.color.name}</span>}
                   </td>
                   <td className="px-4 py-3">
                     <Badge variant={getMovementTypeBadgeVariant(movement.type)}>

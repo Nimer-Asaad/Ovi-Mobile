@@ -80,27 +80,27 @@ export async function createRepSale(_prevState: RepSaleState, formData: FormData
   const productIds = saleItems.map((item) => item.productId);
   const products = await prisma.product.findMany({
     where: { id: { in: productIds } },
-    select: { id: true, sku: true, isActive: true, name: true, nameAr: true, variantMode: true, inventoryTrackingMode: true, colorOptions: { select: { colorId: true, color: { select: { name: true, nameAr: true } } } }, variants: { where: { isActive: true }, select: { id: true, variantCode: true, phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } } } } },
+    select: { id: true, sku: true, isActive: true, name: true, nameAr: true, variantMode: true, inventoryTrackingMode: true, colorOptions: { select: { colorId: true, color: { select: { name: true, nameAr: true } } } }, variants: { where: { isActive: true }, select: { id: true, variantCode: true, phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } } } }, deviceColorVariants: { where: { isActive: true }, select: { id: true, phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } }, color: { select: { name: true, nameAr: true } } } } },
   });
   const productById = new Map(products.map((product) => [product.id, product]));
 
   const inventoryItems = await prisma.inventoryItem.findMany({
     where: { locationId, productId: { in: productIds } },
-    select: { productId: true, variantId: true, quantity: true },
+    select: { productId: true, variantId: true, deviceColorVariantId: true, quantity: true },
   });
   const stockByLineKey = new Map(
-    inventoryItems.map((item) => [`${item.productId}:${item.variantId ?? ""}`, item.quantity]),
+    inventoryItems.map((item) => [`${item.productId}:${item.variantId ?? ""}:${item.deviceColorVariantId ?? ""}`, item.quantity]),
   );
 
-  const lines = saleItems.map((item) => ({ ...item, colorId: item.colorId ?? null, variantId: item.variantId ?? null }));
+  const lines = saleItems.map((item) => ({ ...item, colorId: item.colorId ?? null, variantId: item.variantId ?? null, deviceColorVariantId: item.deviceColorVariantId ?? null }));
 
   // Color no longer distinguishes a stock bucket, so two lines for the same
-  // product+variant but different colors draw from the same bucket — sum
-  // requested quantity per product+variant (ignoring color) before
+  // product+variant/combo but different colors draw from the same bucket —
+  // sum requested quantity per product+variant+combo (ignoring color) before
   // comparing against available stock.
   const requestedByLineKey = new Map<string, number>();
   for (const item of lines) {
-    const key = `${item.productId}:${item.variantId ?? ""}`;
+    const key = `${item.productId}:${item.variantId ?? ""}:${item.deviceColorVariantId ?? ""}`;
     requestedByLineKey.set(key, (requestedByLineKey.get(key) ?? 0) + item.quantity);
   }
 
@@ -112,18 +112,20 @@ export async function createRepSale(_prevState: RepSaleState, formData: FormData
     if (!product.isActive) {
       return { error: `المنتج "${product.nameAr ?? product.name}" غير مفعّل ولا يمكن بيعه` };
     }
-    // DEVICE_MODEL_COLOR products track stock per brand+model+color
-    // combination, which this sale flow doesn't decrement from yet — see
-    // the same guard in src/app/cart/actions.ts.
-    if (product.inventoryTrackingMode === "DEVICE_MODEL_COLOR") {
-      return { error: `المنتج "${product.nameAr ?? product.name}" غير متاح للبيع من هذا المسار حالياً` };
+    const usesDeviceColor = product.inventoryTrackingMode === "DEVICE_MODEL_COLOR";
+    if (usesDeviceColor) {
+      if (!item.deviceColorVariantId || !product.deviceColorVariants.some((combo) => combo.id === item.deviceColorVariantId)) {
+        return { error: `اختر الماركة والموديل واللون للمنتج "${product.nameAr ?? product.name}"` };
+      }
+    } else if (item.deviceColorVariantId) {
+      return { error: "هذا المنتج لا يستخدم تركيبات الجهاز واللون" };
     }
     if (item.colorId && !product.colorOptions.some((option) => option.colorId === item.colorId)) {
       return { error: `اللون المحدد لا ينتمي للمنتج "${product.nameAr ?? product.name}"` };
     }
     if (product.variantMode === "PHONE_COMPATIBILITY" && (!item.variantId || !product.variants.some((variant) => variant.id === item.variantId))) return { error: `اختر Variant صالحاً للمنتج "${product.nameAr ?? product.name}"` };
     if (product.variantMode !== "PHONE_COMPATIBILITY" && item.variantId) return { error: "Variant لا يتبع المنتج المحدد" };
-    const key = `${item.productId}:${item.variantId ?? ""}`;
+    const key = `${item.productId}:${item.variantId ?? ""}:${item.deviceColorVariantId ?? ""}`;
     const available = stockByLineKey.get(key) ?? 0;
     if (available <= 0) {
       return { error: `المنتج "${product.nameAr ?? product.name}" غير موجود في مخزونك` };
@@ -147,6 +149,11 @@ export async function createRepSale(_prevState: RepSaleState, formData: FormData
           const activeVariants = await tx.productVariant.count({ where: { id: { in: requestedVariantIds }, isActive: true } });
           if (activeVariants !== new Set(requestedVariantIds).size) throw new Error("INACTIVE_VARIANT");
         }
+        const requestedComboIds = lines.flatMap((item) => item.deviceColorVariantId ? [item.deviceColorVariantId] : []);
+        if (requestedComboIds.length > 0) {
+          const activeCombos = await tx.deviceColorVariant.count({ where: { id: { in: requestedComboIds }, isActive: true } });
+          if (activeCombos !== new Set(requestedComboIds).size) throw new Error("INACTIVE_VARIANT");
+        }
         await tx.order.create({
           data: {
             orderNumber,
@@ -166,20 +173,41 @@ export async function createRepSale(_prevState: RepSaleState, formData: FormData
             paymentStatus: PAYMENT_STATUSES.PAID,
             paidAmountCents: totalCents,
             items: {
-              create: lines.map((item) => ({
-                productId: item.productId,
-                colorId: item.colorId,
-                variantId: item.variantId,
-                productNameSnapshot: productById.get(item.productId)?.nameAr ?? productById.get(item.productId)?.name,
-                productSkuSnapshot: productById.get(item.productId)?.sku,
-                variantCodeSnapshot: productById.get(item.productId)?.variants.find((variant) => variant.id === item.variantId)?.variantCode ?? null,
-                phoneBrandSnapshot: (() => { const variant = productById.get(item.productId)?.variants.find((row) => row.id === item.variantId); return variant ? (variant.phoneModel.phoneBrand.nameAr ?? variant.phoneModel.phoneBrand.name) : null; })(),
-                phoneModelSnapshot: (() => { const variant = productById.get(item.productId)?.variants.find((row) => row.id === item.variantId); return variant ? (variant.phoneModel.nameAr ?? variant.phoneModel.name) : null; })(),
-                colorNameSnapshot: (() => { const option = productById.get(item.productId)?.colorOptions.find((row) => row.colorId === item.colorId); return option?.color ? (option.color.nameAr ?? option.color.name) : null; })(),
-                quantity: item.quantity,
-                unitPriceCents: item.unitPriceCents,
-                totalCents: item.unitPriceCents * item.quantity,
-              })),
+              create: lines.map((item) => {
+                const variant = productById.get(item.productId)?.variants.find((row) => row.id === item.variantId);
+                const combo = productById.get(item.productId)?.deviceColorVariants.find((row) => row.id === item.deviceColorVariantId);
+                const colorOption = productById.get(item.productId)?.colorOptions.find((row) => row.colorId === item.colorId);
+                return {
+                  productId: item.productId,
+                  colorId: item.colorId,
+                  variantId: item.variantId,
+                  deviceColorVariantId: item.deviceColorVariantId,
+                  productNameSnapshot: productById.get(item.productId)?.nameAr ?? productById.get(item.productId)?.name,
+                  productSkuSnapshot: productById.get(item.productId)?.sku,
+                  variantCodeSnapshot: variant?.variantCode ?? null,
+                  // Same snapshot fields either way — a device+color
+                  // combination and a phone-model variant both resolve to a
+                  // brand/model(/color) triple (see checkout/actions.ts).
+                  phoneBrandSnapshot: variant
+                    ? (variant.phoneModel.phoneBrand.nameAr ?? variant.phoneModel.phoneBrand.name)
+                    : combo
+                      ? (combo.phoneModel.phoneBrand.nameAr ?? combo.phoneModel.phoneBrand.name)
+                      : null,
+                  phoneModelSnapshot: variant
+                    ? (variant.phoneModel.nameAr ?? variant.phoneModel.name)
+                    : combo
+                      ? (combo.phoneModel.nameAr ?? combo.phoneModel.name)
+                      : null,
+                  colorNameSnapshot: colorOption?.color
+                    ? (colorOption.color.nameAr ?? colorOption.color.name)
+                    : combo
+                      ? (combo.color.nameAr ?? combo.color.name)
+                      : null,
+                  quantity: item.quantity,
+                  unitPriceCents: item.unitPriceCents,
+                  totalCents: item.unitPriceCents * item.quantity,
+                };
+              }),
             },
           },
         });
@@ -191,7 +219,7 @@ export async function createRepSale(_prevState: RepSaleState, formData: FormData
         for (const item of lines) {
           const change = await decrementInventoryAtomic(
             tx,
-            { productId: item.productId, variantId: item.variantId, locationId },
+            { productId: item.productId, variantId: item.variantId, deviceColorVariantId: item.deviceColorVariantId, locationId },
             item.quantity,
           );
 
@@ -199,6 +227,7 @@ export async function createRepSale(_prevState: RepSaleState, formData: FormData
             type: STOCK_MOVEMENT_TYPES.SALE_OUT,
             productId: item.productId,
             variantId: item.variantId,
+            deviceColorVariantId: item.deviceColorVariantId,
             fromLocationId: locationId,
             toLocationId: null,
             quantity: item.quantity,

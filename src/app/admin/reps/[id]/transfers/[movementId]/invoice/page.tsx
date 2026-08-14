@@ -24,6 +24,7 @@ export default async function AdminRepTransferInvoicePage({ params }: AdminRepTr
       createdAt: true,
       product: { select: { sku: true, name: true, nameAr: true } },
       variant: { select: { phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } } } },
+      deviceColorVariant: { select: { phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } }, color: { select: { name: true, nameAr: true } } } },
       fromLocation: { select: { name: true } },
       toLocation: { select: { name: true, salesRepId: true } },
       createdBy: { select: { name: true } },
@@ -64,7 +65,11 @@ export default async function AdminRepTransferInvoicePage({ params }: AdminRepTr
           newQuantity: movement.newQuantity,
           note: movement.note,
           product: movement.product,
-          variantLabel: movement.variant ? `${movement.variant.phoneModel.phoneBrand.nameAr ?? movement.variant.phoneModel.phoneBrand.name} / ${movement.variant.phoneModel.nameAr ?? movement.variant.phoneModel.name}` : null,
+          variantLabel: movement.variant
+            ? `${movement.variant.phoneModel.phoneBrand.nameAr ?? movement.variant.phoneModel.phoneBrand.name} / ${movement.variant.phoneModel.nameAr ?? movement.variant.phoneModel.name}`
+            : movement.deviceColorVariant
+              ? `${movement.deviceColorVariant.phoneModel.phoneBrand.nameAr ?? movement.deviceColorVariant.phoneModel.phoneBrand.name} / ${movement.deviceColorVariant.phoneModel.nameAr ?? movement.deviceColorVariant.phoneModel.name} / ${movement.deviceColorVariant.color.nameAr ?? movement.deviceColorVariant.color.name}`
+              : null,
           fromLocationName: movement.fromLocation?.name ?? null,
           toLocationName: movement.toLocation?.name ?? null,
           repName: rep.user.name,

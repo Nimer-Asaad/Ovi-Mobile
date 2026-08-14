@@ -23,6 +23,8 @@ export default async function RepNewSalePage() {
             quantity: true,
             variantId: true,
             variant: { select: { id: true, phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } } } },
+            deviceColorVariantId: true,
+            deviceColorVariant: { select: { id: true, phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } }, color: { select: { name: true, nameAr: true } } } },
             product: {
               select: {
                 id: true,
@@ -31,6 +33,7 @@ export default async function RepNewSalePage() {
                 nameAr: true,
                 retailPriceCents: true,
                 isActive: true,
+                inventoryTrackingMode: true,
                 images: {
                   select: { url: true, altText: true },
                   orderBy: [{ isMain: "desc" }, { sortOrder: "asc" }],
@@ -84,6 +87,7 @@ export default async function RepNewSalePage() {
     repStock: number;
     colorOptions: SaleColorOption[];
     variantOptions: { id: string; label: string; stock: number }[];
+    deviceColorVariantOptions: { id: string; label: string; stock: number }[];
   }
 
   const byProductId = new Map<string, SaleProductAccumulator>();
@@ -98,16 +102,19 @@ export default async function RepNewSalePage() {
       thumbnailUrl: item.product.images[0]?.url ?? null,
       thumbnailAlt: item.product.images[0]?.altText ?? null,
       repStock: 0,
-      colorOptions: item.product.colorOptions.map((option) => ({
+      colorOptions: item.product.inventoryTrackingMode === "DEVICE_MODEL_COLOR" ? [] : item.product.colorOptions.map((option) => ({
         id: option.color.id,
         name: option.color.name,
         nameAr: option.color.nameAr,
         hexCode: option.color.hexCode,
       })),
       variantOptions: [],
+      deviceColorVariantOptions: [],
     };
     if (item.variantId && item.variant) {
       existing.variantOptions.push({ id: item.variant.id, label: `${item.variant.phoneModel.phoneBrand.nameAr ?? item.variant.phoneModel.phoneBrand.name} / ${item.variant.phoneModel.nameAr ?? item.variant.phoneModel.name}`, stock: item.quantity });
+    } else if (item.deviceColorVariantId && item.deviceColorVariant) {
+      existing.deviceColorVariantOptions.push({ id: item.deviceColorVariant.id, label: `${item.deviceColorVariant.phoneModel.phoneBrand.nameAr ?? item.deviceColorVariant.phoneModel.phoneBrand.name} / ${item.deviceColorVariant.phoneModel.nameAr ?? item.deviceColorVariant.phoneModel.name} / ${item.deviceColorVariant.color.nameAr ?? item.deviceColorVariant.color.name}`, stock: item.quantity });
     } else {
       existing.repStock = item.quantity;
     }
