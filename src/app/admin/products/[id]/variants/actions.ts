@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth/guards";
-import { PRODUCT_VARIANT_MODES, ROLES, STOCK_MOVEMENT_TYPES, VARIANT_ALLOCATION_STATUSES } from "@/lib/constants";
+import { PRODUCT_INVENTORY_TRACKING_MODES, PRODUCT_VARIANT_MODES, ROLES, STOCK_MOVEMENT_TYPES, VARIANT_ALLOCATION_STATUSES } from "@/lib/constants";
 import { allocationSchema, productVariantsSchema } from "@/lib/validation/productVariants";
 import { incrementInventoryUpsert, recordStockMovement, setInventoryAbsolute } from "@/lib/inventory-transactions";
 import { getMainWarehouse } from "@/lib/inventory";
@@ -23,6 +23,18 @@ export async function saveProductVariants(productId: string, _state: VariantActi
   await requireRole([ROLES.ADMIN]);
   const parsed = productVariantsSchema.safeParse({ variants: parseJson(formData, "variants") });
   if (!parsed.success) return { error: "بيانات الـVariants غير صالحة" };
+
+  const product = await prisma.product.findUnique({ where: { id: productId }, select: { inventoryTrackingMode: true } });
+  if (!product) return { error: "المنتج غير موجود" };
+  // A product uses at most one variant system at a time (DB CHECK
+  // constraint on products) — this legacy phone-model-only system and
+  // DEVICE_MODEL_COLOR are mutually exclusive. Without this check, saving a
+  // variant here would set variantMode to PHONE_COMPATIBILITY on a
+  // DEVICE_MODEL_COLOR product and hit a raw CHECK-constraint failure
+  // instead of a clean message.
+  if (product.inventoryTrackingMode === PRODUCT_INVENTORY_TRACKING_MODES.DEVICE_MODEL_COLOR) {
+    return { error: "هذا المنتج يستخدم وضع مخزون الجهاز واللون؛ لا يمكن استخدام نظام الـVariants القديم عليه" };
+  }
 
   const modelIds = [...new Set(parsed.data.variants.map((row) => row.phoneModelId))];
   const [models, existing] = await Promise.all([

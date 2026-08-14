@@ -7,6 +7,7 @@ import type {
   ORDER_STATUSES,
   PAYMENT_METHODS,
   PAYMENT_STATUSES,
+  PRODUCT_INVENTORY_TRACKING_MODES,
   REGISTRATION_METHODS,
   ROLES,
   STOCK_LOCATION_TYPES,
@@ -30,6 +31,7 @@ export type StockReturnStatus = (typeof STOCK_RETURN_STATUSES)[keyof typeof STOC
 export type PaymentMethod = (typeof PAYMENT_METHODS)[keyof typeof PAYMENT_METHODS];
 export type PaymentStatus = (typeof PAYMENT_STATUSES)[keyof typeof PAYMENT_STATUSES];
 export type AccountPaymentMethod = (typeof ACCOUNT_PAYMENT_METHODS)[keyof typeof ACCOUNT_PAYMENT_METHODS];
+export type ProductInventoryTrackingMode = (typeof PRODUCT_INVENTORY_TRACKING_MODES)[keyof typeof PRODUCT_INVENTORY_TRACKING_MODES];
 export type UserActivityEventType = (typeof USER_ACTIVITY_EVENT_TYPES)[keyof typeof USER_ACTIVITY_EVENT_TYPES];
 export type AdminAuditAction = (typeof ADMIN_AUDIT_ACTIONS)[keyof typeof ADMIN_AUDIT_ACTIONS];
 export type RegistrationMethod = (typeof REGISTRATION_METHODS)[keyof typeof REGISTRATION_METHODS];

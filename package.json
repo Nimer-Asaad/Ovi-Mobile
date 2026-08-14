@@ -12,6 +12,8 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "verify:order-lifecycle": "node --conditions=react-server --import tsx prisma/verify-order-lifecycle.ts",
+    "verify:inventory-tracking-modes": "node --conditions=react-server --import tsx prisma/verify-inventory-tracking-modes.ts",
+    "verify:migration-upgrade": "node --conditions=react-server --import tsx prisma/verify-migration-upgrade.ts",
     "postinstall": "prisma generate",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",

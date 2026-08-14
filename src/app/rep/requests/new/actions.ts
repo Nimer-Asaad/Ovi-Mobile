@@ -62,7 +62,7 @@ export async function createStockRequest(
   const productIds = parsed.data.items.map((item) => item.productId);
   const products = await prisma.product.findMany({
     where: { id: { in: productIds } },
-    select: { id: true, isActive: true, name: true, nameAr: true, variantMode: true, variantAllocationStatus: true, variants: { where: { isActive: true }, select: { id: true } } },
+    select: { id: true, isActive: true, name: true, nameAr: true, variantMode: true, variantAllocationStatus: true, inventoryTrackingMode: true, variants: { where: { isActive: true }, select: { id: true } } },
   });
   const productById = new Map(products.map((product) => [product.id, product]));
 
@@ -75,6 +75,12 @@ export async function createStockRequest(
     }
     if (!product.isActive) {
       return { error: `المنتج "${product.nameAr ?? product.name}" غير مفعّل ولا يمكن طلبه` };
+    }
+    // DEVICE_MODEL_COLOR products track stock per brand+model+color
+    // combination, which car-stock requests/transfers don't decrement from
+    // yet — see the same guard in src/app/cart/actions.ts.
+    if (product.inventoryTrackingMode === "DEVICE_MODEL_COLOR") {
+      return { error: `المنتج "${product.nameAr ?? product.name}" غير متاح لطلبات مخزون السيارة حالياً` };
     }
     if (product.variantMode === "PHONE_COMPATIBILITY" && (product.variantAllocationStatus !== "READY" || !item.variantId || !product.variants.some((variant) => variant.id === item.variantId))) return { error: `اختر Variant صالحاً للمنتج "${product.nameAr ?? product.name}"` };
     if (product.variantMode !== "PHONE_COMPATIBILITY" && item.variantId) return { error: "Variant لا يتبع المنتج المحدد" };

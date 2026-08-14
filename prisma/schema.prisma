@@ -267,11 +267,12 @@ model Color {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  productOptions    ProductColorOption[]
-  cartItems         CartItem[]
-  orderItems        OrderItem[]
-  stockRequestItems StockRequestItem[]
-  stockReturnItems  StockReturnItem[]
+  productOptions      ProductColorOption[]
+  cartItems           CartItem[]
+  orderItems          OrderItem[]
+  stockRequestItems   StockRequestItem[]
+  stockReturnItems    StockReturnItem[]
+  deviceColorVariants DeviceColorVariant[]
 
   @@map("colors")
 }
@@ -306,7 +307,8 @@ model PhoneModel {
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
-  variants ProductVariant[]
+  variants            ProductVariant[]
+  deviceColorVariants DeviceColorVariant[]
 
   @@unique([phoneBrandId, slug])
   @@index([phoneBrandId])
@@ -353,11 +355,25 @@ model Product {
   isActive                Boolean  @default(true)
   isFeatured              Boolean  @default(false)
   /// NONE | PHONE_COMPATIBILITY. Existing products remain NONE until an
-  /// admin explicitly opts them into variant tracking.
+  /// admin explicitly opts them into variant tracking. Independent of
+  /// inventoryTrackingMode below — DEVICE_MODEL_COLOR products always keep
+  /// variantMode NONE (enforced by a CHECK constraint), since they never use
+  /// the ProductVariant/allocation-batch machinery this field gates.
   variantMode             String   @default("NONE")
   /// NOT_REQUIRED | PENDING | READY. PENDING inventory is never offered as
   /// variant stock until its legacy balance has been reviewed manually.
   variantAllocationStatus String   @default("NOT_REQUIRED")
+  /// TOTAL_STOCK | DEVICE_MODEL_COLOR. Per-product choice of how its stock
+  /// quantity is tracked — orthogonal to variantMode (the older,
+  /// phone-model-only variant system). TOTAL_STOCK is a single plain
+  /// InventoryItem bucket per location (variantId and deviceColorVariantId
+  /// both null) — the default for every product, including ones already
+  /// using variantMode PHONE_COMPATIBILITY. DEVICE_MODEL_COLOR splits stock
+  /// into independent buckets per DeviceColorVariant (brand+model+color)
+  /// combination — see the DeviceColorVariant/InventoryItem doc comments.
+  /// Converting between the two is guarded in src/lib/inventory-tracking.ts
+  /// to never silently move or drop quantity.
+  inventoryTrackingMode   String   @default("TOTAL_STOCK")
   createdAt               DateTime @default(now())
   updatedAt               DateTime @updatedAt
 
@@ -372,8 +388,43 @@ model Product {
   colorOptions           ProductColorOption[]
   variants               ProductVariant[]
   variantAllocationBatch ProductVariantAllocationBatch?
+  deviceColorVariants    DeviceColorVariant[]
 
   @@map("products")
+}
+
+/// A single product + phone model + color combination used only by products
+/// with inventoryTrackingMode = DEVICE_MODEL_COLOR (typically device cases —
+/// جفرات — and similar accessories). Deliberately a separate table from
+/// ProductVariant: ProductVariant's identity is unique per (productId,
+/// phoneModelId) — one row per model, color excluded on purpose (see its doc
+/// comment) — so it cannot represent "the same model in two colors", which
+/// this mode requires. isActive lets a combination be retired without
+/// deleting historical InventoryItem/StockMovement rows that reference it;
+/// identity (productId/phoneModelId/colorId) is immutable once referenced by
+/// either, enforced by a trigger — see the migration.
+model DeviceColorVariant {
+  id           String     @id @default(cuid())
+  productId    String
+  product      Product    @relation(fields: [productId], references: [id])
+  phoneModelId String
+  phoneModel   PhoneModel @relation(fields: [phoneModelId], references: [id])
+  colorId      String
+  color        Color      @relation(fields: [colorId], references: [id])
+  isActive     Boolean    @default(true)
+  sortOrder    Int        @default(0)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  inventoryItems InventoryItem[]
+  stockMovements StockMovement[]
+
+  @@unique([productId, phoneModelId, colorId])
+  @@unique([id, productId])
+  @@index([productId, isActive])
+  @@index([phoneModelId])
+  @@index([colorId])
+  @@map("device_color_variants")
 }
 
 /// A variant's identity is product + phone model only — this is the sole
@@ -536,20 +587,30 @@ model StockLocation {
 
 /// Current on-hand quantity of a product at a location. Derived data — the
 /// source of truth is the StockMovement ledger; this table is a maintained
-/// aggregate for fast reads. Deliberately has no colorId: the stock bucket
-/// is determined solely by product + variant (phone model), never color —
-/// color is a pure display attribute on CartItem/OrderItem/etc., not a
-/// stock dimension.
+/// aggregate for fast reads. Deliberately has no plain colorId column: color
+/// never determines the stock bucket on its own — color is a pure display
+/// attribute on CartItem/OrderItem/etc. (see the Color/CartItem doc
+/// comments). The one exception is deviceColorVariantId below, which
+/// references a declared *combination* row (product + phone model + color),
+/// not a bare color — used only by inventoryTrackingMode = DEVICE_MODEL_COLOR
+/// products. variantId and deviceColorVariantId are mutually exclusive
+/// (enforced by a CHECK constraint) — a product uses at most one of the two
+/// variant systems, matching its Product.variantMode/inventoryTrackingMode.
+/// Three uniqueness tiers, each a partial index (see the migration):
+/// plain (both null), phone-model variant (variantId set), device+color
+/// combination (deviceColorVariantId set).
 model InventoryItem {
-  id         String          @id @default(cuid())
-  productId  String
-  product    Product         @relation(fields: [productId], references: [id])
-  locationId String
-  location   StockLocation   @relation(fields: [locationId], references: [id])
-  variantId  String?
-  variant    ProductVariant? @relation(fields: [variantId, productId], references: [id, productId])
-  quantity   Int             @default(0)
-  updatedAt  DateTime        @updatedAt
+  id                   String              @id @default(cuid())
+  productId            String
+  product              Product             @relation(fields: [productId], references: [id])
+  locationId           String
+  location             StockLocation       @relation(fields: [locationId], references: [id])
+  variantId            String?
+  variant              ProductVariant?     @relation(fields: [variantId, productId], references: [id, productId])
+  deviceColorVariantId String?
+  deviceColorVariant   DeviceColorVariant? @relation(fields: [deviceColorVariantId, productId], references: [id, productId])
+  quantity             Int                 @default(0)
+  updatedAt            DateTime            @updatedAt
 
   @@unique([productId, locationId, variantId])
   @@map("inventory_items")
@@ -563,27 +624,30 @@ model InventoryItem {
 /// returns, adjustments, rep stock assignment/return) is recorded here and
 /// is never edited or deleted, only appended to.
 model StockMovement {
-  id                String                         @id @default(cuid())
-  type              String
-  productId         String
-  product           Product                        @relation(fields: [productId], references: [id])
-  variantId         String?
-  variant           ProductVariant?                @relation(fields: [variantId, productId], references: [id, productId])
-  allocationBatchId String?
-  allocationBatch   ProductVariantAllocationBatch? @relation(fields: [allocationBatchId], references: [id])
-  fromLocationId    String?
-  fromLocation      StockLocation?                 @relation("MovementFromLocation", fields: [fromLocationId], references: [id])
-  toLocationId      String?
-  toLocation        StockLocation?                 @relation("MovementToLocation", fields: [toLocationId], references: [id])
-  quantity          Int
-  previousQuantity  Int?
-  newQuantity       Int?
-  note              String?
-  createdById       String?
-  createdBy         User?                          @relation("StockMovementCreatedBy", fields: [createdById], references: [id])
-  createdAt         DateTime                       @default(now())
+  id                   String                         @id @default(cuid())
+  type                 String
+  productId            String
+  product              Product                        @relation(fields: [productId], references: [id])
+  variantId            String?
+  variant              ProductVariant?                @relation(fields: [variantId, productId], references: [id, productId])
+  deviceColorVariantId String?
+  deviceColorVariant   DeviceColorVariant?            @relation(fields: [deviceColorVariantId, productId], references: [id, productId])
+  allocationBatchId    String?
+  allocationBatch      ProductVariantAllocationBatch? @relation(fields: [allocationBatchId], references: [id])
+  fromLocationId       String?
+  fromLocation         StockLocation?                 @relation("MovementFromLocation", fields: [fromLocationId], references: [id])
+  toLocationId         String?
+  toLocation           StockLocation?                 @relation("MovementToLocation", fields: [toLocationId], references: [id])
+  quantity             Int
+  previousQuantity     Int?
+  newQuantity          Int?
+  note                 String?
+  createdById          String?
+  createdBy            User?                          @relation("StockMovementCreatedBy", fields: [createdById], references: [id])
+  createdAt            DateTime                       @default(now())
 
   @@index([variantId])
+  @@index([deviceColorVariantId])
   @@index([allocationBatchId])
   @@map("stock_movements")
 }

@@ -221,9 +221,19 @@ export async function completeStockRequest(
 
   const products = await prisma.product.findMany({
     where: { id: { in: productIds } },
-    select: { id: true, name: true, nameAr: true },
+    select: { id: true, name: true, nameAr: true, inventoryTrackingMode: true },
   });
   const productById = new Map(products.map((product) => [product.id, product]));
+
+  // Defense in depth — createStockRequest already blocks DEVICE_MODEL_COLOR
+  // products at request time, but this is the only function that actually
+  // mutates stock for this workflow, so it re-checks rather than trusting a
+  // request created before that guard existed.
+  const deviceModelColorLine = linesToTransfer.find((line) => productById.get(line.productId)?.inventoryTrackingMode === "DEVICE_MODEL_COLOR");
+  if (deviceModelColorLine) {
+    const product = productById.get(deviceModelColorLine.productId);
+    return { error: `المنتج "${product?.nameAr ?? product?.name ?? ""}" يُدار من شاشة تركيبات المخزون ولا يمكن تحويله لمخزون سيارة حالياً` };
+  }
 
   // Color no longer distinguishes a stock bucket, so two lines for the same
   // product+variant but different colors draw from the same bucket — sum

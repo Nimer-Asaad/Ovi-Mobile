@@ -5,16 +5,23 @@ import { redirect } from "next/navigation";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth/guards";
-import { PRODUCT_VARIANT_MODES, ROLES, VARIANT_ALLOCATION_STATUSES } from "@/lib/constants";
+import { PRODUCT_INVENTORY_TRACKING_MODES, PRODUCT_VARIANT_MODES, ROLES, VARIANT_ALLOCATION_STATUSES } from "@/lib/constants";
 import { productSchema } from "@/lib/validation/catalog";
 import { validateMediaBuffer, inferMediaTypeFromUrl, type MediaType } from "@/lib/validation/productMedia";
 import { deleteUnreferencedUploadedProductFiles, saveUploadedProductFile } from "@/lib/uploads";
 import { productRemovalSchema } from "@/lib/validation/productRemoval";
+import { changeInventoryTrackingMode, InventoryTrackingModeConversionError } from "@/lib/inventory-tracking";
+import type { ProductInventoryTrackingMode } from "@/types";
 import type { z } from "zod";
 
 export interface ProductFormState {
   error?: string;
   fieldErrors?: Record<string, string>;
+}
+
+export interface TrackingModeState {
+  error?: string;
+  success?: string;
 }
 
 export type ProductRemovalResult =
@@ -218,6 +225,13 @@ export async function createProduct(
 
   const isFeatured = formData.get("isFeatured") === "on";
   const usesPhoneVariants = formData.get("usesPhoneVariants") === "on";
+  const inventoryTrackingMode = formData.get("inventoryTrackingMode")?.toString() === PRODUCT_INVENTORY_TRACKING_MODES.DEVICE_MODEL_COLOR
+    ? PRODUCT_INVENTORY_TRACKING_MODES.DEVICE_MODEL_COLOR
+    : PRODUCT_INVENTORY_TRACKING_MODES.TOTAL_STOCK;
+
+  if (usesPhoneVariants && inventoryTrackingMode === PRODUCT_INVENTORY_TRACKING_MODES.DEVICE_MODEL_COLOR) {
+    return { error: "لا يمكن الجمع بين نظام توافق الهواتف القديم ونظام مخزون الجهاز واللون على نفس المنتج" };
+  }
 
   let productId: string;
   try {
@@ -236,6 +250,7 @@ export async function createProduct(
         isFeatured,
         variantMode: usesPhoneVariants ? PRODUCT_VARIANT_MODES.PHONE_COMPATIBILITY : PRODUCT_VARIANT_MODES.NONE,
         variantAllocationStatus: usesPhoneVariants ? VARIANT_ALLOCATION_STATUSES.PENDING : VARIANT_ALLOCATION_STATUSES.NOT_REQUIRED,
+        inventoryTrackingMode,
       },
     });
     productId = product.id;
@@ -254,7 +269,9 @@ export async function createProduct(
   revalidatePath("/admin/products");
   revalidatePath("/admin");
   revalidatePath("/products");
-  redirect(usesPhoneVariants ? `/admin/products/${productId}/variants` : "/admin/products");
+  if (usesPhoneVariants) redirect(`/admin/products/${productId}/variants`);
+  if (inventoryTrackingMode === PRODUCT_INVENTORY_TRACKING_MODES.DEVICE_MODEL_COLOR) redirect(`/admin/products/${productId}/device-inventory`);
+  redirect("/admin/products");
 }
 
 export async function updateProduct(
@@ -322,6 +339,53 @@ export async function updateProduct(
   revalidatePath("/admin");
   revalidatePath("/products");
   redirect("/admin/products");
+}
+
+const TRACKING_MODE_ERROR_MESSAGES: Record<InventoryTrackingModeConversionError["code"], (details?: { quantity?: number; comboCount?: number }) => string> = {
+  LEGACY_VARIANT_MODE: () =>
+    "هذا المنتج يستخدم نظام توافق الهواتف القديم (Variants)؛ لا يمكن تحويله إلى مخزون الجهاز واللون في هذه المرحلة",
+  EXISTING_TOTAL_STOCK: (details) =>
+    `لا يمكن التحويل لوجود مخزون إجمالي حالي (${details?.quantity ?? 0} قطعة) — صفّر المخزون من صفحة المخزون أولاً ثم أعد المحاولة، لتفادي فقدان الكمية`,
+  EXISTING_COMBOS: (details) =>
+    `لا يمكن التحويل لوجود ${details?.comboCount ?? 0} تركيبة (جهاز/لون) مرتبطة بهذا المنتج — احذف أو عطّل كل التركيبات أولاً من صفحة تركيبات المخزون`,
+};
+
+/** Guarded, isolated from updateProduct on purpose: converting tracking mode
+ * can be refused for data-safety reasons (see changeInventoryTrackingMode),
+ * and mixing that with the unrelated name/price/media save would make a
+ * partial failure confusing. Redirects into the combo manager only on a
+ * successful switch to DEVICE_MODEL_COLOR — every other outcome re-renders
+ * the edit page with a clear Arabic message and touches no inventory. */
+export async function updateInventoryTrackingMode(
+  productId: string,
+  _prevState: TrackingModeState,
+  formData: FormData,
+): Promise<TrackingModeState> {
+  await requireRole([ROLES.ADMIN]);
+
+  const raw = formData.get("inventoryTrackingMode")?.toString();
+  if (raw !== PRODUCT_INVENTORY_TRACKING_MODES.TOTAL_STOCK && raw !== PRODUCT_INVENTORY_TRACKING_MODES.DEVICE_MODEL_COLOR) {
+    return { error: "وضع تتبع المخزون غير صالح" };
+  }
+  const newMode: ProductInventoryTrackingMode = raw;
+
+  try {
+    await prisma.$transaction((tx) => changeInventoryTrackingMode(tx, { productId, newMode }));
+  } catch (error) {
+    if (error instanceof InventoryTrackingModeConversionError) {
+      return { error: TRACKING_MODE_ERROR_MESSAGES[error.code](error.details) };
+    }
+    throw error;
+  }
+
+  revalidatePath(`/admin/products/${productId}/edit`);
+  revalidatePath("/admin/products");
+  revalidatePath("/admin/inventory");
+
+  if (newMode === PRODUCT_INVENTORY_TRACKING_MODES.DEVICE_MODEL_COLOR) {
+    redirect(`/admin/products/${productId}/device-inventory`);
+  }
+  return { success: "تم تحديث طريقة تتبع المخزون إلى مخزون إجمالي" };
 }
 
 export async function toggleProductActive(id: string): Promise<void> {
@@ -429,6 +493,13 @@ export async function removeProduct(productId: string): Promise<ProductRemovalRe
         await tx.inventoryItem.deleteMany({
           where: { productId: product.id, quantity: 0 },
         });
+        // Safe unconditionally at this point: hasHistoricalRecords===false
+        // already proved zero StockMovement rows reference this product (via
+        // either variantId or deviceColorVariantId), and positiveStock===0
+        // already proved every InventoryItem row (just deleted above) was
+        // zero-quantity — so no DeviceColorVariant combo for this product
+        // can have stock or ledger history left to lose.
+        await tx.deviceColorVariant.deleteMany({ where: { productId: product.id } });
         await tx.productVariant.deleteMany({ where: { productId: product.id } });
         await tx.product.delete({ where: { id: product.id } });
 

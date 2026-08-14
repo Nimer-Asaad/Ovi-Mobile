@@ -70,13 +70,19 @@ export async function assignStockToRep(
 
   const product = await prisma.product.findUnique({
     where: { id: productId },
-    select: { id: true, isActive: true, variantMode: true, variantAllocationStatus: true, variants: { where: { isActive: true }, select: { id: true } } },
+    select: { id: true, isActive: true, variantMode: true, variantAllocationStatus: true, inventoryTrackingMode: true, variants: { where: { isActive: true }, select: { id: true } } },
   });
   if (!product) {
     return { error: "المنتج غير موجود" };
   }
   if (!product.isActive) {
     return { error: "لا يمكن تخصيص منتج غير مفعل" };
+  }
+  // DEVICE_MODEL_COLOR products track stock per brand+model+color
+  // combination, which car-stock assignment doesn't decrement from yet —
+  // see the same guard in src/app/cart/actions.ts.
+  if (product.inventoryTrackingMode === "DEVICE_MODEL_COLOR") {
+    return { error: "هذا المنتج يُدار من شاشة تركيبات المخزون ولا يمكن تخصيصه لمخزون سيارة حالياً" };
   }
   if (product.variantMode === "PHONE_COMPATIBILITY" && (product.variantAllocationStatus !== "READY" || !variantId || !product.variants.some((variant) => variant.id === variantId))) return { error: "اختر Variant صالحاً وجاهز المخزون" };
   if (product.variantMode !== "PHONE_COMPATIBILITY" && variantId) return { error: "Variant لا يتبع المنتج" };
@@ -147,10 +153,13 @@ export async function returnStockFromRep(
 
   const product = await prisma.product.findUnique({
     where: { id: productId },
-    select: { id: true, variantMode: true, variants: { select: { id: true } } },
+    select: { id: true, variantMode: true, inventoryTrackingMode: true, variants: { select: { id: true } } },
   });
   if (!product) {
     return { error: "المنتج غير موجود" };
+  }
+  if (product.inventoryTrackingMode === "DEVICE_MODEL_COLOR") {
+    return { error: "هذا المنتج يُدار من شاشة تركيبات المخزون ولا يمكن إرجاعه من مخزون سيارة حالياً" };
   }
   if (product.variantMode === "PHONE_COMPATIBILITY" && (!variantId || !product.variants.some((variant) => variant.id === variantId))) return { error: "اختر Variant صالحاً" };
 

@@ -46,6 +46,16 @@ export async function addToCart(
     return { error: OUT_OF_STOCK_MESSAGE };
   }
 
+  // DEVICE_MODEL_COLOR products track stock per brand+model+color
+  // combination (DeviceColorVariant) — cart/checkout only knows how to
+  // decrement the plain or phone-model-variant bucket, so selling one here
+  // would either wrongly decrement an unrelated bucket or silently fail.
+  // Blocked until the storefront cart/checkout flow is wired to that
+  // dimension in a future phase.
+  if (product.inventoryTrackingMode === "DEVICE_MODEL_COLOR") {
+    return { error: "هذا المنتج غير متاح للشراء عبر المتجر حالياً" };
+  }
+
   // Never trust the client's colorId/variantId — each is validated
   // independently against what this product actually offers. Color is a
   // pure descriptive attribute (never affects stock) and can be picked

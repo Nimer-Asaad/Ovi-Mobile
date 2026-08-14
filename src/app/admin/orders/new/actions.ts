@@ -140,7 +140,7 @@ export async function createManualOrder(
   const productIds = parsed.data.items.map((item) => item.productId);
   const products = await prisma.product.findMany({
     where: { id: { in: productIds } },
-    select: { id: true, sku: true, isActive: true, name: true, nameAr: true, variantMode: true, colorOptions: { select: { colorId: true, color: { select: { name: true, nameAr: true } } } }, variants: { where: { isActive: true }, select: { id: true, variantCode: true, phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } } } } },
+    select: { id: true, sku: true, isActive: true, name: true, nameAr: true, variantMode: true, inventoryTrackingMode: true, colorOptions: { select: { colorId: true, color: { select: { name: true, nameAr: true } } } }, variants: { where: { isActive: true }, select: { id: true, variantCode: true, phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } } } } },
   });
   const productById = new Map(products.map((product) => [product.id, product]));
 
@@ -153,6 +153,12 @@ export async function createManualOrder(
     }
     if (!product.isActive) {
       return { error: `المنتج "${product.nameAr ?? product.name}" غير مفعّل ولا يمكن بيعه` };
+    }
+    // DEVICE_MODEL_COLOR products track stock per brand+model+color
+    // combination, which this manual order flow doesn't decrement from yet
+    // — see the same guard in src/app/cart/actions.ts.
+    if (product.inventoryTrackingMode === "DEVICE_MODEL_COLOR") {
+      return { error: `المنتج "${product.nameAr ?? product.name}" غير متاح للبيع من هذا المسار حالياً` };
     }
     if (item.colorId && !product.colorOptions.some((option) => option.colorId === item.colorId)) {
       return { error: `اللون المحدد لا ينتمي للمنتج "${product.nameAr ?? product.name}"` };

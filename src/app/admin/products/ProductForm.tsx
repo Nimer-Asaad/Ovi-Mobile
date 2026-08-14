@@ -1,14 +1,41 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import Link from "next/link";
 import type { Brand, Category, Color, Product, ProductImage, Supplier } from "@prisma/client";
-import { createProduct, updateProduct, type ProductFormState } from "./actions";
+import { createProduct, updateProduct, updateInventoryTrackingMode, type ProductFormState } from "./actions";
+import { PRODUCT_INVENTORY_TRACKING_MODES } from "@/lib/constants";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { Textarea } from "@/components/ui/Textarea";
 import { Button } from "@/components/ui/Button";
 import { ProductMediaUploader } from "@/components/admin/products/ProductMediaUploader";
+
+const TRACKING_MODE_LABELS: Record<string, string> = {
+  [PRODUCT_INVENTORY_TRACKING_MODES.TOTAL_STOCK]: "مخزون إجمالي (بدون نوع جهاز أو لون)",
+  [PRODUCT_INVENTORY_TRACKING_MODES.DEVICE_MODEL_COLOR]: "مخزون حسب نوع الجهاز واللون",
+};
+
+function TrackingModeConversionForm({ productId, currentMode }: { productId: string; currentMode: string }) {
+  const targetMode = currentMode === PRODUCT_INVENTORY_TRACKING_MODES.TOTAL_STOCK
+    ? PRODUCT_INVENTORY_TRACKING_MODES.DEVICE_MODEL_COLOR
+    : PRODUCT_INVENTORY_TRACKING_MODES.TOTAL_STOCK;
+  const [state, action, pending] = useActionState(updateInventoryTrackingMode.bind(null, productId), {});
+
+  return (
+    <form action={action} className="flex flex-col gap-2 rounded-card border border-amber-500/30 bg-navy-deep/40 p-3">
+      <input type="hidden" name="inventoryTrackingMode" value={targetMode} />
+      <p className="text-xs text-neutral-bg/60">
+        الوضع الحالي: <span className="text-neutral-bg">{TRACKING_MODE_LABELS[currentMode]}</span>
+      </p>
+      <Button type="submit" variant="outline" size="sm" disabled={pending} className="self-start">
+        {pending ? "جارٍ التحويل..." : `تحويل إلى: ${TRACKING_MODE_LABELS[targetMode]}`}
+      </Button>
+      {state.error && <p className="text-sm text-rose-500">{state.error}</p>}
+      {state.success && <p className="text-sm text-emerald-500">{state.success}</p>}
+    </form>
+  );
+}
 
 interface ProductFormProps {
   categories: Category[];
@@ -48,6 +75,8 @@ export function ProductForm({
 }: ProductFormProps) {
   const action = product ? updateProduct.bind(null, product.id) : createProduct;
   const [state, formAction, isPending] = useActionState(action, initialState);
+  const [usesPhoneVariants, setUsesPhoneVariants] = useState(false);
+  const [newProductTrackingMode, setNewProductTrackingMode] = useState<string>(PRODUCT_INVENTORY_TRACKING_MODES.TOTAL_STOCK);
 
   const sortedImages = [...images].sort((a, b) => (a.isMain === b.isMain ? a.sortOrder - b.sortOrder : a.isMain ? -1 : 1));
 
@@ -199,10 +228,69 @@ export function ProductForm({
         )}
       </FormSection>
 
-      {product && (
+      <FormSection title="طريقة تتبّع المخزون">
+        {!product ? (
+          <>
+            <p className="text-sm text-neutral-bg/60">
+              اختر كيف يُدار مخزون هذا المنتج. مخزون إجمالي: كمية واحدة عادية (شواحن، كوابل، سماعات...). مخزون حسب
+              الجهاز واللون: كمية مستقلة لكل تركيبة ماركة + موديل + لون (جفرات ومنتجات مشابهة). لا يمكن الجمع بينه
+              وبين نظام توافق الهواتف القديم أدناه.
+            </p>
+            <div className="flex flex-col gap-2">
+              <label className="flex items-center gap-2 text-sm text-neutral-bg/80">
+                <input
+                  type="radio"
+                  name="inventoryTrackingMode"
+                  value={PRODUCT_INVENTORY_TRACKING_MODES.TOTAL_STOCK}
+                  checked={newProductTrackingMode === PRODUCT_INVENTORY_TRACKING_MODES.TOTAL_STOCK}
+                  onChange={() => setNewProductTrackingMode(PRODUCT_INVENTORY_TRACKING_MODES.TOTAL_STOCK)}
+                  className="h-4 w-4"
+                />
+                {TRACKING_MODE_LABELS[PRODUCT_INVENTORY_TRACKING_MODES.TOTAL_STOCK]}
+              </label>
+              <label className="flex items-center gap-2 text-sm text-neutral-bg/80">
+                <input
+                  type="radio"
+                  name="inventoryTrackingMode"
+                  value={PRODUCT_INVENTORY_TRACKING_MODES.DEVICE_MODEL_COLOR}
+                  checked={newProductTrackingMode === PRODUCT_INVENTORY_TRACKING_MODES.DEVICE_MODEL_COLOR}
+                  disabled={usesPhoneVariants}
+                  onChange={() => setNewProductTrackingMode(PRODUCT_INVENTORY_TRACKING_MODES.DEVICE_MODEL_COLOR)}
+                  className="h-4 w-4"
+                />
+                {TRACKING_MODE_LABELS[PRODUCT_INVENTORY_TRACKING_MODES.DEVICE_MODEL_COLOR]}
+                {newProductTrackingMode === PRODUCT_INVENTORY_TRACKING_MODES.DEVICE_MODEL_COLOR && (
+                  <span className="text-xs text-neutral-bg/50">(سيتم فتح شاشة تركيبات المخزون بعد الحفظ)</span>
+                )}
+              </label>
+            </div>
+          </>
+        ) : (
+          <>
+            {product.variantMode === "PHONE_COMPATIBILITY" ? (
+              <p className="text-sm text-neutral-bg/60">
+                هذا المنتج يستخدم نظام توافق الهواتف القديم (Variants) — لا يمكن تحويله إلى مخزون الجهاز واللون في
+                هذه المرحلة.
+              </p>
+            ) : (
+              <>
+                <TrackingModeConversionForm productId={product.id} currentMode={product.inventoryTrackingMode} />
+                {product.inventoryTrackingMode === PRODUCT_INVENTORY_TRACKING_MODES.DEVICE_MODEL_COLOR && (
+                  <Link href={`/admin/products/${product.id}/device-inventory`}>
+                    <Button type="button" variant="secondary">إدارة تركيبات مخزون الجهاز واللون</Button>
+                  </Link>
+                )}
+              </>
+            )}
+          </>
+        )}
+      </FormSection>
+
+      {product && product.inventoryTrackingMode !== PRODUCT_INVENTORY_TRACKING_MODES.DEVICE_MODEL_COLOR && (
         <FormSection title="التوافق مع موديلات الهواتف والـVariants">
           <p className="text-sm text-neutral-bg/60">
-            للكفرات وحمايات الشاشة والعدسات: عرّف الماركة والموديل واللون لكل Variant، ثم وزّع المخزون القديم يدوياً دون تغيير مجموعه.
+            نظام قديم منفصل — الماركة والموديل فقط بدون لون. للكفرات وحمايات الشاشة والعدسات: عرّف الماركة والموديل
+            لكل Variant، ثم وزّع المخزون القديم يدوياً دون تغيير مجموعه.
           </p>
           <div className="flex flex-wrap items-center gap-3">
             <Link href={`/admin/products/${product.id}/variants`}><Button type="button" variant="secondary">إدارة الـVariants وتوزيع المخزون</Button></Link>
@@ -221,7 +309,21 @@ export function ProductForm({
           />
           منتج مميز
         </label>
-        {!product && <label className="flex items-center gap-2 text-sm text-neutral-bg/80"><input type="checkbox" name="usesPhoneVariants" className="h-4 w-4" />هذا المنتج يحتاج توافق ماركة + موديل هاتف + لون (سيتم فتح محرر الـVariants بعد الحفظ)</label>}
+        {!product && (
+          <label className="flex items-center gap-2 text-sm text-neutral-bg/80">
+            <input
+              type="checkbox"
+              name="usesPhoneVariants"
+              checked={usesPhoneVariants}
+              onChange={(event) => {
+                setUsesPhoneVariants(event.target.checked);
+                if (event.target.checked) setNewProductTrackingMode(PRODUCT_INVENTORY_TRACKING_MODES.TOTAL_STOCK);
+              }}
+              className="h-4 w-4"
+            />
+            هذا المنتج يحتاج توافق ماركة + موديل هاتف (نظام قديم بدون لون — سيتم فتح محرر الـVariants بعد الحفظ)
+          </label>
+        )}
       </FormSection>
 
       {state.error && (

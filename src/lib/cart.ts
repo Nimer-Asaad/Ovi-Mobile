@@ -30,6 +30,7 @@ export const STOCK_CHECK_PRODUCT_SELECT = {
   inventoryItems: { where: { location: { isDefault: true } }, select: { quantity: true, variantId: true } },
   variantMode: true,
   variantAllocationStatus: true,
+  inventoryTrackingMode: true,
 } satisfies Prisma.ProductSelect;
 
 export type StockCheckProduct = Prisma.ProductGetPayload<{ select: typeof STOCK_CHECK_PRODUCT_SELECT }>;
@@ -55,6 +56,7 @@ const CART_PRODUCT_RETAIL_SELECT = {
   isActive: true,
   variantMode: true,
   variantAllocationStatus: true,
+  inventoryTrackingMode: true,
   retailPriceCents: true,
   images: {
     select: { url: true, altText: true },
@@ -74,6 +76,7 @@ const CART_PRODUCT_WHOLESALE_SELECT = {
   isActive: true,
   variantMode: true,
   variantAllocationStatus: true,
+  inventoryTrackingMode: true,
   wholesalePriceCents: true,
   images: {
     select: { url: true, altText: true },

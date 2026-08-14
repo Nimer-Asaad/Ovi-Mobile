@@ -14,12 +14,27 @@ export interface InventoryKey {
    * distinct from every other NULL, so uniqueness for the variant-less case
    * is instead enforced by a hand-authored partial unique index
    * (`... WHERE "variantId" IS NULL`, see the migration), which only a
-   * plain filter can query against. Deliberately has no colorId: color is a
-   * pure display attribute on cart/order/request/return lines and never
-   * determines the stock bucket — see the InventoryItem doc comment in
-   * prisma/schema.prisma. */
+   * plain filter can query against. Deliberately has no plain colorId: color
+   * is a pure display attribute on cart/order/request/return lines and never
+   * determines the stock bucket on its own — see the InventoryItem doc
+   * comment in prisma/schema.prisma. */
   variantId?: string | null;
+  /** DeviceColorVariant identity (product + phone model + color) — used only
+   * by products with inventoryTrackingMode DEVICE_MODEL_COLOR. Mutually
+   * exclusive with variantId (enforced by a DB CHECK constraint and by
+   * assertValidKey below); same plain-filter/partial-index reasoning as
+   * variantId applies here. */
+  deviceColorVariantId?: string | null;
   locationId: string;
+}
+
+/** Guards the variantId/deviceColorVariantId mutual-exclusivity invariant in
+ * application code too, as defense in depth alongside the DB CHECK
+ * constraint — every helper below calls this before touching the database. */
+function assertValidKey(key: InventoryKey): void {
+  if (key.variantId && key.deviceColorVariantId) {
+    throw new RangeError("INVENTORY_KEY_VARIANT_AND_DEVICE_COLOR_VARIANT_BOTH_SET");
+  }
 }
 
 export interface QuantityChange {
@@ -55,7 +70,13 @@ function requireNonnegativeQuantity(quantity: number): void {
 }
 
 function keyFilter(key: InventoryKey) {
-  return { productId: key.productId, variantId: key.variantId ?? null, locationId: key.locationId };
+  assertValidKey(key);
+  return {
+    productId: key.productId,
+    variantId: key.variantId ?? null,
+    deviceColorVariantId: key.deviceColorVariantId ?? null,
+    locationId: key.locationId,
+  };
 }
 
 async function readQuantity(tx: Tx, key: InventoryKey): Promise<number> {
@@ -79,7 +100,13 @@ async function createOrElse(
 ): Promise<void> {
   try {
     await tx.inventoryItem.create({
-      data: { productId: key.productId, locationId: key.locationId, variantId: key.variantId ?? null, quantity: initialQuantity },
+      data: {
+        productId: key.productId,
+        locationId: key.locationId,
+        variantId: key.variantId ?? null,
+        deviceColorVariantId: key.deviceColorVariantId ?? null,
+        quantity: initialQuantity,
+      },
     });
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
@@ -187,6 +214,7 @@ export interface StockMovementInput {
   type: string;
   productId: string;
   variantId?: string | null;
+  deviceColorVariantId?: string | null;
   allocationBatchId?: string | null;
   fromLocationId?: string | null;
   toLocationId?: string | null;

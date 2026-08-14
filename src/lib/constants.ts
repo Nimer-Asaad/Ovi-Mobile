@@ -49,6 +49,18 @@ export const PRODUCT_VARIANT_MODES = {
   PHONE_COMPATIBILITY: "PHONE_COMPATIBILITY",
 } as const;
 
+/** How a product's stock quantity is tracked — independent of
+ * PRODUCT_VARIANT_MODES (the older phone-model-only variant system).
+ * TOTAL_STOCK is a single plain quantity per location (the default for
+ * every product). DEVICE_MODEL_COLOR splits stock into independent
+ * quantities per device brand + model + color combination (DeviceColorVariant)
+ * — used for phone cases and similar accessories. See the Product/
+ * DeviceColorVariant doc comments in prisma/schema.prisma. */
+export const PRODUCT_INVENTORY_TRACKING_MODES = {
+  TOTAL_STOCK: "TOTAL_STOCK",
+  DEVICE_MODEL_COLOR: "DEVICE_MODEL_COLOR",
+} as const;
+
 export const VARIANT_ALLOCATION_STATUSES = {
   NOT_REQUIRED: "NOT_REQUIRED",
   PENDING: "PENDING",

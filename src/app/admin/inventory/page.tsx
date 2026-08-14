@@ -110,6 +110,15 @@ export default async function AdminInventoryPage({ searchParams }: AdminInventor
         }
       />
 
+      <div className="flex flex-wrap items-center gap-3 rounded-card border border-navy-soft bg-navy-surface p-4 text-sm">
+        <span className="text-neutral-bg/60">إعدادات المخزون:</span>
+        <Link href="/admin/phone-devices" className="text-gold-champagne hover:underline">ماركات وموديلات الأجهزة</Link>
+        <span className="text-neutral-bg/30">·</span>
+        <Link href="/admin/colors" className="text-gold-champagne hover:underline">الألوان</Link>
+        <span className="text-neutral-bg/30">·</span>
+        <span className="text-neutral-bg/50">طريقة تتبّع مخزون كل منتج (إجمالي / حسب الجهاز واللون) تُحدَّد من صفحة تعديل المنتج نفسه</span>
+      </div>
+
       <form
         method="GET"
         className="grid grid-cols-1 gap-4 rounded-card border border-navy-soft bg-navy-surface p-4 sm:grid-cols-2 lg:grid-cols-5"

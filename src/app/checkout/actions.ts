@@ -65,6 +65,13 @@ export async function placeOrder(_prevState: CheckoutState, formData: FormData):
     if (item.product.variantMode === "PHONE_COMPATIBILITY" && (!item.variant || !item.variant.isActive || item.product.variantAllocationStatus !== "READY")) {
       return { error: `يرجى إعادة اختيار موديل ولون المنتج "${item.product.name}" قبل إتمام الطلب` };
     }
+    // Defense in depth — addToCart already blocks DEVICE_MODEL_COLOR
+    // products, but a cart line could predate that guard or be added
+    // through a stale client. See the addToCart comment for why this must
+    // fail closed rather than decrement the wrong bucket.
+    if (item.product.inventoryTrackingMode === "DEVICE_MODEL_COLOR") {
+      return { error: `المنتج "${item.product.name}" غير متاح للشراء عبر المتجر حالياً` };
+    }
   }
 
   // Color no longer distinguishes a stock bucket, so two cart lines for the
