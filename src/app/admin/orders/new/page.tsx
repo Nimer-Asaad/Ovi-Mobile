@@ -91,12 +91,18 @@ export default async function NewManualOrderPage({ searchParams }: NewManualOrde
     variantOptions: product.variantMode === "PHONE_COMPATIBILITY" && product.variantAllocationStatus === "READY" ? product.variants.map((variant) => ({ id: variant.id, label: `${variant.phoneModel.phoneBrand.nameAr ?? variant.phoneModel.phoneBrand.name} / ${variant.phoneModel.nameAr ?? variant.phoneModel.name}`, stock: product.inventoryItems.find((item) => item.variantId === variant.id)?.quantity ?? 0 })) : [],
   }));
 
+  // The query above filters `user: { isActive: true }`, which only matches
+  // merchants with a real linked User row — a login-less trader (userId
+  // null) can never appear here, so `user` is guaranteed non-null at this
+  // point despite Merchant.user now being an optional relation in general.
+  const merchantOptions = merchants.map((merchant) => ({ ...merchant, user: merchant.user! }));
+
   return (
     <div className="flex flex-col gap-6">
       <PageHeader title="طلب يدوي جديد" subtitle="إنشاء طلب من داخل لوحة التحكم لعميل أو تاجر جملة أو عميل مباشر" />
       <ManualOrderForm
         customers={customers}
-        merchants={merchants}
+        merchants={merchantOptions}
         products={productOptions}
         walkInAccounts={walkInAccounts}
         initialMode={mode}

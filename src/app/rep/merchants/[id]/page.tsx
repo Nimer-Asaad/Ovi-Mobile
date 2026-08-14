@@ -29,6 +29,7 @@ export default async function RepMerchantDetailPage({ params }: RepMerchantDetai
         select: {
           businessName: true,
           region: true,
+          contactPhone: true,
           user: { select: { phone: true } },
           account: {
             select: {
@@ -59,7 +60,7 @@ export default async function RepMerchantDetailPage({ params }: RepMerchantDetai
       <AccountStatementView
         account={{
           displayName: merchant.businessName,
-          phone: merchant.user.phone,
+          phone: merchant.contactPhone ?? merchant.user?.phone ?? null,
           kindLabel: "تاجر جملة",
           orders: merchant.account?.orders ?? [],
           payments: merchant.account?.payments ?? [],

@@ -20,12 +20,12 @@ export async function getOrCreateMerchantAccount(tx: Tx, merchantId: string): Pr
 
   const merchant = await tx.merchant.findUniqueOrThrow({
     where: { id: merchantId },
-    select: { businessName: true, user: { select: { phone: true } } },
+    select: { businessName: true, contactPhone: true, user: { select: { phone: true } } },
   });
 
   try {
     const created = await tx.customerAccount.create({
-      data: { displayName: merchant.businessName, phone: merchant.user.phone, merchantId },
+      data: { displayName: merchant.businessName, phone: merchant.contactPhone ?? merchant.user?.phone, merchantId },
       select: { id: true },
     });
     return created.id;

@@ -41,6 +41,7 @@ export default async function AdminMerchantsPage({ searchParams }: AdminMerchant
         region: true,
         status: true,
         createdAt: true,
+        contactPhone: true,
         user: { select: { name: true, email: true, phone: true } },
         orders: { select: { totalCents: true } },
       },
@@ -63,7 +64,15 @@ export default async function AdminMerchantsPage({ searchParams }: AdminMerchant
 
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader title="التجار" subtitle="إدارة طلبات انضمام تجار الجملة واعتمادهم" />
+      <PageHeader
+        title="التجار"
+        subtitle="إدارة طلبات انضمام تجار الجملة واعتمادهم"
+        actions={
+          <Link href="/admin/merchants/new">
+            <Button>إضافة تاجر</Button>
+          </Link>
+        }
+      />
 
       <form
         method="GET"
@@ -111,9 +120,9 @@ export default async function AdminMerchantsPage({ searchParams }: AdminMerchant
           {rows.map((merchant) => (
             <tr key={merchant.id}>
               <td className="px-4 py-3 text-neutral-bg">{merchant.businessName}</td>
-              <td className="px-4 py-3 text-neutral-bg/70">{merchant.user.name}</td>
-              <td className="px-4 py-3 text-neutral-bg/70">{merchant.user.email}</td>
-              <td className="px-4 py-3 text-neutral-bg/70">{merchant.user.phone ?? "—"}</td>
+              <td className="px-4 py-3 text-neutral-bg/70">{merchant.user?.name ?? "—"}</td>
+              <td className="px-4 py-3 text-neutral-bg/70">{merchant.user?.email ?? "—"}</td>
+              <td className="px-4 py-3 text-neutral-bg/70">{merchant.contactPhone ?? merchant.user?.phone ?? "—"}</td>
               <td className="px-4 py-3 text-neutral-bg/70">{merchant.region ?? "—"}</td>
               <td className="px-4 py-3">
                 <Badge variant={getMerchantStatusBadgeVariant(merchant.status)}>

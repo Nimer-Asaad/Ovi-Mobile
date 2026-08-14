@@ -5,9 +5,10 @@ import { redirect } from "next/navigation";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth/guards";
-import { ROLES, ORDER_SOURCES, ORDER_STATUSES, PAYMENT_METHODS, PAYMENT_STATUSES, STOCK_MOVEMENT_TYPES } from "@/lib/constants";
+import { ROLES, MERCHANT_STATUSES, ORDER_SOURCES, ORDER_STATUSES, PAYMENT_METHODS, PAYMENT_STATUSES, STOCK_MOVEMENT_TYPES } from "@/lib/constants";
 import { repSaleSchema } from "@/lib/validation/repSale";
 import { decrementInventoryAtomic, recordStockMovement, InsufficientInventoryError } from "@/lib/inventory-transactions";
+import { getOrCreateMerchantAccount, recordInitialAccountPayment } from "@/lib/accounts";
 
 export interface RepSaleState {
   error?: string;
@@ -30,8 +31,10 @@ function revalidateRepSalePaths(orderNumber: string): void {
   revalidatePath(`/rep/sales/${orderNumber}`);
   revalidatePath("/rep/stock");
   revalidatePath("/rep/movements");
+  revalidatePath("/rep/merchants");
   revalidatePath("/admin/orders");
   revalidatePath(`/admin/orders/${orderNumber}`);
+  revalidatePath("/admin/merchants");
   revalidatePath("/admin");
 }
 
@@ -154,13 +157,45 @@ export async function createRepSale(_prevState: RepSaleState, formData: FormData
           const activeCombos = await tx.deviceColorVariant.count({ where: { id: { in: requestedComboIds }, isActive: true } });
           if (activeCombos !== new Set(requestedComboIds).size) throw new Error("INACTIVE_VARIANT");
         }
+
+        // Resolve this rep's trader for the sale by phone — reuses whichever
+        // Merchant already matches (self-registered, added by an admin, or
+        // created by this rep on an earlier sale), regardless of whether it
+        // has a login. No match creates a new login-less trader, approved
+        // immediately and assigned to this rep, visible in /admin/merchants
+        // right away — see the Merchant model doc comment.
+        let merchant = await tx.merchant.findFirst({
+          where: {
+            assignedRepId: rep.id,
+            OR: [{ contactPhone: customerPhone }, { user: { phone: customerPhone } }],
+          },
+          select: { id: true, userId: true },
+        });
+        if (!merchant) {
+          merchant = await tx.merchant.create({
+            data: {
+              businessName: customerName,
+              contactPhone: customerPhone,
+              city,
+              address,
+              assignedRepId: rep.id,
+              status: MERCHANT_STATUSES.APPROVED,
+              approvedAt: new Date(),
+            },
+            select: { id: true, userId: true },
+          });
+        }
+        const accountId = await getOrCreateMerchantAccount(tx, merchant.id);
+
         await tx.order.create({
           data: {
             orderNumber,
             source: ORDER_SOURCES.REP_SALE,
             status: ORDER_STATUSES.DELIVERED,
             stockLocationId: locationId,
-            customerId: null,
+            customerId: merchant.userId,
+            merchantId: merchant.id,
+            accountId,
             createdByRepId: rep.id,
             subtotalCents: totalCents,
             totalCents,
@@ -211,6 +246,12 @@ export async function createRepSale(_prevState: RepSaleState, formData: FormData
             },
           },
         });
+
+        // A rep sale is always fully paid at the point of sale (paymentMethod
+        // CASH, paymentStatus PAID above) — mirror that into the trader's
+        // account ledger immediately so getAccountBalanceCents doesn't show
+        // a false debt for an order that was, in fact, paid in full.
+        await recordInitialAccountPayment(tx, accountId, totalCents, user.id);
 
         // Per line: atomic conditional decrement — never a stale
         // read-then-write. If the rep's car stock is no longer sufficient

@@ -27,6 +27,7 @@ export async function getMerchantsForRep(repId: string, region?: string): Promis
       businessName: true,
       region: true,
       status: true,
+      contactPhone: true,
       user: { select: { phone: true } },
       account: {
         select: {
@@ -41,7 +42,7 @@ export async function getMerchantsForRep(repId: string, region?: string): Promis
     id: merchant.id,
     businessName: merchant.businessName,
     region: merchant.region,
-    phone: merchant.user.phone,
+    phone: merchant.contactPhone ?? merchant.user?.phone ?? null,
     status: merchant.status,
     balanceCents: merchant.account ? getAccountBalanceCents(merchant.account) : 0,
   }));
@@ -58,6 +59,42 @@ export async function getRepMerchantRegions(repId: string): Promise<string[]> {
   });
 
   return rows.map((row) => row.region).filter((value): value is string => Boolean(value));
+}
+
+export interface RepTraderContact {
+  name: string;
+  phone: string;
+  city: string | null;
+  address: string | null;
+}
+
+/** Contact-autofill list for the rep sale form's customer-name search (see
+ * NewSaleForm.tsx) — every trader assigned to this rep, whether a real
+ * login-based merchant or a login-less trader quick-added by this rep
+ * during a past sale (see createRepSale). Only traders with a known phone
+ * are included, since phone is how createRepSale later re-identifies the
+ * same trader instead of creating a duplicate. */
+export async function getRepTraderContactsForSaleForm(repId: string): Promise<RepTraderContact[]> {
+  const merchants = await prisma.merchant.findMany({
+    where: { assignedRepId: repId },
+    orderBy: { businessName: "asc" },
+    select: {
+      businessName: true,
+      contactPhone: true,
+      city: true,
+      address: true,
+      user: { select: { phone: true } },
+    },
+  });
+
+  return merchants
+    .map((merchant) => ({
+      name: merchant.businessName,
+      phone: merchant.contactPhone ?? merchant.user?.phone ?? null,
+      city: merchant.city,
+      address: merchant.address,
+    }))
+    .filter((merchant): merchant is RepTraderContact => Boolean(merchant.phone));
 }
 
 export interface RepMerchantsFleetSummary {

@@ -105,7 +105,7 @@ export async function createManualOrder(
       where: { id: parsed.data.merchantId },
       select: { id: true, status: true, userId: true, user: { select: { isActive: true } } },
     });
-    if (!merchant || merchant.status !== MERCHANT_STATUSES.APPROVED || !merchant.user.isActive) {
+    if (!merchant || merchant.status !== MERCHANT_STATUSES.APPROVED || !merchant.user?.isActive) {
       return { error: "التاجر المحدد غير معتمد أو غير صالح" };
     }
     resolvedMerchantId = merchant.id;

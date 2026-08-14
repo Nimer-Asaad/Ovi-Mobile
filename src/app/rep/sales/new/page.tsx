@@ -1,7 +1,8 @@
 import { requireRole } from "@/lib/auth/guards";
-import { ROLES, ORDER_SOURCES } from "@/lib/constants";
+import { ROLES } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { getRepTraderContactsForSaleForm } from "@/lib/rep-merchants";
 import { NewSaleForm } from "../NewSaleForm";
 
 export default async function RepNewSalePage() {
@@ -14,7 +15,7 @@ export default async function RepNewSalePage() {
 
   const locationId = rep?.carStockLocation?.id ?? null;
 
-  const [items, pastOrders] = await Promise.all([
+  const [items, customers] = await Promise.all([
     locationId
       ? prisma.inventoryItem.findMany({
           where: { locationId, quantity: { gt: 0 } },
@@ -48,19 +49,11 @@ export default async function RepNewSalePage() {
           },
         })
       : Promise.resolve([]),
-    // Most recent contact details per phone number this rep has sold to
-    // before, used to auto-fill the customer fields instead of re-typing
-    // them (and re-registering the "same" customer under slightly different
-    // details) on every repeat sale.
-    rep
-      ? prisma.order.findMany({
-          where: { createdByRepId: rep.id, source: ORDER_SOURCES.REP_SALE, contactPhone: { not: null } },
-          distinct: ["contactPhone"],
-          orderBy: { createdAt: "desc" },
-          select: { contactName: true, contactPhone: true, city: true, shippingAddress: true },
-          take: 100,
-        })
-      : Promise.resolve([]),
+    // This rep's own trader roster (Merchant.assignedRepId), used to
+    // auto-fill the customer fields instead of re-typing them — see
+    // createRepSale, which resolves/creates the matching Merchant by phone
+    // so repeat sales to the same trader never register a duplicate.
+    rep ? getRepTraderContactsForSaleForm(rep.id) : Promise.resolve([]),
   ]);
 
   // Group rep-car InventoryItem rows into one option per product — a
@@ -121,15 +114,6 @@ export default async function RepNewSalePage() {
     byProductId.set(item.product.id, existing);
   }
   const options = [...byProductId.values()];
-
-  const customers = pastOrders
-    .filter((order) => order.contactName && order.contactPhone)
-    .map((order) => ({
-      name: order.contactName as string,
-      phone: order.contactPhone as string,
-      city: order.city,
-      address: order.shippingAddress,
-    }));
 
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-6">

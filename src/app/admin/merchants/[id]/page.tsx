@@ -33,6 +33,9 @@ export default async function AdminMerchantDetailPage({ params }: AdminMerchantD
       status: true,
       approvedAt: true,
       createdAt: true,
+      contactPhone: true,
+      city: true,
+      address: true,
       user: { select: { name: true, email: true, phone: true, isActive: true } },
       orders: {
         orderBy: { createdAt: "desc" },
@@ -116,29 +119,49 @@ export default async function AdminMerchantDetailPage({ params }: AdminMerchantD
 
         <Card>
           <CardHeader>
-            <CardTitle>معلومات المالك</CardTitle>
+            <CardTitle>{merchant.user ? "معلومات المالك" : "بيانات التواصل"}</CardTitle>
           </CardHeader>
           <CardContent>
-            <dl className="grid grid-cols-1 gap-2 text-sm">
-              <div>
-                <dt className="text-neutral-bg/50">الاسم</dt>
-                <dd className="text-neutral-bg">{merchant.user.name}</dd>
-              </div>
-              <div>
-                <dt className="text-neutral-bg/50">البريد الإلكتروني</dt>
-                <dd className="text-neutral-bg">{merchant.user.email}</dd>
-              </div>
-              <div>
-                <dt className="text-neutral-bg/50">الهاتف</dt>
-                <dd className="text-neutral-bg">{merchant.user.phone ?? "—"}</dd>
-              </div>
-              <div>
-                <dt className="text-neutral-bg/50">حالة الحساب</dt>
-                <dd>
-                  <AdminStatusBadge isActive={merchant.user.isActive} />
-                </dd>
-              </div>
-            </dl>
+            {merchant.user ? (
+              <dl className="grid grid-cols-1 gap-2 text-sm">
+                <div>
+                  <dt className="text-neutral-bg/50">الاسم</dt>
+                  <dd className="text-neutral-bg">{merchant.user.name}</dd>
+                </div>
+                <div>
+                  <dt className="text-neutral-bg/50">البريد الإلكتروني</dt>
+                  <dd className="text-neutral-bg">{merchant.user.email}</dd>
+                </div>
+                <div>
+                  <dt className="text-neutral-bg/50">الهاتف</dt>
+                  <dd className="text-neutral-bg">{merchant.user.phone ?? "—"}</dd>
+                </div>
+                <div>
+                  <dt className="text-neutral-bg/50">حالة الحساب</dt>
+                  <dd>
+                    <AdminStatusBadge isActive={merchant.user.isActive} />
+                  </dd>
+                </div>
+              </dl>
+            ) : (
+              <dl className="grid grid-cols-1 gap-2 text-sm">
+                <div>
+                  <dt className="text-neutral-bg/50">الهاتف</dt>
+                  <dd className="text-neutral-bg">{merchant.contactPhone ?? "—"}</dd>
+                </div>
+                <div>
+                  <dt className="text-neutral-bg/50">المدينة</dt>
+                  <dd className="text-neutral-bg">{merchant.city ?? "—"}</dd>
+                </div>
+                <div>
+                  <dt className="text-neutral-bg/50">العنوان</dt>
+                  <dd className="text-neutral-bg">{merchant.address ?? "—"}</dd>
+                </div>
+                <p className="text-xs text-neutral-bg/50">
+                  تاجر بدون حساب دخول — تمت إضافته مباشرة (لا يملك بريداً إلكترونياً أو كلمة مرور).
+                </p>
+              </dl>
+            )}
           </CardContent>
         </Card>
       </div>

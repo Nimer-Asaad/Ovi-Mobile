@@ -78,11 +78,25 @@ model User {
 
 /// MerchantStatus values: "PENDING" | "APPROVED" | "REJECTED" | "SUSPENDED"
 /// Wholesale pricing is only visible once status = "APPROVED".
+/// A merchant is either a real login-based wholesale account (userId set —
+/// self-registered via /register/merchant, reviewed by an admin) or a
+/// login-less trader contact quick-added directly by an admin or a sales rep
+/// (userId null, contactPhone/city/address set instead). Both kinds share
+/// this one table and the same admin "التجار" list/rep-assignment/account
+/// ledger machinery — the distinction is purely whether userId is set, never
+/// a separate parallel model. Display code prefers user.name/user.phone when
+/// userId is set and falls back to businessName/contactPhone otherwise.
 model Merchant {
   id            String               @id @default(cuid())
-  userId        String               @unique
-  user          User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId        String?              @unique
+  user          User?                @relation(fields: [userId], references: [id], onDelete: Cascade)
   businessName  String
+  /// Contact phone/city/address for a login-less trader (userId null) — set
+  /// by whoever quick-added them (admin form or a rep during a sale). Stay
+  /// null for a real login-based merchant, whose contact info lives on User.
+  contactPhone  String?
+  city          String?
+  address       String?
   taxId         String?
   /// Free-form territory label (e.g. city/area name) used to filter which
   /// merchants a sales rep sees under /rep/merchants — not a separate model

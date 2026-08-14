@@ -1,10 +1,11 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth/guards";
 import { ROLES, MERCHANT_STATUSES, ADMIN_AUDIT_ACTIONS } from "@/lib/constants";
-import { merchantStatusSchema } from "@/lib/validation/merchant";
+import { merchantStatusSchema, createMerchantSchema } from "@/lib/validation/merchant";
 import { getOrCreateMerchantAccount } from "@/lib/accounts";
 
 const AUDIT_ACTION_BY_STATUS: Record<string, string> = {
@@ -64,15 +65,22 @@ export async function updateMerchantStatus(
         approvedAt: parsed.data === MERCHANT_STATUSES.APPROVED ? new Date() : null,
       },
     }),
-    prisma.adminAuditLog.create({
-      data: {
-        adminUserId: admin.id,
-        targetUserId: merchant.userId,
-        action: AUDIT_ACTION_BY_STATUS[parsed.data] ?? ADMIN_AUDIT_ACTIONS.MERCHANT_STATUS_RESET,
-        oldValue: { status: merchant.status },
-        newValue: { status: parsed.data },
-      },
-    }),
+    // AdminAuditLog tracks actions against a User account — a login-less
+    // trader (merchant.userId null) has none, so there's nothing meaningful
+    // to log here; the status change above still applies either way.
+    ...(merchant.userId
+      ? [
+          prisma.adminAuditLog.create({
+            data: {
+              adminUserId: admin.id,
+              targetUserId: merchant.userId,
+              action: AUDIT_ACTION_BY_STATUS[parsed.data] ?? ADMIN_AUDIT_ACTIONS.MERCHANT_STATUS_RESET,
+              oldValue: { status: merchant.status },
+              newValue: { status: parsed.data },
+            },
+          }),
+        ]
+      : []),
   ]);
 
   // Every approved merchant gets a debt-ledger account up front (not just
@@ -133,4 +141,65 @@ export async function updateMerchantAssignment(
   revalidatePath("/rep/merchants");
 
   return { success: "تم حفظ المنطقة والمندوب المسؤول" };
+}
+
+export interface CreateMerchantState {
+  error?: string;
+}
+
+/** Admin "add trader" form — creates a login-less Merchant (no email/
+ * password) approved immediately, since an admin is vouching for them
+ * directly rather than this going through /register/merchant self-signup +
+ * review. Mirrors updateMerchantStatus's "every approved merchant gets a
+ * debt-ledger account up front" behavior. */
+export async function createMerchant(
+  _prevState: CreateMerchantState,
+  formData: FormData,
+): Promise<CreateMerchantState> {
+  await requireRole([ROLES.ADMIN]);
+
+  const parsed = createMerchantSchema.safeParse({
+    businessName: formData.get("businessName")?.toString().trim() ?? "",
+    contactPhone: formData.get("contactPhone")?.toString().trim() ?? "",
+    city: formData.get("city")?.toString().trim() || undefined,
+    address: formData.get("address")?.toString().trim() || undefined,
+    region: formData.get("region")?.toString().trim() || undefined,
+    assignedRepId: formData.get("assignedRepId")?.toString().trim() || undefined,
+  });
+
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "بيانات التاجر غير صالحة" };
+  }
+  const { businessName, contactPhone, city, address, region, assignedRepId } = parsed.data;
+
+  if (assignedRepId) {
+    const rep = await prisma.salesRepresentative.findUnique({ where: { id: assignedRepId }, select: { id: true } });
+    if (!rep) {
+      return { error: "المندوب المحدد غير موجود" };
+    }
+  }
+
+  const merchant = await prisma.$transaction(async (tx) => {
+    const created = await tx.merchant.create({
+      data: {
+        businessName,
+        contactPhone,
+        city,
+        address,
+        region,
+        assignedRepId,
+        status: MERCHANT_STATUSES.APPROVED,
+        approvedAt: new Date(),
+      },
+      select: { id: true },
+    });
+    await getOrCreateMerchantAccount(tx, created.id);
+    return created;
+  });
+
+  revalidatePath("/admin/merchants");
+  revalidatePath("/admin");
+  revalidatePath("/rep/merchants");
+
+  redirect(`/admin/merchants/${merchant.id}`);
 }

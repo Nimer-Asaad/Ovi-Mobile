@@ -32,7 +32,7 @@ async function main() {
     if (existing) continue;
 
     await prisma.customerAccount.create({
-      data: { displayName: merchant.businessName, phone: merchant.user.phone, merchantId: merchant.id },
+      data: { displayName: merchant.businessName, phone: merchant.user?.phone, merchantId: merchant.id },
     });
     created += 1;
     console.log("Created account for:", merchant.businessName);
