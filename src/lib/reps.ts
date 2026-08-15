@@ -1,7 +1,51 @@
 import "server-only";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { STOCK_LOCATION_TYPES } from "@/lib/constants";
 import { isLowStock } from "@/lib/inventory";
+
+type Tx = Prisma.TransactionClient;
+
+/** Next sequential employee code (REP-001, REP-002, ...). Reads the highest
+ * existing numeric suffix rather than counting rows, so a deactivated/
+ * removed rep never causes a code to be reused. Must run inside the same
+ * transaction as the create it feeds, or two concurrent promotions could
+ * generate the same code. */
+export async function generateNextEmployeeCode(tx: Tx): Promise<string> {
+  const reps = await tx.salesRepresentative.findMany({ select: { employeeCode: true } });
+  const maxNumber = reps.reduce((max, rep) => {
+    const match = rep.employeeCode.match(/^REP-(\d+)$/);
+    return match ? Math.max(max, parseInt(match[1], 10)) : max;
+  }, 0);
+  return `REP-${String(maxNumber + 1).padStart(3, "0")}`;
+}
+
+/** Ensures a user promoted to SALES_REPRESENTATIVE has a linked
+ * SalesRepresentative row — the Reps admin page and every rep-facing feature
+ * (car stock, employee code, assigned merchants) read from that table, not
+ * from User.role, so without this the promotion is cosmetic only. Reactivates
+ * a previously-demoted rep's existing row instead of creating a duplicate,
+ * since employeeCode/stock/order history should survive a role round-trip. */
+export async function ensureRepProfile(tx: Tx, userId: string): Promise<{ created: boolean }> {
+  const existing = await tx.salesRepresentative.findUnique({ where: { userId } });
+  if (existing) {
+    if (!existing.isActive) {
+      await tx.salesRepresentative.update({ where: { id: existing.id }, data: { isActive: true } });
+    }
+    return { created: false };
+  }
+
+  const employeeCode = await generateNextEmployeeCode(tx);
+  await tx.salesRepresentative.create({ data: { userId, employeeCode } });
+  return { created: true };
+}
+
+/** Deactivates a demoted user's SalesRepresentative row so they stop
+ * appearing as an active rep. Never deletes it — orders, stock movements,
+ * and assigned merchants hold a real FK to this row. */
+export async function deactivateRepProfile(tx: Tx, userId: string): Promise<void> {
+  await tx.salesRepresentative.updateMany({ where: { userId, isActive: true }, data: { isActive: false } });
+}
 
 /** Lazily creates a rep's stock location if one doesn't exist yet. Only
  * call from write actions (e.g. assigning stock) — read-only GET pages must

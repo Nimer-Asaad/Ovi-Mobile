@@ -7,6 +7,7 @@ import { requireRole } from "@/lib/auth/guards";
 import { hashPassword } from "@/lib/auth/password";
 import { ROLES, ADMIN_AUDIT_ACTIONS } from "@/lib/constants";
 import { changeableRoleSchema } from "@/lib/validation/user";
+import { ensureRepProfile, deactivateRepProfile } from "@/lib/reps";
 
 export interface UserActionState {
   error?: string;
@@ -78,9 +79,22 @@ export async function changeUserRole(
     }
   }
 
-  await prisma.$transaction([
-    prisma.user.update({ where: { id: targetUserId }, data: { role: parsed.data } }),
-    prisma.adminAuditLog.create({
+  await prisma.$transaction(async (tx) => {
+    await tx.user.update({ where: { id: targetUserId }, data: { role: parsed.data } });
+
+    // Keep the SalesRepresentative table (which the Reps admin page and every
+    // rep-facing feature actually read from) in sync with the role change —
+    // otherwise promoting a user only changes their badge and they never show
+    // up as a rep. See ensureRepProfile/deactivateRepProfile for details.
+    let repProfileCreated = false;
+    if (parsed.data === ROLES.SALES_REPRESENTATIVE) {
+      const result = await ensureRepProfile(tx, targetUserId);
+      repProfileCreated = result.created;
+    } else if (target.role === ROLES.SALES_REPRESENTATIVE) {
+      await deactivateRepProfile(tx, targetUserId);
+    }
+
+    await tx.adminAuditLog.create({
       data: {
         adminUserId: admin.id,
         targetUserId,
@@ -88,10 +102,23 @@ export async function changeUserRole(
         oldValue: { role: target.role },
         newValue: { role: parsed.data },
       },
-    }),
-  ]);
+    });
+
+    if (repProfileCreated) {
+      await tx.adminAuditLog.create({
+        data: {
+          adminUserId: admin.id,
+          targetUserId,
+          action: ADMIN_AUDIT_ACTIONS.REP_PROFILE_CREATED,
+          oldValue: {},
+          newValue: { role: parsed.data },
+        },
+      });
+    }
+  });
 
   revalidateUserPaths(targetUserId);
+  revalidatePath("/admin/reps");
 
   return { success: "تم تغيير الدور بنجاح" };
 }
