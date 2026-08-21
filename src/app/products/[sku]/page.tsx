@@ -72,20 +72,33 @@ export default async function ProductDetailPage({ params }: ProductDetailPagePro
     nameAr: option.color.nameAr,
     hexCode: option.color.hexCode,
   }));
-  const variants = product.variants.map((variant) => ({
-    id: variant.id,
-    variantCode: variant.variantCode,
-    stock: variant.inventoryItems.reduce((sum, item) => sum + item.quantity, 0),
-    brand: variant.phoneModel.phoneBrand,
-    model: { id: variant.phoneModel.id, name: variant.phoneModel.name, nameAr: variant.phoneModel.nameAr },
-  }));
-  const deviceColorVariants = product.deviceColorVariants.map((combo) => ({
-    id: combo.id,
-    stock: combo.inventoryItems.reduce((sum, item) => sum + item.quantity, 0),
-    brand: combo.phoneModel.phoneBrand,
-    model: { id: combo.phoneModel.id, name: combo.phoneModel.name, nameAr: combo.phoneModel.nameAr },
-    color: combo.color,
-  }));
+  // Purchasable options only: `isActive` (manual admin control, already
+  // filtered by the `variants`/`deviceColorVariants` query select) AND
+  // in-stock. Quantity reaching zero never touches `isActive` itself — a
+  // combination/variant just stops being offered here until restocked, and
+  // reappears on its own the moment its quantity goes back above zero.
+  // ProductPurchasePanel derives its brand/model(/color) picker lists from
+  // these arrays, so filtering here cascades: a model with every color at
+  // zero stock drops out entirely, while a model with at least one
+  // in-stock color still shows (with only that color offered).
+  const variants = product.variants
+    .map((variant) => ({
+      id: variant.id,
+      variantCode: variant.variantCode,
+      stock: variant.inventoryItems.reduce((sum, item) => sum + item.quantity, 0),
+      brand: variant.phoneModel.phoneBrand,
+      model: { id: variant.phoneModel.id, name: variant.phoneModel.name, nameAr: variant.phoneModel.nameAr },
+    }))
+    .filter((variant) => variant.stock > 0);
+  const deviceColorVariants = product.deviceColorVariants
+    .map((combo) => ({
+      id: combo.id,
+      stock: combo.inventoryItems.reduce((sum, item) => sum + item.quantity, 0),
+      brand: combo.phoneModel.phoneBrand,
+      model: { id: combo.phoneModel.id, name: combo.phoneModel.name, nameAr: combo.phoneModel.nameAr },
+      color: combo.color,
+    }))
+    .filter((combo) => combo.stock > 0);
   const totalStock = product.variantMode === "PHONE_COMPATIBILITY"
     ? product.variantAllocationStatus === "READY" ? variants.reduce((sum, variant) => sum + variant.stock, 0) : 0
     : product.inventoryTrackingMode === "DEVICE_MODEL_COLOR"

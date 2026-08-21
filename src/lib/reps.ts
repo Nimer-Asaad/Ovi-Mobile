@@ -14,8 +14,8 @@ type Tx = Prisma.TransactionClient;
 export async function generateNextEmployeeCode(tx: Tx): Promise<string> {
   const reps = await tx.salesRepresentative.findMany({ select: { employeeCode: true } });
   const maxNumber = reps.reduce((max, rep) => {
-    const match = rep.employeeCode.match(/^REP-(\d+)$/);
-    return match ? Math.max(max, parseInt(match[1], 10)) : max;
+    const captured = rep.employeeCode.match(/^REP-(\d+)$/)?.[1];
+    return captured ? Math.max(max, parseInt(captured, 10)) : max;
   }, 0);
   return `REP-${String(maxNumber + 1).padStart(3, "0")}`;
 }
