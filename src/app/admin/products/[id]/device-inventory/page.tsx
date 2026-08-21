@@ -23,7 +23,17 @@ export default async function DeviceInventoryPage({ params }: { params: Promise<
     }),
     prisma.deviceColorVariant.findMany({
       where: { productId: id },
-      orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+      // Brand → model → color order, so the grouped UI below (one section
+      // per model, colors listed underneath) renders in a stable, obvious
+      // sequence instead of insertion order.
+      orderBy: [
+        { phoneModel: { phoneBrand: { sortOrder: "asc" } } },
+        { phoneModel: { phoneBrand: { name: "asc" } } },
+        { phoneModel: { sortOrder: "asc" } },
+        { phoneModel: { name: "asc" } },
+        { sortOrder: "asc" },
+        { createdAt: "asc" },
+      ],
       include: {
         phoneModel: { include: { phoneBrand: true } },
         color: true,
@@ -71,6 +81,7 @@ export default async function DeviceInventoryPage({ params }: { params: Promise<
           combos={combos.map((combo) => ({
             id: combo.id,
             isActive: combo.isActive,
+            phoneModelId: combo.phoneModelId,
             brandLabel: combo.phoneModel.phoneBrand.nameAr ?? combo.phoneModel.phoneBrand.name,
             modelLabel: combo.phoneModel.nameAr ?? combo.phoneModel.name,
             colorLabel: combo.color.nameAr ?? combo.color.name,

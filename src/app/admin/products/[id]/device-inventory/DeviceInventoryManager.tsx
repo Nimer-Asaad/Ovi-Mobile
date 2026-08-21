@@ -4,15 +4,21 @@ import { useActionState, useMemo, useState } from "react";
 import Link from "next/link";
 import { createCombo, updateComboQuantity, toggleComboActive, removeCombo, type ComboActionState } from "./actions";
 import { Button } from "@/components/ui/Button";
+import { Badge } from "@/components/ui/Badge";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
+import { cn } from "@/lib/utils";
 
 type DeviceBrand = { id: string; name: string; nameAr: string | null; models: { id: string; name: string; nameAr: string | null }[] };
 type ColorOption = { id: string; name: string; nameAr: string | null; hexCode: string | null };
-type Combo = { id: string; isActive: boolean; brandLabel: string; modelLabel: string; colorLabel: string; colorHex: string | null; quantity: number };
+type Combo = { id: string; isActive: boolean; phoneModelId: string; brandLabel: string; modelLabel: string; colorLabel: string; colorHex: string | null; quantity: number };
 
 const initial: ComboActionState = {};
 
+/** One color's row inside a model group — same three-column layout
+ * (color / quantity+save / status actions) on every row across every group,
+ * so everything lines up regardless of label length. Still one independent
+ * DeviceColorVariant record per row; grouping by model is purely visual. */
 function ComboRow({ productId, combo }: { productId: string; combo: Combo }) {
   const [quantity, setQuantity] = useState(combo.quantity);
   const [qtyState, qtyAction, qtyPending] = useActionState(updateComboQuantity.bind(null, combo.id, productId), initial);
@@ -27,43 +33,52 @@ function ComboRow({ productId, combo }: { productId: string; combo: Combo }) {
   }
 
   return (
-    <tr className={combo.isActive ? undefined : "opacity-50"}>
-      <td className="px-3 py-2 text-neutral-bg">{combo.brandLabel}</td>
-      <td className="px-3 py-2 text-neutral-bg">{combo.modelLabel}</td>
-      <td className="px-3 py-2 text-neutral-bg">
-        <span className="inline-flex items-center gap-2">
-          {combo.colorHex && <span aria-hidden="true" className="h-3 w-3 rounded-full border border-navy-soft" style={{ backgroundColor: combo.colorHex }} />}
-          {combo.colorLabel}
-        </span>
-      </td>
-      <td className="px-3 py-2">
-        <form action={qtyAction} className="flex items-center gap-2">
-          <input type="hidden" name="quantity" value={quantity} />
-          <input
-            type="number"
-            min={0}
-            value={quantity}
-            onChange={(event) => setQuantity(Math.max(0, Math.floor(Number(event.target.value) || 0)))}
-            className="h-9 w-24 rounded-card border border-navy-soft bg-navy-deep px-2 text-neutral-bg"
-          />
-          <Button type="submit" size="sm" variant="outline" disabled={qtyPending || quantity === combo.quantity}>
-            {qtyPending ? "..." : "حفظ"}
-          </Button>
-        </form>
-        {qtyState.error && <p className="mt-1 text-xs text-rose-500">{qtyState.error}</p>}
-      </td>
-      <td className="px-3 py-2 text-center">
+    <div
+      className={cn(
+        "grid grid-cols-1 items-center gap-x-4 gap-y-2 border-b border-navy-soft/60 px-4 py-3 last:border-b-0 sm:grid-cols-[11rem_1fr_auto]",
+        !combo.isActive && "opacity-60",
+      )}
+    >
+      <div className="flex flex-wrap items-center gap-1.5">
+        {combo.colorHex && (
+          <span aria-hidden="true" className="h-3 w-3 shrink-0 rounded-full border border-navy-soft" style={{ backgroundColor: combo.colorHex }} />
+        )}
+        <span className="text-sm font-medium text-neutral-bg">{combo.colorLabel}</span>
+        {/* Disabled is the manual admin control; out-of-stock is purely
+         * informational — quantity 0 never flips isActive on its own (see
+         * updateComboQuantity in ./actions.ts), so both can appear
+         * independently of each other. */}
+        {!combo.isActive && <Badge variant="neutral">معطل</Badge>}
+        {combo.isActive && combo.quantity === 0 && <Badge variant="warning">نفد المخزون</Badge>}
+      </div>
+
+      <form action={qtyAction} className="flex flex-wrap items-center gap-2">
+        <span className="text-xs text-neutral-bg/50 sm:hidden">الكمية</span>
+        <input type="hidden" name="quantity" value={quantity} />
+        <input
+          type="number"
+          min={0}
+          value={quantity}
+          onChange={(event) => setQuantity(Math.max(0, Math.floor(Number(event.target.value) || 0)))}
+          className="h-9 w-24 rounded-card border border-navy-soft bg-navy-deep px-2 text-neutral-bg"
+        />
+        <Button type="submit" size="sm" variant="outline" disabled={qtyPending || quantity === combo.quantity}>
+          {qtyPending ? "جارٍ الحفظ..." : "حفظ"}
+        </Button>
+        {qtyState.error && <span className="text-xs text-rose-500">{qtyState.error}</span>}
+        {!qtyState.error && qtyState.success && <span className="text-xs text-emerald-500">{qtyState.success}</span>}
+      </form>
+
+      <div className="flex items-center gap-2">
         <form action={toggleComboActive.bind(null, combo.id, productId)}>
           <Button type="submit" size="sm" variant="ghost">{combo.isActive ? "تعطيل" : "تفعيل"}</Button>
         </form>
-      </td>
-      <td className="px-3 py-2 text-center">
         <Button type="button" size="sm" variant="ghost" disabled={removing} onClick={handleRemove}>
           {removing ? "..." : "حذف"}
         </Button>
-        {removeMessage && <p className="mt-1 text-xs text-neutral-bg/60">{removeMessage}</p>}
-      </td>
-    </tr>
+        {removeMessage && <span className="text-xs text-neutral-bg/60">{removeMessage}</span>}
+      </div>
+    </div>
   );
 }
 
@@ -92,6 +107,30 @@ export function DeviceInventoryManager({
   }
 
   const canAddCombo = brands.length > 0 && colors.length > 0;
+
+  // Purely presentational grouping — every combo stays its own independent
+  // record (see createCombo/updateComboQuantity/removeCombo in ./actions.ts,
+  // all untouched); this just clusters rows by phoneModelId so the
+  // brand/model heading is shown once instead of repeating per color.
+  // `combos` already arrives sorted brand → model → color (see the page's
+  // Prisma orderBy), so grouping by first-seen order preserves that.
+  const groups = useMemo(() => {
+    const byModel = new Map<string, { phoneModelId: string; brandLabel: string; modelLabel: string; combos: Combo[] }>();
+    for (const combo of combos) {
+      const group = byModel.get(combo.phoneModelId);
+      if (group) {
+        group.combos.push(combo);
+      } else {
+        byModel.set(combo.phoneModelId, {
+          phoneModelId: combo.phoneModelId,
+          brandLabel: combo.brandLabel,
+          modelLabel: combo.modelLabel,
+          combos: [combo],
+        });
+      }
+    }
+    return Array.from(byModel.values());
+  }, [combos]);
 
   return (
     <div className="space-y-6">
@@ -136,30 +175,28 @@ export function DeviceInventoryManager({
         </form>
       )}
 
-      <div className="overflow-x-auto rounded-card border border-navy-soft">
-        <table className="w-full text-sm">
-          <thead className="bg-navy-soft/30 text-neutral-bg/70">
-            <tr>
-              <th className="px-3 py-3 text-start">الماركة</th>
-              <th className="px-3 py-3 text-start">الموديل</th>
-              <th className="px-3 py-3 text-start">اللون</th>
-              <th className="px-3 py-3 text-start">الكمية</th>
-              <th className="px-3 py-3 text-center">الحالة</th>
-              <th className="px-3 py-3 text-center"></th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-navy-soft bg-navy-surface">
-            {combos.map((combo) => <ComboRow key={combo.id} productId={productId} combo={combo} />)}
-            {combos.length === 0 && (
-              <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-neutral-bg/50">
-                  لا توجد تركيبات بعد — أضِف أول تركيبة من النموذج أعلاه.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      {groups.length === 0 ? (
+        <div className="rounded-card border border-navy-soft bg-navy-surface px-4 py-8 text-center text-sm text-neutral-bg/50">
+          لا توجد تركيبات بعد — أضِف أول تركيبة من النموذج أعلاه.
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {groups.map((group) => (
+            <div key={group.phoneModelId} className="overflow-hidden rounded-card border border-navy-soft">
+              <div className="flex items-center gap-2 bg-navy-soft/30 px-4 py-3">
+                <span className="text-xs font-semibold uppercase tracking-wide text-gold-champagne/80">{group.brandLabel}</span>
+                <span aria-hidden="true" className="text-neutral-bg/30">•</span>
+                <h3 className="text-sm font-semibold text-neutral-bg">{group.modelLabel}</h3>
+                <span className="ms-auto text-xs text-neutral-bg/50">{group.combos.length} لون</span>
+              </div>
+              <div className="bg-navy-surface">
+                {group.combos.map((combo) => <ComboRow key={combo.id} productId={productId} combo={combo} />)}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
       <p className="text-xs text-neutral-bg/50">{allModels.length} موديل متاح إجمالاً عبر {brands.length} ماركة.</p>
     </div>
   );
