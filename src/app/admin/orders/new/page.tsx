@@ -17,6 +17,16 @@ interface NewManualOrderPageProps {
   }>;
 }
 
+// Brand → model[ → color] order, matching the same stable sequence used by
+// the device-inventory grouped UI and the admin/inventory/adjust cascade.
+const BRAND_MODEL_ORDER = [
+  { phoneModel: { phoneBrand: { sortOrder: "asc" as const } } },
+  { phoneModel: { phoneBrand: { name: "asc" as const } } },
+  { phoneModel: { sortOrder: "asc" as const } },
+  { phoneModel: { name: "asc" as const } },
+  { sortOrder: "asc" as const },
+];
+
 export default async function NewManualOrderPage({ searchParams }: NewManualOrderPageProps) {
   const { mode, merchantId, customerId, walkInAccountId } = await searchParams;
   const [customers, merchants, products, walkInAccounts] = await Promise.all([
@@ -47,15 +57,35 @@ export default async function NewManualOrderPage({ searchParams }: NewManualOrde
         brand: { select: { name: true } },
         inventoryItems: {
           where: { location: { isDefault: true } },
-          select: { quantity: true, variantId: true },
+          select: { quantity: true, variantId: true, deviceColorVariantId: true },
         },
         colorOptions: {
           select: { color: { select: { id: true, name: true, nameAr: true, hexCode: true } } },
           orderBy: { sortOrder: "asc" },
         },
-        variants: { where: { isActive: true }, select: { id: true, phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } } } },
+        // Active only — order creation is a sale-facing flow (like
+        // cart/checkout/rep-sale), unlike admin/inventory/adjust which
+        // deliberately shows disabled rows for restocking.
+        variants: {
+          where: { isActive: true },
+          orderBy: BRAND_MODEL_ORDER,
+          select: {
+            id: true,
+            phoneModel: { select: { id: true, name: true, nameAr: true, phoneBrandId: true, phoneBrand: { select: { id: true, name: true, nameAr: true } } } },
+          },
+        },
+        deviceColorVariants: {
+          where: { isActive: true },
+          orderBy: BRAND_MODEL_ORDER,
+          select: {
+            id: true,
+            phoneModel: { select: { id: true, name: true, nameAr: true, phoneBrandId: true, phoneBrand: { select: { id: true, name: true, nameAr: true } } } },
+            color: { select: { id: true, name: true, nameAr: true, hexCode: true } },
+          },
+        },
         variantMode: true,
         variantAllocationStatus: true,
+        inventoryTrackingMode: true,
       },
       orderBy: { name: "asc" },
     }),
@@ -78,17 +108,44 @@ export default async function NewManualOrderPage({ searchParams }: NewManualOrde
     wholesalePriceCents: product.wholesalePriceCents,
     categoryLabel: product.category?.nameAr ?? product.category?.name ?? null,
     brandLabel: product.brand?.name ?? null,
-    // Non-variant total — a phone-variant product's purchasable stock is
-    // per-model instead (variantOptions[].stock). Color never affects
-    // stock either way — see the InventoryItem doc comment in schema.prisma.
-    stock: product.inventoryItems.filter((item) => !item.variantId).reduce((sum, item) => sum + item.quantity, 0),
-    colorOptions: product.colorOptions.map((option) => ({
+    // Plain (non-variant, non-combo) total — a phone-variant product's
+    // purchasable stock is per-model instead (variantOptions[].stock), and a
+    // DEVICE_MODEL_COLOR product's is per-combination
+    // (deviceColorVariantOptions[].stock). Color never affects stock on its
+    // own either way — see the InventoryItem doc comment in schema.prisma.
+    stock: product.inventoryItems.filter((item) => !item.variantId && !item.deviceColorVariantId).reduce((sum, item) => sum + item.quantity, 0),
+    // Never populated for a DEVICE_MODEL_COLOR product — its color is
+    // already part of deviceColorVariantOptions below, matching the same
+    // convention already used in rep/sales/new/page.tsx.
+    colorOptions: product.inventoryTrackingMode === "DEVICE_MODEL_COLOR" ? [] : product.colorOptions.map((option) => ({
       id: option.color.id,
       name: option.color.name,
       nameAr: option.color.nameAr,
       hexCode: option.color.hexCode,
     })),
-    variantOptions: product.variantMode === "PHONE_COMPATIBILITY" && product.variantAllocationStatus === "READY" ? product.variants.map((variant) => ({ id: variant.id, label: `${variant.phoneModel.phoneBrand.nameAr ?? variant.phoneModel.phoneBrand.name} / ${variant.phoneModel.nameAr ?? variant.phoneModel.name}`, stock: product.inventoryItems.find((item) => item.variantId === variant.id)?.quantity ?? 0 })) : [],
+    variantOptions: product.variantMode === "PHONE_COMPATIBILITY" && product.variantAllocationStatus === "READY"
+      ? product.variants.map((variant) => ({
+          id: variant.id,
+          phoneBrandId: variant.phoneModel.phoneBrandId,
+          brandLabel: variant.phoneModel.phoneBrand.nameAr ?? variant.phoneModel.phoneBrand.name,
+          phoneModelId: variant.phoneModel.id,
+          modelLabel: variant.phoneModel.nameAr ?? variant.phoneModel.name,
+          stock: product.inventoryItems.find((item) => item.variantId === variant.id)?.quantity ?? 0,
+        }))
+      : [],
+    deviceColorVariantOptions: product.inventoryTrackingMode === "DEVICE_MODEL_COLOR"
+      ? product.deviceColorVariants.map((combo) => ({
+          id: combo.id,
+          phoneBrandId: combo.phoneModel.phoneBrandId,
+          brandLabel: combo.phoneModel.phoneBrand.nameAr ?? combo.phoneModel.phoneBrand.name,
+          phoneModelId: combo.phoneModel.id,
+          modelLabel: combo.phoneModel.nameAr ?? combo.phoneModel.name,
+          colorId: combo.color.id,
+          colorLabel: combo.color.nameAr ?? combo.color.name,
+          colorHex: combo.color.hexCode,
+          stock: product.inventoryItems.find((item) => item.deviceColorVariantId === combo.id)?.quantity ?? 0,
+        }))
+      : [],
   }));
 
   // The query above filters `user: { isActive: true }`, which only matches

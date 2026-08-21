@@ -24,6 +24,10 @@ const manualOrderItemSchema = z.object({
   /** Null for a colorless product/line. */
   colorId: z.string().nullable().optional(),
   variantId: z.string().nullable().optional(),
+  /** Set only for a DEVICE_MODEL_COLOR line — mutually exclusive with
+   * variantId (enforced server-side in actions.ts, mirroring the DB CHECK
+   * constraint every other inventory-mutating flow already respects). */
+  deviceColorVariantId: z.string().nullable().optional(),
   quantity: z.number().int("الكمية يجب أن تكون رقماً صحيحاً").positive("الكمية يجب أن تكون أكبر من صفر"),
   unitPriceCents: z.number().int("السعر يجب أن يكون رقماً صحيحاً").nonnegative("السعر لا يمكن أن يكون سالباً"),
 });
@@ -56,7 +60,9 @@ export const manualOrderSchema = z.object({
     .min(1, "يجب إضافة منتج واحد على الأقل")
     .max(50, "عدد كبير جداً من المنتجات في طلب واحد")
     .refine(
-      (items) => new Set(items.map((item) => `${item.productId}:${item.variantId ?? ""}:${item.colorId ?? ""}`)).size === items.length,
+      (items) =>
+        new Set(items.map((item) => `${item.productId}:${item.variantId ?? ""}:${item.deviceColorVariantId ?? ""}:${item.colorId ?? ""}`))
+          .size === items.length,
       { message: "لا يمكن تكرار نفس المنتج بنفس الخيارات أكثر من مرة — عدّل الكمية بدلاً من ذلك" },
     ),
 });

@@ -4,7 +4,13 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth/guards";
-import { ROLES, MANUAL_STOCK_MOVEMENT_TYPES } from "@/lib/constants";
+import {
+  ROLES,
+  MANUAL_STOCK_MOVEMENT_TYPES,
+  PRODUCT_VARIANT_MODES,
+  PRODUCT_INVENTORY_TRACKING_MODES,
+  VARIANT_ALLOCATION_STATUSES,
+} from "@/lib/constants";
 import { getMainWarehouse } from "@/lib/inventory";
 import { stockAdjustmentSchema } from "@/lib/validation/inventory";
 import {
@@ -29,12 +35,14 @@ const PARSE_ERROR_MESSAGE = "بيانات التعديل غير صالحة";
 const POSITIVE_QUANTITY_MESSAGE = "الكمية يجب أن تكون رقماً صحيحاً أكبر من صفر";
 const NO_OP_MESSAGE = "الكمية الجديدة مساوية للكمية الحالية، لم يتم تنفيذ أي تعديل";
 
-function revalidateInventoryPaths(): void {
+function revalidateInventoryPaths(productId: string): void {
   revalidatePath("/admin/inventory");
   revalidatePath("/admin/inventory/movements");
   revalidatePath("/admin/inventory/adjust");
   revalidatePath("/admin");
   revalidatePath("/admin/products");
+  revalidatePath(`/admin/products/${productId}/variants`);
+  revalidatePath(`/admin/products/${productId}/device-inventory`);
   revalidatePath("/products");
 }
 
@@ -46,6 +54,8 @@ export async function createStockMovement(
 
   const parsed = stockAdjustmentSchema.safeParse({
     productId: formData.get("productId")?.toString() ?? "",
+    variantId: formData.get("variantId")?.toString() ?? "",
+    deviceColorVariantId: formData.get("deviceColorVariantId")?.toString() ?? "",
     movementType: formData.get("movementType")?.toString() ?? "",
     quantity: formData.get("quantity")?.toString() ?? "",
     notes: formData.get("notes")?.toString().trim() || undefined,
@@ -59,7 +69,21 @@ export async function createStockMovement(
 
   const product = await prisma.product.findUnique({
     where: { id: productId },
-    select: { id: true, isActive: true, variantMode: true, inventoryTrackingMode: true },
+    select: {
+      id: true,
+      isActive: true,
+      variantMode: true,
+      inventoryTrackingMode: true,
+      variantAllocationStatus: true,
+      // Deliberately not filtered to isActive: true — a disabled
+      // variant/combination is still a valid admin stock-movement target.
+      // isActive only gates customer/sale-facing flows (cart, checkout, rep
+      // sale, warehouse<->rep transfers), never an admin's own count here
+      // (see DeviceInventoryManager and the variants screen, which both
+      // show disabled rows too).
+      variants: { select: { id: true, isActive: true } },
+      deviceColorVariants: { select: { id: true, isActive: true } },
+    },
   });
   if (!product) {
     return { error: "المنتج غير موجود" };
@@ -67,15 +91,40 @@ export async function createStockMovement(
   if (!product.isActive) {
     return { error: "لا يمكن تعديل مخزون منتج غير مفعل" };
   }
-  if (product.variantMode === "PHONE_COMPATIBILITY") return { error: "مخزون هذا المنتج يُدار من شاشة الـVariants والتوزيع اليدوي" };
-  if (product.inventoryTrackingMode === "DEVICE_MODEL_COLOR") return { error: "مخزون هذا المنتج يُدار من شاشة تركيبات المخزون (الجهاز واللون)، وليس من هنا" };
+
+  // Resolve the exact inventory target for this product's tracking mode —
+  // mirrors the same resolution already used by addToCart/checkout/rep-sale,
+  // just admin-side (no isActive requirement on the variant/combo itself).
+  let resolvedVariantId: string | null = null;
+  let resolvedDeviceColorVariantId: string | null = null;
+
+  if (product.variantMode === PRODUCT_VARIANT_MODES.PHONE_COMPATIBILITY) {
+    if (product.variantAllocationStatus !== VARIANT_ALLOCATION_STATUSES.READY) {
+      return { error: "اعتمد توزيع المخزون القديم من صفحة الـVariants الخاصة بالمنتج قبل تعديل مخزونها من هنا" };
+    }
+    if (!parsed.data.variantId || !product.variants.some((variant) => variant.id === parsed.data.variantId)) {
+      return { error: "اختر ماركة وموديل الهاتف بشكل صحيح" };
+    }
+    resolvedVariantId = parsed.data.variantId;
+  } else if (parsed.data.variantId) {
+    return { error: "هذا المنتج لا يستخدم Variants" };
+  }
+
+  if (product.inventoryTrackingMode === PRODUCT_INVENTORY_TRACKING_MODES.DEVICE_MODEL_COLOR) {
+    if (!parsed.data.deviceColorVariantId || !product.deviceColorVariants.some((combo) => combo.id === parsed.data.deviceColorVariantId)) {
+      return { error: "اختر الماركة والموديل واللون بشكل صحيح" };
+    }
+    resolvedDeviceColorVariantId = parsed.data.deviceColorVariantId;
+  } else if (parsed.data.deviceColorVariantId) {
+    return { error: "هذا المنتج لا يستخدم تركيبات الجهاز واللون" };
+  }
 
   if (movementType !== MANUAL_STOCK_MOVEMENT_TYPES.ADJUSTMENT && quantity <= 0) {
     return { error: POSITIVE_QUANTITY_MESSAGE };
   }
 
   const warehouse = await getMainWarehouse();
-  const key = { productId, locationId: warehouse.id };
+  const key = { productId, variantId: resolvedVariantId, deviceColorVariantId: resolvedDeviceColorVariantId, locationId: warehouse.id };
 
   try {
     await prisma.$transaction(async (tx) => {
@@ -92,6 +141,8 @@ export async function createStockMovement(
         await recordStockMovement(tx, {
           type: movementType,
           productId,
+          variantId: resolvedVariantId,
+          deviceColorVariantId: resolvedDeviceColorVariantId,
           quantity: Math.abs(change.newQuantity - change.previousQuantity),
           previousQuantity: change.previousQuantity,
           newQuantity: change.newQuantity,
@@ -118,6 +169,8 @@ export async function createStockMovement(
       await recordStockMovement(tx, {
         type: movementType,
         productId,
+        variantId: resolvedVariantId,
+        deviceColorVariantId: resolvedDeviceColorVariantId,
         quantity,
         previousQuantity: change.previousQuantity,
         newQuantity: change.newQuantity,
@@ -132,6 +185,6 @@ export async function createStockMovement(
     throw err;
   }
 
-  revalidateInventoryPaths();
+  revalidateInventoryPaths(productId);
   redirect("/admin/inventory");
 }

@@ -15,10 +15,13 @@ const nonNegativeIntString = z
 
 /** A manual product-level stock adjustment has no customer/order context, so
  * it has no colorId — see repStockTransferBatchSchema for the same reasoning.
- * PHONE_COMPATIBILITY products are excluded entirely (see actions.ts) and
- * managed through the variant manager instead. */
+ * variantId/deviceColorVariantId are optional here (empty string from the
+ * form becomes undefined) — actions.ts resolves which one, if either, this
+ * product's tracking mode actually requires and rejects a mismatch. */
 export const stockAdjustmentSchema = z.object({
   productId: z.string().min(1, "المنتج مطلوب"),
+  variantId: z.string().optional().transform((v) => (v ? v : undefined)),
+  deviceColorVariantId: z.string().optional().transform((v) => (v ? v : undefined)),
   movementType: manualMovementTypeSchema,
   quantity: nonNegativeIntString,
   notes: z.string().max(500, "الملاحظات طويلة جداً").optional(),

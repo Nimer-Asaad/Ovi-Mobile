@@ -140,11 +140,29 @@ export async function createManualOrder(
   const productIds = parsed.data.items.map((item) => item.productId);
   const products = await prisma.product.findMany({
     where: { id: { in: productIds } },
-    select: { id: true, sku: true, isActive: true, name: true, nameAr: true, variantMode: true, inventoryTrackingMode: true, colorOptions: { select: { colorId: true, color: { select: { name: true, nameAr: true } } } }, variants: { where: { isActive: true }, select: { id: true, variantCode: true, phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } } } } },
+    select: {
+      id: true,
+      sku: true,
+      isActive: true,
+      name: true,
+      nameAr: true,
+      variantMode: true,
+      inventoryTrackingMode: true,
+      colorOptions: { select: { colorId: true, color: { select: { name: true, nameAr: true } } } },
+      variants: { where: { isActive: true }, select: { id: true, variantCode: true, phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } } } },
+      // Active only — order creation is a sale-facing flow, same eligibility
+      // rule already applied to variants above and to cart/checkout/rep-sale.
+      deviceColorVariants: { where: { isActive: true }, select: { id: true, phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } }, color: { select: { name: true, nameAr: true } } } },
+    },
   });
   const productById = new Map(products.map((product) => [product.id, product]));
 
-  const lines = parsed.data.items.map((item) => ({ ...item, colorId: item.colorId ?? null, variantId: item.variantId ?? null }));
+  const lines = parsed.data.items.map((item) => ({
+    ...item,
+    colorId: item.colorId ?? null,
+    variantId: item.variantId ?? null,
+    deviceColorVariantId: item.deviceColorVariantId ?? null,
+  }));
 
   for (const item of lines) {
     const product = productById.get(item.productId);
@@ -155,36 +173,49 @@ export async function createManualOrder(
       return { error: `المنتج "${product.nameAr ?? product.name}" غير مفعّل ولا يمكن بيعه` };
     }
     // DEVICE_MODEL_COLOR products track stock per brand+model+color
-    // combination, which this manual order flow doesn't decrement from yet
-    // — see the same guard in src/app/cart/actions.ts.
+    // combination (DeviceColorVariant) instead of a plain product-wide
+    // bucket — mutually exclusive with variantId (DB CHECK constraint),
+    // same resolution already used by checkout/actions.ts and
+    // rep/sales/actions.ts.
     if (product.inventoryTrackingMode === "DEVICE_MODEL_COLOR") {
-      return { error: `المنتج "${product.nameAr ?? product.name}" غير متاح للبيع من هذا المسار حالياً` };
+      if (!item.deviceColorVariantId || !product.deviceColorVariants.some((combo) => combo.id === item.deviceColorVariantId)) {
+        return { error: `اختر الماركة والموديل واللون للمنتج "${product.nameAr ?? product.name}"` };
+      }
+    } else if (item.deviceColorVariantId) {
+      return { error: `المنتج "${product.nameAr ?? product.name}" لا يستخدم تركيبات الجهاز واللون` };
     }
     if (item.colorId && !product.colorOptions.some((option) => option.colorId === item.colorId)) {
       return { error: `اللون المحدد لا ينتمي للمنتج "${product.nameAr ?? product.name}"` };
     }
     if (product.variantMode === "PHONE_COMPATIBILITY" && (!item.variantId || !product.variants.some((variant) => variant.id === item.variantId))) return { error: `اختر Variant صالحاً للمنتج "${product.nameAr ?? product.name}"` };
+    if (product.variantMode !== "PHONE_COMPATIBILITY" && item.variantId) return { error: `Variant لا يتبع المنتج "${product.nameAr ?? product.name}"` };
   }
 
   const warehouse = await getMainWarehouse();
   const inventoryItems = await prisma.inventoryItem.findMany({
     where: { productId: { in: productIds }, locationId: warehouse.id },
-    select: { productId: true, variantId: true, quantity: true },
+    select: { productId: true, variantId: true, deviceColorVariantId: true, quantity: true },
   });
-  const stockByLineKey = new Map(inventoryItems.map((row) => [`${row.productId}:${row.variantId ?? ""}`, row.quantity]));
+  const stockByLineKey = new Map(
+    inventoryItems.map((row) => [`${row.productId}:${row.variantId ?? ""}:${row.deviceColorVariantId ?? ""}`, row.quantity]),
+  );
 
   // Color no longer distinguishes a stock bucket, so two lines for the same
-  // product+variant but different colors draw from the same bucket — sum
-  // requested quantity per product+variant (ignoring color) before
-  // comparing against available stock.
+  // product+variant/combo but different colors draw from the same bucket —
+  // sum requested quantity per product+variant+combo (ignoring color) before
+  // comparing against available stock. This also makes duplicate exact-target
+  // lines (same productId+variantId+deviceColorVariantId submitted twice)
+  // safe: their quantities are summed here and checked as one, and the
+  // schema-level uniqueness refine already rejects that shape from the
+  // client-rendered form in the first place — this is defense in depth.
   const requestedByLineKey = new Map<string, number>();
   for (const item of lines) {
-    const key = `${item.productId}:${item.variantId ?? ""}`;
+    const key = `${item.productId}:${item.variantId ?? ""}:${item.deviceColorVariantId ?? ""}`;
     requestedByLineKey.set(key, (requestedByLineKey.get(key) ?? 0) + item.quantity);
   }
   for (const item of lines) {
     const product = productById.get(item.productId)!;
-    const key = `${item.productId}:${item.variantId ?? ""}`;
+    const key = `${item.productId}:${item.variantId ?? ""}:${item.deviceColorVariantId ?? ""}`;
     const available = stockByLineKey.get(key) ?? 0;
     if (requestedByLineKey.get(key)! > available) {
       return {
@@ -196,20 +227,42 @@ export async function createManualOrder(
   // ---------------------------------------------------------------------
   // Server-computed totals — never trust anything the client summed.
   // ---------------------------------------------------------------------
-  const orderItemsData = lines.map((item) => ({
-    productId: item.productId,
-    colorId: item.colorId,
-    variantId: item.variantId,
-    productNameSnapshot: productById.get(item.productId)?.nameAr ?? productById.get(item.productId)?.name,
-    productSkuSnapshot: productById.get(item.productId)?.sku,
-    variantCodeSnapshot: productById.get(item.productId)?.variants.find((variant) => variant.id === item.variantId)?.variantCode ?? null,
-    phoneBrandSnapshot: (() => { const variant = productById.get(item.productId)?.variants.find((row) => row.id === item.variantId); return variant ? (variant.phoneModel.phoneBrand.nameAr ?? variant.phoneModel.phoneBrand.name) : null; })(),
-    phoneModelSnapshot: (() => { const variant = productById.get(item.productId)?.variants.find((row) => row.id === item.variantId); return variant ? (variant.phoneModel.nameAr ?? variant.phoneModel.name) : null; })(),
-    colorNameSnapshot: (() => { const option = productById.get(item.productId)?.colorOptions.find((row) => row.colorId === item.colorId); return option?.color ? (option.color.nameAr ?? option.color.name) : null; })(),
-    quantity: item.quantity,
-    unitPriceCents: item.unitPriceCents,
-    totalCents: item.unitPriceCents * item.quantity,
-  }));
+  const orderItemsData = lines.map((item) => {
+    const product = productById.get(item.productId);
+    const variant = product?.variants.find((row) => row.id === item.variantId);
+    const combo = product?.deviceColorVariants.find((row) => row.id === item.deviceColorVariantId);
+    const colorOption = product?.colorOptions.find((row) => row.colorId === item.colorId);
+    return {
+      productId: item.productId,
+      colorId: item.colorId,
+      variantId: item.variantId,
+      deviceColorVariantId: item.deviceColorVariantId,
+      productNameSnapshot: product?.nameAr ?? product?.name,
+      productSkuSnapshot: product?.sku,
+      variantCodeSnapshot: variant?.variantCode ?? null,
+      // Same snapshot fields either way — a device+color combination and a
+      // phone-model variant both resolve to a brand/model(/color) triple,
+      // same as checkout/actions.ts and rep/sales/actions.ts.
+      phoneBrandSnapshot: variant
+        ? (variant.phoneModel.phoneBrand.nameAr ?? variant.phoneModel.phoneBrand.name)
+        : combo
+          ? (combo.phoneModel.phoneBrand.nameAr ?? combo.phoneModel.phoneBrand.name)
+          : null,
+      phoneModelSnapshot: variant
+        ? (variant.phoneModel.nameAr ?? variant.phoneModel.name)
+        : combo
+          ? (combo.phoneModel.nameAr ?? combo.phoneModel.name)
+          : null,
+      colorNameSnapshot: colorOption?.color
+        ? (colorOption.color.nameAr ?? colorOption.color.name)
+        : combo
+          ? (combo.color.nameAr ?? combo.color.name)
+          : null,
+      quantity: item.quantity,
+      unitPriceCents: item.unitPriceCents,
+      totalCents: item.unitPriceCents * item.quantity,
+    };
+  });
   const subtotalCents = orderItemsData.reduce((sum, item) => sum + item.totalCents, 0);
 
   if (discountCents > subtotalCents) {
@@ -240,6 +293,11 @@ export async function createManualOrder(
         if (requestedVariantIds.length > 0) {
           const activeVariants = await tx.productVariant.count({ where: { id: { in: requestedVariantIds }, isActive: true } });
           if (activeVariants !== new Set(requestedVariantIds).size) throw new Error("INACTIVE_VARIANT");
+        }
+        const requestedComboIds = lines.flatMap((item) => item.deviceColorVariantId ? [item.deviceColorVariantId] : []);
+        if (requestedComboIds.length > 0) {
+          const activeCombos = await tx.deviceColorVariant.count({ where: { id: { in: requestedComboIds }, isActive: true } });
+          if (activeCombos !== new Set(requestedComboIds).size) throw new Error("INACTIVE_VARIANT");
         }
         let accountId: string | undefined;
         if (customerMode === MANUAL_ORDER_CUSTOMER_MODES.EXISTING_MERCHANT && resolvedMerchantId) {
@@ -300,7 +358,7 @@ export async function createManualOrder(
         for (const item of lines) {
           const change = await decrementInventoryAtomic(
             tx,
-            { productId: item.productId, variantId: item.variantId, locationId: warehouse.id },
+            { productId: item.productId, variantId: item.variantId, deviceColorVariantId: item.deviceColorVariantId, locationId: warehouse.id },
             item.quantity,
           );
 
@@ -308,6 +366,7 @@ export async function createManualOrder(
             type: STOCK_MOVEMENT_TYPES.SALE_OUT,
             productId: item.productId,
             variantId: item.variantId,
+            deviceColorVariantId: item.deviceColorVariantId,
             fromLocationId: warehouse.id,
             toLocationId: null,
             quantity: item.quantity,
