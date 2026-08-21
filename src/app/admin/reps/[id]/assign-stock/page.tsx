@@ -40,7 +40,24 @@ export default async function AdminRepAssignStockPage({ params }: AdminRepAssign
       variantMode: true,
       variantAllocationStatus: true,
       inventoryTrackingMode: true,
-      deviceColorVariants: { where: { isActive: true }, select: { id: true, phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } }, color: { select: { name: true, nameAr: true } } } },
+      // Brand → model → color order, so the picker's grouped model list
+      // (see ProductQuickPicker's dcModelGroups) renders in a stable
+      // sequence instead of insertion order.
+      deviceColorVariants: {
+        where: { isActive: true },
+        orderBy: [
+          { phoneModel: { phoneBrand: { sortOrder: "asc" } } },
+          { phoneModel: { phoneBrand: { name: "asc" } } },
+          { phoneModel: { sortOrder: "asc" } },
+          { phoneModel: { name: "asc" } },
+          { sortOrder: "asc" },
+        ],
+        select: {
+          id: true,
+          phoneModel: { select: { id: true, name: true, nameAr: true, phoneBrandId: true, phoneBrand: { select: { id: true, name: true, nameAr: true } } } },
+          color: { select: { id: true, name: true, nameAr: true, hexCode: true } },
+        },
+      },
     },
   });
 
@@ -57,7 +74,19 @@ export default async function AdminRepAssignStockPage({ params }: AdminRepAssign
       .filter((item) => !item.variantId && !item.deviceColorVariantId)
       .reduce((sum, item) => sum + item.quantity, 0),
     variantOptions: product.variantMode === "PHONE_COMPATIBILITY" && product.variantAllocationStatus === "READY" ? product.variants.map((variant) => ({ id: variant.id, label: `${variant.phoneModel.phoneBrand.nameAr ?? variant.phoneModel.phoneBrand.name} / ${variant.phoneModel.nameAr ?? variant.phoneModel.name}`, stock: product.inventoryItems.find((item) => item.variantId === variant.id)?.quantity ?? 0 })) : [],
-    deviceColorVariantOptions: product.inventoryTrackingMode === "DEVICE_MODEL_COLOR" ? product.deviceColorVariants.map((combo) => ({ id: combo.id, label: `${combo.phoneModel.phoneBrand.nameAr ?? combo.phoneModel.phoneBrand.name} / ${combo.phoneModel.nameAr ?? combo.phoneModel.name} / ${combo.color.nameAr ?? combo.color.name}`, stock: product.inventoryItems.find((item) => item.deviceColorVariantId === combo.id)?.quantity ?? 0 })) : [],
+    deviceColorVariantOptions: product.inventoryTrackingMode === "DEVICE_MODEL_COLOR"
+      ? product.deviceColorVariants.map((combo) => ({
+          id: combo.id,
+          phoneBrandId: combo.phoneModel.phoneBrandId,
+          brandLabel: combo.phoneModel.phoneBrand.nameAr ?? combo.phoneModel.phoneBrand.name,
+          phoneModelId: combo.phoneModel.id,
+          modelLabel: combo.phoneModel.nameAr ?? combo.phoneModel.name,
+          colorId: combo.color.id,
+          colorLabel: combo.color.nameAr ?? combo.color.name,
+          colorHex: combo.color.hexCode,
+          stock: product.inventoryItems.find((item) => item.deviceColorVariantId === combo.id)?.quantity ?? 0,
+        }))
+      : [],
   }));
 
   return (

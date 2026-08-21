@@ -14,6 +14,18 @@ export interface PickableColorOption {
   hexCode: string | null;
 }
 
+export interface PickableDeviceComboOption {
+  id: string;
+  phoneBrandId: string;
+  brandLabel: string;
+  phoneModelId: string;
+  modelLabel: string;
+  colorId: string;
+  colorLabel: string;
+  colorHex: string | null;
+  stock?: number;
+}
+
 export interface PickableProduct {
   id: string;
   sku: string;
@@ -28,8 +40,10 @@ export interface PickableProduct {
   variantOptions?: { id: string; label: string; stock?: number }[];
   /** Active brand+model+color combinations for a DEVICE_MODEL_COLOR product
    * — mutually exclusive with variantOptions (a product uses one variant
-   * system or the other). label is the full "Brand / Model / Color" text. */
-  deviceColorVariantOptions?: { id: string; label: string; stock?: number }[];
+   * system or the other). Grouped by phoneModelId in the picker UI below
+   * (model chosen first, colors shown under it) instead of one flat row per
+   * combination — see dcModelGroups. */
+  deviceColorVariantOptions?: PickableDeviceComboOption[];
 }
 
 /** Small inline thumbnail shared by every rep product list (search results,
@@ -129,6 +143,26 @@ export function ProductQuickPicker<T extends PickableProduct>({
   const [search, setSearch] = useState("");
   const [detailProduct, setDetailProduct] = useState<T | null>(null);
   const [pendingVariantId, setPendingVariantId] = useState<string | null>(null);
+  const [expandedDcModelId, setExpandedDcModelId] = useState<string | null>(null);
+
+  // Groups the flat deviceColorVariantOptions list by phoneModelId so the
+  // modal shows one row per model (brand + model) instead of one row per
+  // color — colors for the currently expanded model are shown underneath
+  // it. Order follows first-seen order in the source array, which the page
+  // queries already sort brand → model → color.
+  const dcModelGroups = useMemo(() => {
+    const combos = detailProduct?.deviceColorVariantOptions ?? [];
+    const groups = new Map<string, { phoneModelId: string; brandLabel: string; modelLabel: string; colors: PickableDeviceComboOption[] }>();
+    for (const combo of combos) {
+      const group = groups.get(combo.phoneModelId);
+      if (group) {
+        group.colors.push(combo);
+      } else {
+        groups.set(combo.phoneModelId, { phoneModelId: combo.phoneModelId, brandLabel: combo.brandLabel, modelLabel: combo.modelLabel, colors: [combo] });
+      }
+    }
+    return Array.from(groups.values());
+  }, [detailProduct]);
 
   const filteredProducts = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -148,6 +182,7 @@ export function ProductQuickPicker<T extends PickableProduct>({
   function openDetail(product: T) {
     setDetailProduct(product);
     setPendingVariantId(null);
+    setExpandedDcModelId(null);
   }
 
   function handlePick(product: T, colorId: string | null, variantId: string | null = null, deviceColorVariantId: string | null = null) {
@@ -155,6 +190,7 @@ export function ProductQuickPicker<T extends PickableProduct>({
     setSearch("");
     setDetailProduct(null);
     setPendingVariantId(null);
+    setExpandedDcModelId(null);
   }
 
   function handleRowClick(product: T) {
@@ -218,7 +254,7 @@ export function ProductQuickPicker<T extends PickableProduct>({
       {detailProduct && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
-          onClick={() => setDetailProduct(null)}
+          onClick={() => { setDetailProduct(null); setPendingVariantId(null); setExpandedDcModelId(null); }}
         >
           <div
             role="dialog"
@@ -228,7 +264,7 @@ export function ProductQuickPicker<T extends PickableProduct>({
           >
             <button
               type="button"
-              onClick={() => { setDetailProduct(null); setPendingVariantId(null); }}
+              onClick={() => { setDetailProduct(null); setPendingVariantId(null); setExpandedDcModelId(null); }}
               aria-label="إغلاق"
               className="absolute start-3 top-3 flex h-7 w-7 items-center justify-center rounded-full text-neutral-bg/60 transition-colors hover:bg-navy-deep hover:text-neutral-bg"
             >
@@ -260,10 +296,57 @@ export function ProductQuickPicker<T extends PickableProduct>({
               </div>
             ) : detailProduct.deviceColorVariantOptions && detailProduct.deviceColorVariantOptions.length > 0 ? (
               <div className="mt-5 flex flex-col gap-2">
-                <p className="text-center text-xs text-neutral-bg/50">اختر الماركة والموديل واللون</p>
-                {detailProduct.deviceColorVariantOptions.map((combo) => {
-                  const outOfStock = combo.stock !== undefined && combo.stock <= 0;
-                  return <button key={combo.id} type="button" disabled={outOfStock} onClick={() => handlePickDeviceColorVariant(detailProduct, combo.id)} className={cn("rounded-card border border-navy-soft px-3 py-2 text-sm text-neutral-bg/80 hover:border-gold-champagne/40", outOfStock && "cursor-not-allowed opacity-40")}>{combo.label}{combo.stock !== undefined && ` (${combo.stock})`}{outOfStock && " — نفد"}</button>;
+                <p className="text-center text-xs text-neutral-bg/50">اختر الموديل ثم اللون</p>
+                {/* Grouped by model — one row per model (brand + model),
+                 * expanding to its colors underneath instead of repeating
+                 * "Brand / Model" for every single color. A product with
+                 * only one model skips the extra click and shows its colors
+                 * right away. */}
+                {dcModelGroups.map((group) => {
+                  const isOpen = dcModelGroups.length === 1 || expandedDcModelId === group.phoneModelId;
+                  return (
+                    <div key={group.phoneModelId} className="overflow-hidden rounded-card border border-navy-soft">
+                      {dcModelGroups.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => setExpandedDcModelId(isOpen ? null : group.phoneModelId)}
+                          className={cn(
+                            "flex w-full items-center justify-between gap-2 px-3 py-2 text-start text-sm text-neutral-bg/80 hover:bg-navy-deep",
+                            isOpen && "text-gold-champagne",
+                          )}
+                        >
+                          <span>{group.brandLabel} — {group.modelLabel}</span>
+                          <span aria-hidden="true" className="text-xs text-neutral-bg/40">{isOpen ? "▲" : "▼"}</span>
+                        </button>
+                      )}
+                      {isOpen && (
+                        <div className={cn("flex flex-wrap gap-2 px-3 py-2", dcModelGroups.length > 1 && "border-t border-navy-soft")}>
+                          {group.colors.map((combo) => {
+                            const outOfStock = combo.stock !== undefined && combo.stock <= 0;
+                            return (
+                              <button
+                                key={combo.id}
+                                type="button"
+                                disabled={outOfStock}
+                                onClick={() => handlePickDeviceColorVariant(detailProduct, combo.id)}
+                                className={cn(
+                                  "flex items-center gap-1.5 rounded-full border border-navy-soft px-3 py-1.5 text-xs text-neutral-bg/80 hover:border-gold-champagne/40",
+                                  outOfStock && "cursor-not-allowed opacity-40",
+                                )}
+                              >
+                                {combo.colorHex && (
+                                  <span aria-hidden="true" className="h-3 w-3 shrink-0 rounded-full border border-navy-soft" style={{ backgroundColor: combo.colorHex }} />
+                                )}
+                                {combo.colorLabel}
+                                {combo.stock !== undefined && ` (${combo.stock})`}
+                                {outOfStock && " — نفد"}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
                 })}
               </div>
             ) : detailProduct.colorOptions && detailProduct.colorOptions.length > 0 ? (

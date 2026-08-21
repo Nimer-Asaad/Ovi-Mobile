@@ -77,7 +77,7 @@ export function AssignStockForm({ repId, products }: AssignStockFormProps) {
         variantId,
         deviceColorVariantId,
         label: product.nameAr ?? product.name,
-        optionLabel: variant?.label ?? combo?.label ?? null,
+        optionLabel: variant?.label ?? (combo ? `${combo.brandLabel} / ${combo.modelLabel} / ${combo.colorLabel}` : null),
         sku: product.sku,
         quantity: 1,
         maxStock: variant ? (variant.stock ?? 0) : combo ? (combo.stock ?? 0) : product.warehouseStock,

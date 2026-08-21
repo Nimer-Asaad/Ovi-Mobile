@@ -97,7 +97,9 @@ export function NewSaleForm({ products, customers }: NewSaleFormProps) {
     const color = product.colorOptions?.find((option) => option.id === colorId) ?? null;
     const variant = product.variantOptions?.find((option) => option.id === variantId) ?? null;
     const combo = product.deviceColorVariantOptions?.find((option) => option.id === deviceColorVariantId) ?? null;
-    const colorLabel = combo ? combo.label : [variant?.label, color ? (color.nameAr ?? color.name) : null].filter(Boolean).join(" — ") || null;
+    const colorLabel = combo
+      ? `${combo.brandLabel} / ${combo.modelLabel} / ${combo.colorLabel}`
+      : [variant?.label, color ? (color.nameAr ?? color.name) : null].filter(Boolean).join(" — ") || null;
     setLines((prev) => [
       ...prev,
       {
