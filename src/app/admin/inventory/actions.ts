@@ -34,6 +34,7 @@ class StockActionError extends Error {}
 const PARSE_ERROR_MESSAGE = "بيانات التعديل غير صالحة";
 const POSITIVE_QUANTITY_MESSAGE = "الكمية يجب أن تكون رقماً صحيحاً أكبر من صفر";
 const NO_OP_MESSAGE = "الكمية الجديدة مساوية للكمية الحالية، لم يتم تنفيذ أي تعديل";
+const NOT_PERMITTED_MESSAGE = "لا تملك صلاحية تنفيذ هذا الإجراء";
 
 /** Postgres INTEGER's max value — the actual column type behind
  * StockMovement.quantity/InventoryItem.quantity (see schema.prisma). Bounds
@@ -294,7 +295,14 @@ export async function createBulkStockMovement(
   _prevState: BulkStockMovementState,
   formData: FormData,
 ): Promise<BulkStockMovementState> {
-  const admin = await requireRole([ROLES.ADMIN]);
+  // ADMIN_ASSISTANT (مساعد الأدمن, warehouse picker/preparer staff) is
+  // least-privilege: allowed into this action at all only for STOCK_OUT,
+  // checked explicitly below — never inferred from which UI rendered, since
+  // AdjustStockPanel hiding the IN button for that role is a convenience,
+  // not the security boundary. A manipulated request replaying this action
+  // with direction=STOCK_IN while signed in as ADMIN_ASSISTANT must fail
+  // here, before any inventory read/write.
+  const actor = await requireRole([ROLES.ADMIN, ROLES.ADMIN_ASSISTANT]);
 
   // `direction` arrives as a bound Server Action argument (see
   // BulkStockMovementForm's `.bind(null, direction)`), not form data — but a
@@ -308,6 +316,10 @@ export async function createBulkStockMovement(
     return { error: PARSE_ERROR_MESSAGE };
   }
   const isOut = direction === MANUAL_STOCK_MOVEMENT_TYPES.STOCK_OUT;
+
+  if (!isOut && actor.role !== ROLES.ADMIN) {
+    return { error: NOT_PERMITTED_MESSAGE };
+  }
 
   let items: unknown;
   try {
@@ -427,7 +439,7 @@ export async function createBulkStockMovement(
           previousQuantity: change.previousQuantity,
           newQuantity: change.newQuantity,
           note: notes,
-          createdById: admin.id,
+          createdById: actor.id,
           fromLocationId: isOut ? warehouse.id : undefined,
           toLocationId: isOut ? undefined : warehouse.id,
         });

@@ -1,5 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { getMainWarehouse } from "@/lib/inventory";
+import { requireRole } from "@/lib/auth/guards";
+import { ROLES } from "@/lib/constants";
 import { AdjustStockPanel } from "../AdjustStockPanel";
 import type { AdjustStockProductOption } from "../adjustCascades";
 
@@ -19,6 +21,13 @@ const BRAND_MODEL_ORDER = [
 ];
 
 export default async function AdminInventoryAdjustPage({ searchParams }: AdminInventoryAdjustPageProps) {
+  // ADMIN and ADMIN_ASSISTANT both reach this page (least-privilege
+  // warehouse OUT is exactly what ADMIN_ASSISTANT needs it for) — the role
+  // decides which panel modes AdjustStockPanel renders below. The real
+  // enforcement is server-side in the movement actions (see actions.ts),
+  // not this UI choice.
+  const user = await requireRole([ROLES.ADMIN, ROLES.ADMIN_ASSISTANT]);
+
   const { productId } = await searchParams;
   const warehouse = await getMainWarehouse();
 
@@ -125,7 +134,7 @@ export default async function AdminInventoryAdjustPage({ searchParams }: AdminIn
         <h2 className="text-xl font-semibold text-neutral-bg">تعديل المخزون</h2>
         <p className="mt-1 text-sm text-neutral-bg/60">تسجيل إدخال أو إخراج أو تصحيح مخزون في {warehouse.name}</p>
       </div>
-      <AdjustStockPanel products={options} selectedProductId={productId} />
+      <AdjustStockPanel products={options} selectedProductId={productId} role={user.role} />
     </div>
   );
 }

@@ -146,6 +146,7 @@ export default async function AdminUsersPage({ searchParams }: AdminUsersPagePro
         <Select name="role" label="الدور" defaultValue={params.role ?? ""}>
           <option value="">كل الأدوار</option>
           <option value={ROLES.ADMIN}>{getRoleLabel(ROLES.ADMIN)}</option>
+          <option value={ROLES.ADMIN_ASSISTANT}>{getRoleLabel(ROLES.ADMIN_ASSISTANT)}</option>
           <option value={ROLES.SALES_REPRESENTATIVE}>{getRoleLabel(ROLES.SALES_REPRESENTATIVE)}</option>
           <option value={ROLES.WHOLESALE_MERCHANT}>{getRoleLabel(ROLES.WHOLESALE_MERCHANT)}</option>
           <option value={ROLES.RETAIL_CUSTOMER}>{getRoleLabel(ROLES.RETAIL_CUSTOMER)}</option>

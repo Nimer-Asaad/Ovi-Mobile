@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import { cookies } from "next/headers";
 import { prisma } from "@/lib/prisma";
 import { SESSION_COOKIE_NAME, SESSION_TTL_MS } from "@/lib/auth/session-constants";
@@ -70,8 +71,13 @@ export async function createSession(userId: string): Promise<void> {
 }
 
 /** Resolve the current session cookie to a user, or null if absent/expired.
- * Never returns `passwordHash` — only the fields safe to pass to a client. */
-export async function getSession(): Promise<SessionUser | null> {
+ * Never returns `passwordHash` — only the fields safe to pass to a client.
+ * Wrapped in React's cache() for per-request memoization: the admin layout
+ * and several admin pages/components now each need the caller's role (e.g.
+ * to pick which nav list or which inventory-adjust workflow to render for
+ * ADMIN_ASSISTANT) — without this, every one of those would re-run the same
+ * session lookup against the database on every single request. */
+export const getSession = cache(async (): Promise<SessionUser | null> => {
   const cookieStore = await cookies();
   const sessionId = cookieStore.get(SESSION_COOKIE_NAME)?.value;
   if (!sessionId) return null;
@@ -112,7 +118,7 @@ export async function getSession(): Promise<SessionUser | null> {
     email: session.user.email,
     merchantStatus: session.user.merchantProfile?.status ?? null,
   };
-}
+});
 
 /** Delete the session row (if any), record a real LOGOUT activity event,
  * and clear the cookie. */

@@ -8,7 +8,8 @@ import { DashboardLineChart } from "@/components/admin/dashboard/DashboardLineCh
 import { DashboardBarChart } from "@/components/admin/dashboard/DashboardBarChart";
 import { DashboardDonutChart } from "@/components/admin/dashboard/DashboardDonutChart";
 import { formatCurrencyFromCents } from "@/lib/utils";
-import { ORDER_STATUSES, ORDER_SOURCES, MERCHANT_STATUSES } from "@/lib/constants";
+import { ORDER_STATUSES, ORDER_SOURCES, MERCHANT_STATUSES, ROLES } from "@/lib/constants";
+import { requireRole } from "@/lib/auth/guards";
 import { getInventoryDashboardStats } from "@/lib/inventory";
 import { getRepFleetStats } from "@/lib/reps";
 import {
@@ -26,7 +27,15 @@ interface DashboardStat {
   badge: { text: string; variant: BadgeVariant };
 }
 
+// This overview is business-analytics (revenue, sales trends, merchant/rep
+// breakdowns) — narrows the outer /admin layout's ADMIN | ADMIN_ASSISTANT
+// gate back down to ADMIN alone. An ADMIN_ASSISTANT session hitting /admin
+// directly (e.g. a stale bookmark) bounces through /dashboard, which then
+// forwards it to /admin/orders via getPostLoginRedirect — see
+// src/app/dashboard/page.tsx.
 export default async function AdminDashboardPage() {
+  await requireRole([ROLES.ADMIN]);
+
   const startOfToday = new Date();
   startOfToday.setHours(0, 0, 0, 0);
 

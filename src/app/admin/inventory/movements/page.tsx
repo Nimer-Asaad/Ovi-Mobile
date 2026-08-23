@@ -6,8 +6,9 @@ import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { AdminTable, AdminTableHead, AdminTableBody, AdminEmptyRow } from "@/components/admin/AdminTable";
-import { MANUAL_STOCK_MOVEMENT_TYPES } from "@/lib/constants";
+import { MANUAL_STOCK_MOVEMENT_TYPES, ROLES } from "@/lib/constants";
 import { getMovementTypeLabel, getMovementTypeBadgeVariant } from "@/lib/inventory-labels";
+import { requireRole } from "@/lib/auth/guards";
 
 interface AdminInventoryMovementsPageProps {
   searchParams: Promise<{
@@ -19,7 +20,15 @@ interface AdminInventoryMovementsPageProps {
   }>;
 }
 
+// Read-only for both roles — no forms here mutate anything, so ADMIN and
+// ADMIN_ASSISTANT get identical access. This explicit guard is otherwise
+// redundant with the outer /admin layout's own ADMIN | ADMIN_ASSISTANT
+// gate; it exists so this page's access boundary is visible on its own,
+// matching every other ADMIN_ASSISTANT-reachable page under /admin/orders
+// and /admin/inventory.
 export default async function AdminInventoryMovementsPage({ searchParams }: AdminInventoryMovementsPageProps) {
+  await requireRole([ROLES.ADMIN, ROLES.ADMIN_ASSISTANT]);
+
   const { q, type, from, to, productId } = await searchParams;
   const trimmedQuery = q?.trim();
 

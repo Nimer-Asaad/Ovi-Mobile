@@ -12,7 +12,7 @@ import { getRoleLabel } from "@/lib/user-labels";
 
 const initialState: UserActionState = {};
 
-const ROLE_OPTIONS = [ROLES.ADMIN, ROLES.SALES_REPRESENTATIVE, ROLES.WHOLESALE_MERCHANT, ROLES.RETAIL_CUSTOMER];
+const ROLE_OPTIONS = [ROLES.ADMIN, ROLES.ADMIN_ASSISTANT, ROLES.SALES_REPRESENTATIVE, ROLES.WHOLESALE_MERCHANT, ROLES.RETAIL_CUSTOMER];
 
 interface RoleChangeFormProps {
   userId: string;

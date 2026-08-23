@@ -12,6 +12,12 @@ export const ROLES = {
   RETAIL_CUSTOMER: "RETAIL_CUSTOMER",
   WHOLESALE_MERCHANT: "WHOLESALE_MERCHANT",
   SALES_REPRESENTATIVE: "SALES_REPRESENTATIVE",
+  /// Warehouse picker/preparer staff — deliberately least-privilege: never
+  /// treated as ADMIN anywhere. Restricted server-side to warehouse
+  /// STOCK_OUT (single-item and bulk) and read-only order/inventory access
+  /// — see requireRole call sites in src/app/admin/inventory/actions.ts and
+  /// the ADMIN-only nested layouts under src/app/admin/*/layout.tsx.
+  ADMIN_ASSISTANT: "ADMIN_ASSISTANT",
 } as const;
 
 export const MERCHANT_STATUSES = {
@@ -225,6 +231,22 @@ export const ADMIN_NAV_ITEMS = [
   { label: "Sales Reps", labelAr: "المندوبون", href: "/admin/reps" },
   { label: "Car Stock Requests", labelAr: "طلبات السيارة", href: "/admin/rep-requests" },
   { label: "Accounts", labelAr: "الحسابات", href: "/admin/accounts" },
+] as const;
+
+/** Restricted admin-shell navigation for ADMIN_ASSISTANT (مساعد الأدمن) —
+ * used by AdminSidebar/AdminTopbar instead of ADMIN_NAV_ITEMS when the
+ * signed-in user's role is ADMIN_ASSISTANT. Every href here must also be
+ * reachable server-side for that role (see the per-section ADMIN-only
+ * nested layout.tsx files under src/app/admin — every admin subsection NOT
+ * listed here sits behind one) — this list existing is a UX convenience,
+ * not the actual access boundary. "إخراج من المخزون" points straight at
+ * the adjust screen, which renders only the bulk OUT workflow for this
+ * role (see AdjustStockPanel). */
+export const ADMIN_ASSISTANT_NAV_ITEMS = [
+  { label: "Orders", labelAr: "الطلبات", href: "/admin/orders" },
+  { label: "Inventory", labelAr: "المخزون", href: "/admin/inventory" },
+  { label: "Stock Out", labelAr: "إخراج من المخزون", href: "/admin/inventory/adjust" },
+  { label: "Movement Log", labelAr: "حركات المخزون", href: "/admin/inventory/movements" },
 ] as const;
 
 /** Rep dashboard sidebar/topbar navigation — same shape as ADMIN_NAV_ITEMS,

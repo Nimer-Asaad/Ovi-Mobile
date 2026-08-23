@@ -7,7 +7,8 @@ import { Badge } from "@/components/ui/Badge";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { AdminTable, AdminTableHead, AdminTableBody, AdminEmptyRow } from "@/components/admin/AdminTable";
 import { formatCurrencyFromCents } from "@/lib/utils";
-import { ORDER_STATUSES, ORDER_SOURCES, PAYMENT_STATUSES } from "@/lib/constants";
+import { ORDER_STATUSES, ORDER_SOURCES, PAYMENT_STATUSES, ROLES } from "@/lib/constants";
+import { requireRole } from "@/lib/auth/guards";
 import {
   getOrderStatusLabel,
   getOrderStatusBadgeVariant,
@@ -27,6 +28,13 @@ interface AdminOrdersPageProps {
 }
 
 export default async function AdminOrdersPage({ searchParams }: AdminOrdersPageProps) {
+  // ADMIN and ADMIN_ASSISTANT both have read access to this list (order
+  // preparation) — requireRole here only resolves which role is signed in,
+  // to decide whether to show the ADMIN-only "طلب يدوي جديد" creation
+  // button below. /admin/orders/new itself carries its own ADMIN-only guard
+  // regardless of whether this button is rendered.
+  const user = await requireRole([ROLES.ADMIN, ROLES.ADMIN_ASSISTANT]);
+
   const { q, status, paymentStatus, customerType } = await searchParams;
   const trimmedQuery = q?.trim();
 
@@ -71,9 +79,11 @@ export default async function AdminOrdersPage({ searchParams }: AdminOrdersPageP
         title="الطلبات"
         subtitle="إدارة طلبات العملاء والتجار"
         actions={
-          <Link href="/admin/orders/new">
-            <Button>طلب يدوي جديد</Button>
-          </Link>
+          user.role === ROLES.ADMIN ? (
+            <Link href="/admin/orders/new">
+              <Button>طلب يدوي جديد</Button>
+            </Link>
+          ) : undefined
         }
       />
 

@@ -3,6 +3,7 @@ import type { BadgeVariant } from "@/components/ui/Badge";
 
 const ROLE_LABELS: Record<string, string> = {
   [ROLES.ADMIN]: "مدير",
+  [ROLES.ADMIN_ASSISTANT]: "مساعد الأدمن",
   [ROLES.SALES_REPRESENTATIVE]: "مندوب مبيعات",
   [ROLES.WHOLESALE_MERCHANT]: "تاجر جملة",
   [ROLES.RETAIL_CUSTOMER]: "عميل تجزئة",

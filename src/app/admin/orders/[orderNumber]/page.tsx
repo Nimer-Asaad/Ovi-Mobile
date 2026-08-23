@@ -6,9 +6,10 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { ProductImagePlaceholder } from "@/components/catalog/ProductImagePlaceholder";
 import { formatCurrencyFromCents } from "@/lib/utils";
-import { ORDER_SOURCES } from "@/lib/constants";
+import { ORDER_SOURCES, ROLES } from "@/lib/constants";
 import { getOrderStatusLabel, getOrderStatusBadgeVariant, getOrderSourceLabel } from "@/lib/order-labels";
 import { getValidNextOrderStatuses, isTerminalOrderStatus } from "@/lib/order-lifecycle";
+import { requireRole } from "@/lib/auth/guards";
 import { OrderStatusForm } from "../OrderStatusForm";
 import { PaymentStatusForm } from "../PaymentStatusForm";
 
@@ -17,6 +18,13 @@ interface AdminOrderDetailPageProps {
 }
 
 export default async function AdminOrderDetailPage({ params }: AdminOrderDetailPageProps) {
+  // ADMIN and ADMIN_ASSISTANT both have read access to order details (order
+  // preparation) — requireRole here only resolves which role is signed in,
+  // to decide whether to show the ADMIN-only status/payment management card
+  // below. OrderStatusForm/PaymentStatusForm's own server actions carry
+  // their own ADMIN-only guard regardless of whether the card is rendered.
+  const user = await requireRole([ROLES.ADMIN, ROLES.ADMIN_ASSISTANT]);
+
   const { orderNumber } = await params;
 
   const order = await prisma.order.findUnique({
@@ -106,11 +114,13 @@ export default async function AdminOrderDetailPage({ params }: AdminOrderDetailP
         <div className="flex items-center gap-2">
           <Badge variant={isWholesaleOrder ? "gold" : "neutral"}>{getOrderSourceLabel(order.source)}</Badge>
           <Badge variant={getOrderStatusBadgeVariant(order.status)}>{getOrderStatusLabel(order.status)}</Badge>
-          <Link href={`/admin/orders/${order.orderNumber}/invoice`}>
-            <Button variant="outline" size="sm">
-              طباعة الفاتورة
-            </Button>
-          </Link>
+          {user.role === ROLES.ADMIN && (
+            <Link href={`/admin/orders/${order.orderNumber}/invoice`}>
+              <Button variant="outline" size="sm">
+                طباعة الفاتورة
+              </Button>
+            </Link>
+          )}
         </div>
       </div>
 
@@ -174,22 +184,30 @@ export default async function AdminOrderDetailPage({ params }: AdminOrderDetailP
               <span className="text-neutral-bg">الإجمالي</span>
               <span className="text-gold-champagne">{formatCurrencyFromCents(order.totalCents)}</span>
             </div>
-            <div className="mt-2 flex items-center justify-between border-t border-navy-soft pt-2">
-              <span className="text-neutral-bg/70">المبلغ المستلم</span>
-              <span className="text-neutral-bg">{formatCurrencyFromCents(order.paidAmountCents)}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-neutral-bg/70">المتبقي</span>
-              <span
-                className={
-                  order.totalCents - order.paidAmountCents > 0
-                    ? "font-semibold text-rose-600"
-                    : "text-neutral-bg"
-                }
-              >
-                {formatCurrencyFromCents(Math.max(order.totalCents - order.paidAmountCents, 0))}
-              </span>
-            </div>
+            {/* Payment-collection/ledger status (received vs. outstanding) —
+             * ADMIN-only, unlike the order's own subtotal/discount/total
+             * above (kept for both roles as ordinary operational order
+             * value, not internal accounting). */}
+            {user.role === ROLES.ADMIN && (
+              <>
+                <div className="mt-2 flex items-center justify-between border-t border-navy-soft pt-2">
+                  <span className="text-neutral-bg/70">المبلغ المستلم</span>
+                  <span className="text-neutral-bg">{formatCurrencyFromCents(order.paidAmountCents)}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-neutral-bg/70">المتبقي</span>
+                  <span
+                    className={
+                      order.totalCents - order.paidAmountCents > 0
+                        ? "font-semibold text-rose-600"
+                        : "text-neutral-bg"
+                    }
+                  >
+                    {formatCurrencyFromCents(Math.max(order.totalCents - order.paidAmountCents, 0))}
+                  </span>
+                </div>
+              </>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -215,7 +233,7 @@ export default async function AdminOrderDetailPage({ params }: AdminOrderDetailP
                     <dt className="text-neutral-bg/50">اسم النشاط التجاري</dt>
                     <dd className="text-neutral-bg">{order.merchant.businessName}</dd>
                   </div>
-                  {order.merchant.taxId && (
+                  {order.merchant.taxId && user.role === ROLES.ADMIN && (
                     <div>
                       <dt className="text-neutral-bg/50">الرقم الضريبي</dt>
                       <dd className="text-neutral-bg">{order.merchant.taxId}</dd>
@@ -346,22 +364,24 @@ export default async function AdminOrderDetailPage({ params }: AdminOrderDetailP
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>إدارة الحالة</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
-            <OrderStatusForm
-              orderNumber={order.orderNumber}
-              currentStatus={order.status}
-              validNextStatuses={validNextStatuses}
-              paymentStatus={order.paymentStatus}
-            />
-            <PaymentStatusForm orderNumber={order.orderNumber} currentStatus={order.paymentStatus} />
-          </div>
-        </CardContent>
-      </Card>
+      {user.role === ROLES.ADMIN && (
+        <Card>
+          <CardHeader>
+            <CardTitle>إدارة الحالة</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+              <OrderStatusForm
+                orderNumber={order.orderNumber}
+                currentStatus={order.status}
+                validNextStatuses={validNextStatuses}
+                paymentStatus={order.paymentStatus}
+              />
+              <PaymentStatusForm orderNumber={order.orderNumber} currentStatus={order.paymentStatus} />
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

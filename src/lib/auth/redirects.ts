@@ -9,6 +9,11 @@ export function getPostLoginRedirect(user: { role: Role; merchantStatus: string 
   switch (user.role) {
     case ROLES.ADMIN:
       return "/admin";
+    // Least-privilege warehouse staff — /admin (the business-analytics
+    // overview) is ADMIN-only, so this role lands directly on the one
+    // section it's actually allowed into instead of bouncing through it.
+    case ROLES.ADMIN_ASSISTANT:
+      return "/admin/orders";
     case ROLES.SALES_REPRESENTATIVE:
       return "/rep";
     case ROLES.WHOLESALE_MERCHANT:
@@ -34,6 +39,8 @@ export function getShopCtaHref(user: SessionUser | null): string {
       return user.merchantStatus === MERCHANT_STATUSES.APPROVED ? "/products" : "/merchant/pending";
     case ROLES.ADMIN:
       return "/admin";
+    case ROLES.ADMIN_ASSISTANT:
+      return "/admin/orders";
     case ROLES.SALES_REPRESENTATIVE:
       return "/rep";
     default:

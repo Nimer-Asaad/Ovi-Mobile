@@ -5,6 +5,8 @@ import { Button } from "@/components/ui/Button";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { InventoryLiveSearch, type AdminInventoryRow } from "@/components/admin/inventory/InventoryLiveSearch";
 import { getMainWarehouse, isLowStock } from "@/lib/inventory";
+import { requireRole } from "@/lib/auth/guards";
+import { ROLES } from "@/lib/constants";
 
 interface AdminInventoryPageProps {
   searchParams: Promise<{
@@ -19,6 +21,13 @@ interface AdminInventoryPageProps {
 type SortOption = "lowest" | "highest" | "newest" | "name";
 
 export default async function AdminInventoryPage({ searchParams }: AdminInventoryPageProps) {
+  // ADMIN and ADMIN_ASSISTANT both have full read access to this page —
+  // requireRole here only resolves which role is signed in, to decide
+  // whether to show the ADMIN-only catalog-settings shortcuts below
+  // (/admin/phone-devices, /admin/colors both carry their own ADMIN-only
+  // layout guard regardless of whether these links are rendered).
+  const user = await requireRole([ROLES.ADMIN, ROLES.ADMIN_ASSISTANT]);
+
   const { category, brand, lowStock, active, sort } = await searchParams;
   const sortOption: SortOption = sort === "highest" || sort === "newest" || sort === "name" ? sort : "lowest";
 
@@ -110,14 +119,16 @@ export default async function AdminInventoryPage({ searchParams }: AdminInventor
         }
       />
 
-      <div className="flex flex-wrap items-center gap-3 rounded-card border border-navy-soft bg-navy-surface p-4 text-sm">
-        <span className="text-neutral-bg/60">إعدادات المخزون:</span>
-        <Link href="/admin/phone-devices" className="text-gold-champagne hover:underline">ماركات وموديلات الأجهزة</Link>
-        <span className="text-neutral-bg/30">·</span>
-        <Link href="/admin/colors" className="text-gold-champagne hover:underline">الألوان</Link>
-        <span className="text-neutral-bg/30">·</span>
-        <span className="text-neutral-bg/50">طريقة تتبّع مخزون كل منتج (إجمالي / حسب الجهاز واللون) تُحدَّد من صفحة تعديل المنتج نفسه</span>
-      </div>
+      {user.role === ROLES.ADMIN && (
+        <div className="flex flex-wrap items-center gap-3 rounded-card border border-navy-soft bg-navy-surface p-4 text-sm">
+          <span className="text-neutral-bg/60">إعدادات المخزون:</span>
+          <Link href="/admin/phone-devices" className="text-gold-champagne hover:underline">ماركات وموديلات الأجهزة</Link>
+          <span className="text-neutral-bg/30">·</span>
+          <Link href="/admin/colors" className="text-gold-champagne hover:underline">الألوان</Link>
+          <span className="text-neutral-bg/30">·</span>
+          <span className="text-neutral-bg/50">طريقة تتبّع مخزون كل منتج (إجمالي / حسب الجهاز واللون) تُحدَّد من صفحة تعديل المنتج نفسه</span>
+        </div>
+      )}
 
       <form
         method="GET"

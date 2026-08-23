@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ManualOrderForm } from "@/components/admin/orders/ManualOrderForm";
 import { ROLES, MERCHANT_STATUSES } from "@/lib/constants";
+import { requireRole } from "@/lib/auth/guards";
 
 /** Preloads everything the manual-order form needs — customers, approved
  * merchants, and active products with Main Warehouse stock — as plain
@@ -27,7 +28,14 @@ const BRAND_MODEL_ORDER = [
   { sortOrder: "asc" as const },
 ];
 
+// Manual order creation is an ADMIN-only capability — narrows the outer
+// /admin layout's ADMIN | ADMIN_ASSISTANT gate back down to ADMIN alone.
+// The rest of /admin/orders stays reachable by ADMIN_ASSISTANT for
+// order-preparation read access; only this specific creation page and its
+// server action (see ../new/actions.ts) are restricted.
 export default async function NewManualOrderPage({ searchParams }: NewManualOrderPageProps) {
+  await requireRole([ROLES.ADMIN]);
+
   const { mode, merchantId, customerId, walkInAccountId } = await searchParams;
   const [customers, merchants, products, walkInAccounts] = await Promise.all([
     prisma.user.findMany({
