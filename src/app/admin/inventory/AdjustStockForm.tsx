@@ -25,21 +25,24 @@ interface AdjustStockFormProps {
 
 const initialState: StockAdjustmentState = {};
 
-/** Single-item stock-movement form for IN and Correction (final-balance
- * adjustment) — OUT moved to the dedicated multi-item BulkStockOutForm (see
- * AdjustStockPanel), since removing several different items in one visit is
- * the common case for a warehouse OUT and forcing one submission per item
- * was the exact problem that form was replaced for. Still handles every
- * inventory tracking mode: a plain TOTAL_STOCK product needs only the
- * product itself; PHONE_COMPATIBILITY needs brand+model; DEVICE_MODEL_COLOR
- * needs brand+model+color. Whichever applies, the resolved variantId/
- * deviceColorVariantId travels to createStockMovement via a hidden input —
- * the server re-validates it belongs to the product (see actions.ts). */
+/** Single-item stock-movement form for Correction (final-balance
+ * adjustment) only — IN and OUT both moved to the dedicated multi-item
+ * BulkStockMovementForm (see AdjustStockPanel), since removing/adding
+ * several different items in one visit is the common case and forcing one
+ * submission per item was the exact problem that form was built to fix.
+ * Correction stays single-item and single-purpose here: it sets one exact
+ * inventory target to an absolute final quantity, which doesn't compose
+ * with a multi-item "add to list" flow the same way a plain increment/
+ * decrement does. Still handles every inventory tracking mode: a plain
+ * TOTAL_STOCK product needs only the product itself; PHONE_COMPATIBILITY
+ * needs brand+model; DEVICE_MODEL_COLOR needs brand+model+color. Whichever
+ * applies, the resolved variantId/deviceColorVariantId travels to
+ * createStockMovement via a hidden input — the server re-validates it
+ * belongs to the product (see actions.ts). */
 export function AdjustStockForm({ products, selectedProductId }: AdjustStockFormProps) {
   const [state, formAction, isPending] = useActionState(createStockMovement, initialState);
   const preselected = selectedProductId ? products.find((product) => product.id === selectedProductId) : undefined;
   const [selected, setSelected] = useState<AdjustStockProductOption | null>(preselected ?? null);
-  const [movementType, setMovementType] = useState<string>(MANUAL_STOCK_MOVEMENT_TYPES.STOCK_IN);
   const [quantity, setQuantity] = useState("");
 
   const deviceCombo = useDeviceComboCascade(selected);
@@ -81,6 +84,7 @@ export function AdjustStockForm({ products, selectedProductId }: AdjustStockForm
       <input type="hidden" name="productId" value={selected?.id ?? ""} />
       <input type="hidden" name="variantId" value={usesPhoneVariant ? phoneVariant.resolved?.id ?? "" : ""} />
       <input type="hidden" name="deviceColorVariantId" value={usesDeviceColor ? deviceCombo.resolved?.id ?? "" : ""} />
+      <input type="hidden" name="movementType" value={MANUAL_STOCK_MOVEMENT_TYPES.ADJUSTMENT} />
 
       <div>
         <p className="mb-1.5 text-sm font-medium text-neutral-bg/80">الصنف</p>
@@ -182,25 +186,20 @@ export function AdjustStockForm({ products, selectedProductId }: AdjustStockForm
         </div>
       )}
 
-      <Select name="movementType" label="نوع الحركة" value={movementType} onChange={(event) => setMovementType(event.target.value)}>
-        <option value={MANUAL_STOCK_MOVEMENT_TYPES.STOCK_IN}>إدخال مخزون</option>
-        <option value={MANUAL_STOCK_MOVEMENT_TYPES.ADJUSTMENT}>تعديل إلى رصيد نهائي</option>
-      </Select>
-
       <div>
         <Input
           name="quantity"
           type="number"
           min={0}
           step={1}
-          label="الكمية"
+          label="الرصيد النهائي"
           required
           disabled={!targetFullyResolved}
           value={quantity}
           onChange={(event) => setQuantity(event.target.value)}
         />
         <p className="mt-1.5 text-xs text-neutral-bg/50">
-          لإدخال مخزون: أدخل الكمية المراد إضافتها. لتعديل الرصيد: أدخل الرصيد النهائي المطلوب للمخزون.
+          أدخل الرصيد النهائي المطلوب لهذا المخزون — سيُستبدل الرصيد الحالي بهذه القيمة تماماً، وليس إضافة عليه.
         </p>
       </div>
 
@@ -214,7 +213,7 @@ export function AdjustStockForm({ products, selectedProductId }: AdjustStockForm
 
       <Button type="submit" disabled={isPending || !canSubmit}>
         {isPending && <Spinner />}
-        {isPending ? "جارٍ الحفظ..." : "حفظ الحركة"}
+        {isPending ? "جارٍ الحفظ..." : "حفظ التصحيح"}
       </Button>
     </form>
   );

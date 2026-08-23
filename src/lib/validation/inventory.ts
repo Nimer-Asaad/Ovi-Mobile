@@ -29,7 +29,7 @@ export const stockAdjustmentSchema = z.object({
 
 export type StockAdjustmentInput = z.infer<typeof stockAdjustmentSchema>;
 
-const bulkStockOutLineSchema = z.object({
+const bulkStockMovementLineSchema = z.object({
   productId: z.string().min(1, "المنتج مطلوب"),
   variantId: z.string().nullable().optional(),
   deviceColorVariantId: z.string().nullable().optional(),
@@ -40,26 +40,28 @@ const bulkStockOutLineSchema = z.object({
     .positive("الكمية يجب أن تكون أكبر من صفر"),
 });
 
-/** A warehouse-only bulk OUT — no customer/order context, so a line has no
- * colorId, same reasoning as repStockTransferBatchSchema. notes is entered
- * once for the whole submission and carried onto every resulting
- * StockMovement row (see createBulkStockOut), rather than per line.
+/** A warehouse-only bulk IN or OUT (direction is a bound server-action
+ * argument, never part of this payload — see createBulkStockMovement) — no
+ * customer/order context, so a line has no colorId, same reasoning as
+ * repStockTransferBatchSchema. notes is entered once for the whole
+ * submission and carried onto every resulting StockMovement row, rather
+ * than per line.
  *
  * Deliberately no uniqueness .refine() here (unlike
  * repStockTransferBatchSchema/repSaleSchema, which reject a repeated exact
  * target) — the client UI already merges duplicate exact targets before
- * submitting, but the server never trusts that: createBulkStockOut
+ * submitting, but the server never trusts that: createBulkStockMovement
  * aggregates any duplicate exact target (productId + variantId +
  * deviceColorVariantId) into one effective line, summing quantities, before
- * validation/decrement — see the comment there. Rejecting here would just
- * produce a confusing error for a case the server can trivially and safely
- * absorb instead. */
-export const bulkStockOutSchema = z.object({
+ * validation/increment-or-decrement — see the comment there. Rejecting here
+ * would just produce a confusing error for a case the server can trivially
+ * and safely absorb instead. */
+export const bulkStockMovementSchema = z.object({
   items: z
-    .array(bulkStockOutLineSchema)
+    .array(bulkStockMovementLineSchema)
     .min(1, "يجب إضافة صنف واحد على الأقل")
-    .max(50, "عدد كبير جداً من الأصناف في عملية إخراج واحدة"),
+    .max(50, "عدد كبير جداً من الأصناف في عملية واحدة"),
   notes: z.string().max(500, "الملاحظات طويلة جداً").optional(),
 });
 
-export type BulkStockOutInput = z.infer<typeof bulkStockOutSchema>;
+export type BulkStockMovementInput = z.infer<typeof bulkStockMovementSchema>;

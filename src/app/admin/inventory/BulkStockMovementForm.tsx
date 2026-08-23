@@ -2,17 +2,17 @@
 
 import { useActionState, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { createBulkStockOut, type BulkStockOutState } from "./actions";
+import { createBulkStockMovement, type BulkStockMovementState } from "./actions";
 import { Select } from "@/components/ui/Select";
 import { Input } from "@/components/ui/Input";
 import { Textarea } from "@/components/ui/Textarea";
 import { Button } from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Spinner";
-import { PRODUCT_VARIANT_MODES, PRODUCT_INVENTORY_TRACKING_MODES, VARIANT_ALLOCATION_STATUSES } from "@/lib/constants";
+import { MANUAL_STOCK_MOVEMENT_TYPES, PRODUCT_VARIANT_MODES, PRODUCT_INVENTORY_TRACKING_MODES, VARIANT_ALLOCATION_STATUSES } from "@/lib/constants";
 import { ProductThumb, ProductQuickPicker } from "@/components/reps/ProductQuickPicker";
 import { type AdjustStockProductOption, useDeviceComboCascade, usePhoneVariantCascade } from "./adjustCascades";
 
-interface BulkOutLine {
+interface BulkMovementLine {
   productId: string;
   variantId: string | null;
   deviceColorVariantId: string | null;
@@ -21,35 +21,44 @@ interface BulkOutLine {
   sku: string;
   quantity: number;
   /** Warehouse stock known at the moment this line was added/merged —
-   * display only, never trusted server-side (see createBulkStockOut, which
-   * re-reads and atomically decrements each line's real current stock
-   * inside the transaction). */
-  maxStock: number;
+   * display only, never trusted server-side (see createBulkStockMovement,
+   * which re-reads and atomically applies each line's real current stock
+   * inside the transaction). For OUT this is the ceiling the quantity input
+   * is softly capped to; for IN it's the baseline shown alongside the live
+   * "current → resulting" total. */
+  currentStock: number;
   thumbnailUrl: string | null;
   thumbnailAlt: string | null;
 }
 
-interface BulkStockOutFormProps {
+interface BulkStockMovementFormProps {
   products: AdjustStockProductOption[];
+  /** MANUAL_STOCK_MOVEMENT_TYPES.STOCK_IN | STOCK_OUT — drives every
+   * direction-specific label below and is bound into createBulkStockMovement
+   * server-side (see AdjustStockPanel), never submitted as form data. */
+  direction: string;
 }
 
-const initialState: BulkStockOutState = {};
+const initialState: BulkStockMovementState = {};
 
 function lineKey(productId: string, variantId: string | null, deviceColorVariantId: string | null): string {
   return `${productId}:${variantId ?? ""}:${deviceColorVariantId ?? ""}`;
 }
 
-/** Multi-item warehouse OUT: pick a product (+ exact model/color when the
- * product requires it, via the same cascading selects AdjustStockForm
- * uses), enter a quantity, add it to a running list, repeat for as many
- * items as needed, then submit the whole list as one atomic operation (see
- * createBulkStockOut) — replaces the old one-item-at-a-time OUT flow, which
- * is why OUT no longer appears as an option in AdjustStockForm. */
-export function BulkStockOutForm({ products }: BulkStockOutFormProps) {
-  const [state, formAction, isPending] = useActionState(createBulkStockOut, initialState);
+/** Multi-item warehouse IN or OUT: pick a product (+ exact model/color when
+ * the product requires it, via the same cascading selects the single-item
+ * Correction form uses), enter a quantity, add it to a running list, repeat
+ * for as many items as needed, then submit the whole list as one atomic
+ * operation (see createBulkStockMovement). Replaces the old one-item-at-a-
+ * time IN/OUT flow — see AdjustStockPanel for the three-way IN/OUT/
+ * Correction mode switch this form serves two of. */
+export function BulkStockMovementForm({ products, direction }: BulkStockMovementFormProps) {
+  const isOut = direction === MANUAL_STOCK_MOVEMENT_TYPES.STOCK_OUT;
+  const action = createBulkStockMovement.bind(null, direction);
+  const [state, formAction, isPending] = useActionState(action, initialState);
   const router = useRouter();
 
-  const [lines, setLines] = useState<BulkOutLine[]>([]);
+  const [lines, setLines] = useState<BulkMovementLine[]>([]);
   const [selected, setSelected] = useState<AdjustStockProductOption | null>(null);
   const [quantity, setQuantity] = useState("");
   const [notes, setNotes] = useState("");
@@ -107,7 +116,7 @@ export function BulkStockOutForm({ products }: BulkStockOutFormProps) {
     const variantId = variant?.id ?? null;
     const deviceColorVariantId = combo?.id ?? null;
     const optionLabel = combo ? `${combo.brandLabel} / ${combo.modelLabel} / ${combo.colorLabel}` : variant ? `${variant.brandLabel} / ${variant.modelLabel}` : null;
-    const maxStock = combo ? combo.stock : variant ? variant.stock : selected.stock;
+    const stockNow = combo ? combo.stock : variant ? variant.stock : selected.stock;
     const key = lineKey(selected.id, variantId, deviceColorVariantId);
 
     setLines((prev) => {
@@ -129,7 +138,7 @@ export function BulkStockOutForm({ products }: BulkStockOutFormProps) {
           optionLabel,
           sku: selected.sku,
           quantity: parsedQuantity,
-          maxStock,
+          currentStock: stockNow,
           thumbnailUrl: selected.thumbnailUrl,
           thumbnailAlt: selected.thumbnailAlt,
         },
@@ -262,14 +271,14 @@ export function BulkStockOutForm({ products }: BulkStockOutFormProps) {
 
       {selected && variantNotReady && (
         <p className="rounded-card border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-300">
-          هذا المنتج ينتظر اعتماد توزيع مخزون الـVariants من صفحة الـVariants الخاصة به قبل إمكانية إخراج مخزونه من هنا.
+          هذا المنتج ينتظر اعتماد توزيع مخزون الـVariants من صفحة الـVariants الخاصة به قبل إمكانية تعديل مخزونه من هنا.
         </p>
       )}
 
       {selected && !variantNotReady && (
         <div className="flex flex-wrap items-end gap-3">
           <div className="rounded-card border border-navy-soft bg-navy-deep px-3 py-2 text-sm text-neutral-bg/80">
-            المتوفر حالياً:{" "}
+            {isOut ? "المتوفر حالياً" : "الكمية الحالية"}:{" "}
             <span className="font-semibold text-neutral-bg">{currentStock === null ? "—" : currentStock}</span>
           </div>
           <div className="w-28">
@@ -303,13 +312,16 @@ export function BulkStockOutForm({ products }: BulkStockOutFormProps) {
                     {line.label}
                     {line.optionLabel && <span> — {line.optionLabel}</span>}
                   </p>
-                  <p className="text-xs text-neutral-bg/50">{line.sku} — متوفر: {line.maxStock}</p>
+                  <p className="text-xs text-neutral-bg/50">
+                    {line.sku} —{" "}
+                    {isOut ? `متوفر: ${line.currentStock}` : `الحالي: ${line.currentStock} ← بعد الإدخال: ${line.currentStock + line.quantity}`}
+                  </p>
                 </div>
                 <div className="w-20">
                   <Input
                     type="number"
                     min={1}
-                    max={line.maxStock}
+                    max={isOut ? line.currentStock : undefined}
                     value={line.quantity}
                     onChange={(event) => handleLineQuantityChange(line.productId, line.variantId, line.deviceColorVariantId, event.target.value)}
                     aria-label="الكمية"
@@ -331,7 +343,13 @@ export function BulkStockOutForm({ products }: BulkStockOutFormProps) {
         )}
       </div>
 
-      <Textarea name="notes" label="سبب الإخراج / ملاحظات (اختياري)" rows={3} value={notes} onChange={(event) => setNotes(event.target.value)} />
+      <Textarea
+        name="notes"
+        label={isOut ? "سبب الإخراج / ملاحظات (اختياري)" : "سبب الإدخال / ملاحظات (اختياري)"}
+        rows={3}
+        value={notes}
+        onChange={(event) => setNotes(event.target.value)}
+      />
 
       {state.error && (
         <p className="whitespace-pre-line text-sm text-rose-600" role="alert">
@@ -342,7 +360,11 @@ export function BulkStockOutForm({ products }: BulkStockOutFormProps) {
 
       <Button type="submit" disabled={isPending || lines.length === 0} className="w-full sm:w-auto">
         {isPending && <Spinner />}
-        {isPending ? "جارٍ الإخراج..." : `إخراج جميع الأصناف${lines.length > 0 ? ` (${lines.length})` : ""}`}
+        {isPending
+          ? isOut
+            ? "جارٍ الإخراج..."
+            : "جارٍ الإدخال..."
+          : `${isOut ? "إخراج" : "إدخال"} جميع الأصناف${lines.length > 0 ? ` (${lines.length})` : ""}`}
       </Button>
     </form>
   );

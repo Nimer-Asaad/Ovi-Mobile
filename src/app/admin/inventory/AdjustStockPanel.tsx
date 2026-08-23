@@ -2,13 +2,15 @@
 
 import { useState } from "react";
 import { AdjustStockForm } from "./AdjustStockForm";
-import { BulkStockOutForm } from "./BulkStockOutForm";
+import { BulkStockMovementForm } from "./BulkStockMovementForm";
+import { MANUAL_STOCK_MOVEMENT_TYPES } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import type { AdjustStockProductOption } from "./adjustCascades";
 
 const MODES = {
-  IN_CORRECTION: "IN_CORRECTION",
+  IN: "IN",
   OUT: "OUT",
+  CORRECTION: "CORRECTION",
 } as const;
 
 interface AdjustStockPanelProps {
@@ -16,19 +18,29 @@ interface AdjustStockPanelProps {
   selectedProductId?: string;
 }
 
-/** Top-level switch between the two warehouse stock-movement flows: IN /
- * Correction stay a single-item form (AdjustStockForm, unchanged), while OUT
- * is the dedicated multi-item BulkStockOutForm — removing several different
- * items in one visit no longer requires one submission per item. */
+/** Top-level switch between the warehouse's three stock-movement flows: IN
+ * and OUT are both multi-item (BulkStockMovementForm, one component
+ * parameterized by direction — see its own doc comment), while Correction
+ * stays single-item (AdjustStockForm) since it sets one exact inventory
+ * target to an absolute final quantity, which doesn't compose with a
+ * multi-item "add to list" flow the same way a plain increment/decrement
+ * does.
+ *
+ * Defaults to Correction when arriving with a specific product preselected
+ * (the "تعديل" link from the inventory list, /admin/inventory/adjust?
+ * productId=...) — that link's intent is "fix this one product's count",
+ * which only the Correction form can act on directly; otherwise defaults to
+ * IN, the most common way an admin opens this page cold. */
 export function AdjustStockPanel({ products, selectedProductId }: AdjustStockPanelProps) {
-  const [mode, setMode] = useState<string>(MODES.IN_CORRECTION);
+  const [mode, setMode] = useState<string>(selectedProductId ? MODES.CORRECTION : MODES.IN);
 
   return (
     <div className="flex flex-col gap-6">
-      <div role="radiogroup" aria-label="نوع العملية" className="flex gap-2">
+      <div role="radiogroup" aria-label="نوع العملية" className="flex flex-wrap gap-2">
         {[
-          { value: MODES.IN_CORRECTION, label: "إدخال / تصحيح" },
+          { value: MODES.IN, label: "إدخال للمخزن" },
           { value: MODES.OUT, label: "إخراج من المخزن" },
+          { value: MODES.CORRECTION, label: "تصحيح المخزون" },
         ].map((option) => (
           <button
             key={option.value}
@@ -48,11 +60,9 @@ export function AdjustStockPanel({ products, selectedProductId }: AdjustStockPan
         ))}
       </div>
 
-      {mode === MODES.IN_CORRECTION ? (
-        <AdjustStockForm products={products} selectedProductId={selectedProductId} />
-      ) : (
-        <BulkStockOutForm products={products} />
-      )}
+      {mode === MODES.IN && <BulkStockMovementForm products={products} direction={MANUAL_STOCK_MOVEMENT_TYPES.STOCK_IN} />}
+      {mode === MODES.OUT && <BulkStockMovementForm products={products} direction={MANUAL_STOCK_MOVEMENT_TYPES.STOCK_OUT} />}
+      {mode === MODES.CORRECTION && <AdjustStockForm products={products} selectedProductId={selectedProductId} />}
     </div>
   );
 }

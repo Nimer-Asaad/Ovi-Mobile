@@ -27,10 +27,12 @@ export interface AdjustDeviceComboOption {
 /** Deliberately never populates PickableProduct's own variantOptions/
  * deviceColorVariantOptions/colorOptions — those would make ProductQuickPicker
  * open its built-in choice modal (which disables zero-stock options, wrong
- * for an admin stock-movement screen). Both AdjustStockForm (IN/Correction)
- * and BulkStockOutForm (OUT) use their own cascading selects below instead,
- * fed by variantChoices/deviceComboChoices, with every option always
- * selectable regardless of quantity or isActive. */
+ * for an admin stock-movement screen). Both AdjustStockForm (single-item
+ * Correction) and BulkStockMovementForm (multi-item IN/OUT) use their own
+ * cascading selects below instead, fed by variantChoices/deviceComboChoices,
+ * with every option always selectable regardless of quantity or isActive —
+ * restocking a currently zero-stock combination is exactly when IN is
+ * needed, so nothing here is filtered by current stock. */
 export interface AdjustStockProductOption extends PickableProduct {
   isActive: boolean;
   /** Plain (non-variant, non-combo) warehouse stock — meaningful only for a
@@ -46,8 +48,8 @@ export interface AdjustStockProductOption extends PickableProduct {
 /** الماركة → الموديل → اللون cascade for a DEVICE_MODEL_COLOR product.
  * Nothing defaults to "first option" — every step starts empty so the admin
  * must actively pick the exact combination a movement will apply to. Shared
- * by AdjustStockForm (single-item IN/Correction) and BulkStockOutForm
- * (multi-item OUT). */
+ * by AdjustStockForm (single-item Correction) and BulkStockMovementForm
+ * (multi-item IN/OUT). */
 export function useDeviceComboCascade(product: AdjustStockProductOption | null) {
   const [brandId, setBrandId] = useState("");
   const [modelId, setModelId] = useState("");
@@ -94,7 +96,7 @@ export function useDeviceComboCascade(product: AdjustStockProductOption | null) 
 
 /** الماركة → الموديل cascade for a PHONE_COMPATIBILITY product — no color
  * step, since a ProductVariant's identity is product + phone model only.
- * Shared by AdjustStockForm and BulkStockOutForm. */
+ * Shared by AdjustStockForm and BulkStockMovementForm. */
 export function usePhoneVariantCascade(product: AdjustStockProductOption | null) {
   const [brandId, setBrandId] = useState("");
   const [modelId, setModelId] = useState("");

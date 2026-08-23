@@ -12,7 +12,7 @@ import {
   VARIANT_ALLOCATION_STATUSES,
 } from "@/lib/constants";
 import { getMainWarehouse } from "@/lib/inventory";
-import { stockAdjustmentSchema, bulkStockOutSchema } from "@/lib/validation/inventory";
+import { stockAdjustmentSchema, bulkStockMovementSchema } from "@/lib/validation/inventory";
 import {
   decrementInventoryAtomic,
   incrementInventoryUpsert,
@@ -34,6 +34,12 @@ class StockActionError extends Error {}
 const PARSE_ERROR_MESSAGE = "بيانات التعديل غير صالحة";
 const POSITIVE_QUANTITY_MESSAGE = "الكمية يجب أن تكون رقماً صحيحاً أكبر من صفر";
 const NO_OP_MESSAGE = "الكمية الجديدة مساوية للكمية الحالية، لم يتم تنفيذ أي تعديل";
+
+/** Postgres INTEGER's max value — the actual column type behind
+ * StockMovement.quantity/InventoryItem.quantity (see schema.prisma). Bounds
+ * a bulk movement line's post-aggregation quantity so a payload summing
+ * many duplicate lines can never exceed what the column can store. */
+const MAX_STOCK_MOVEMENT_QUANTITY = 2_147_483_647;
 
 function revalidateInventoryPaths(productId: string): void {
   revalidatePath("/admin/inventory");
@@ -189,12 +195,12 @@ export async function createStockMovement(
   redirect("/admin/inventory");
 }
 
-export interface BulkStockOutState {
+export interface BulkStockMovementState {
   error?: string;
   success?: string;
 }
 
-interface BulkOutLine {
+interface BulkMovementLine {
   productId: string;
   variantId: string | null;
   deviceColorVariantId: string | null;
@@ -206,7 +212,7 @@ interface BulkOutLine {
  * same reason (a disabled variant/combination is still a valid admin
  * stock-movement target). One query covers every distinct product across
  * every line in the bulk submission. */
-const BULK_OUT_PRODUCT_SELECT = {
+const BULK_MOVEMENT_PRODUCT_SELECT = {
   id: true,
   name: true,
   nameAr: true,
@@ -231,14 +237,14 @@ const BULK_OUT_PRODUCT_SELECT = {
   },
 } as const;
 
-type BulkOutProduct = Awaited<ReturnType<typeof prisma.product.findMany<{ where: { id: { in: string[] } }; select: typeof BULK_OUT_PRODUCT_SELECT }>>>[number];
+type BulkMovementProduct = Awaited<ReturnType<typeof prisma.product.findMany<{ where: { id: { in: string[] } }; select: typeof BULK_MOVEMENT_PRODUCT_SELECT }>>>[number];
 
 /** "Product — Brand / Model[ / Color]" for an error message identifying
  * exactly which line failed — never just the bare product name once a
  * variant/combo is involved, so the admin isn't left guessing which of
  * several lines for the same product (e.g. two colors of one case) needs
  * its quantity corrected. */
-function describeBulkOutLine(product: BulkOutProduct, line: BulkOutLine): string {
+function describeBulkMovementLine(product: BulkMovementProduct, line: BulkMovementLine): string {
   const name = product.nameAr ?? product.name;
   if (line.deviceColorVariantId) {
     const combo = product.deviceColorVariants.find((candidate) => candidate.id === line.deviceColorVariantId);
@@ -260,23 +266,48 @@ function describeBulkOutLine(product: BulkOutProduct, line: BulkOutLine): string
   return name;
 }
 
-/** Multi-item warehouse OUT (see BulkStockOutForm) — every line in one
- * submission is validated and decremented inside a single transaction:
- * either every line's stock leaves the warehouse, or (on the first
- * insufficient-stock/invalid-line failure) none of it does. Reuses
- * decrementInventoryAtomic per line, same as the single-item form, so the
- * `quantity >= requested` concurrency guard is never weakened — a bulk
- * submission is just that guard applied N times inside one transaction
- * instead of once.
+/** Multi-item warehouse IN or OUT (see BulkStockMovementForm) — every line
+ * in one submission is validated and moved inside a single transaction:
+ * either every line's stock moves, or (on the first invalid-line/
+ * insufficient-stock failure) none of it does. Reuses
+ * decrementInventoryAtomic/incrementInventoryUpsert per line, same as the
+ * single-item Correction form, so the `quantity >= requested` concurrency
+ * guard on OUT is never weakened — a bulk submission is just that guard
+ * applied N times inside one transaction instead of once.
+ *
+ * `direction` (MANUAL_STOCK_MOVEMENT_TYPES.STOCK_IN | STOCK_OUT) is a bound
+ * argument supplied by the caller (BulkStockMovementForm binds it via
+ * `.bind(null, direction)`, the same pattern assignStockToRep/
+ * returnStockFromRep use for repId) — never read from form data, so a
+ * client can't flip an IN submission into an OUT one (or vice versa) by
+ * tampering with the payload; only which server action reference was
+ * rendered decides that.
  *
  * notes is entered once for the whole submission (no per-line reason field
  * exists in the schema, and none is added — see the schema.prisma/
  * StockMovement doc comment) and carried onto every resulting StockMovement
- * row unchanged, so every line from one bulk OUT can still be identified
- * together later by matching note text, without a new batch/reference
- * column. */
-export async function createBulkStockOut(_prevState: BulkStockOutState, formData: FormData): Promise<BulkStockOutState> {
+ * row unchanged, so every line from one bulk submission can still be
+ * identified together later by matching note text, without a new batch/
+ * reference column. */
+export async function createBulkStockMovement(
+  direction: string,
+  _prevState: BulkStockMovementState,
+  formData: FormData,
+): Promise<BulkStockMovementState> {
   const admin = await requireRole([ROLES.ADMIN]);
+
+  // `direction` arrives as a bound Server Action argument (see
+  // BulkStockMovementForm's `.bind(null, direction)`), not form data — but a
+  // bound argument is still just a value carried in the action reference the
+  // client posts back, not a value TypeScript can enforce at runtime. Any
+  // value other than exactly STOCK_IN/STOCK_OUT must be rejected outright:
+  // falling through to `isOut === false` for an unrecognized value would
+  // silently treat it as an IN, doing real inventory work under an
+  // unintended direction.
+  if (direction !== MANUAL_STOCK_MOVEMENT_TYPES.STOCK_IN && direction !== MANUAL_STOCK_MOVEMENT_TYPES.STOCK_OUT) {
+    return { error: PARSE_ERROR_MESSAGE };
+  }
+  const isOut = direction === MANUAL_STOCK_MOVEMENT_TYPES.STOCK_OUT;
 
   let items: unknown;
   try {
@@ -285,7 +316,7 @@ export async function createBulkStockOut(_prevState: BulkStockOutState, formData
     return { error: PARSE_ERROR_MESSAGE };
   }
 
-  const parsed = bulkStockOutSchema.safeParse({
+  const parsed = bulkStockMovementSchema.safeParse({
     items,
     notes: formData.get("notes")?.toString().trim() || undefined,
   });
@@ -296,13 +327,13 @@ export async function createBulkStockOut(_prevState: BulkStockOutState, formData
   const { notes } = parsed.data;
 
   // Aggregate by exact inventory target (productId + variantId +
-  // deviceColorVariantId) before any validation/decrement — the client UI
+  // deviceColorVariantId) before any validation/movement — the client UI
   // already merges a duplicate exact target before submitting, but the
   // server never trusts that: a payload listing the same exact target twice
   // (e.g. Black x3 + Black x4, however that happened — a stale tab, a
   // hand-crafted request) is summed into one effective line here, so it can
-  // never be processed as two independent decrements/movements.
-  const aggregatedByKey = new Map<string, BulkOutLine>();
+  // never be processed as two independent increments/decrements/movements.
+  const aggregatedByKey = new Map<string, BulkMovementLine>();
   for (const item of parsed.data.items) {
     const variantId = item.variantId ?? null;
     const deviceColorVariantId = item.deviceColorVariantId ?? null;
@@ -314,11 +345,25 @@ export async function createBulkStockOut(_prevState: BulkStockOutState, formData
       aggregatedByKey.set(key, { productId: item.productId, variantId, deviceColorVariantId, quantity: item.quantity });
     }
   }
-  const lines: BulkOutLine[] = [...aggregatedByKey.values()];
+  const lines: BulkMovementLine[] = [...aggregatedByKey.values()];
+
+  // Each raw line's quantity was already validated as a finite positive
+  // integer by bulkStockMovementSchema, but the aggregation step above sums
+  // however many duplicate lines a manipulated payload lists for the same
+  // exact target — that sum was never itself re-checked. Re-verify it here,
+  // bounded to Postgres's INTEGER range (the actual column type behind
+  // StockMovement.quantity/InventoryItem.quantity — see schema.prisma), so a
+  // payload crafted to sum past that range fails cleanly here instead of
+  // surfacing as a raw, unhandled database error later.
+  for (const line of lines) {
+    if (!Number.isSafeInteger(line.quantity) || line.quantity <= 0 || line.quantity > MAX_STOCK_MOVEMENT_QUANTITY) {
+      return { error: POSITIVE_QUANTITY_MESSAGE };
+    }
+  }
 
   const products = await prisma.product.findMany({
     where: { id: { in: lines.map((line) => line.productId) } },
-    select: BULK_OUT_PRODUCT_SELECT,
+    select: BULK_MOVEMENT_PRODUCT_SELECT,
   });
   const productById = new Map(products.map((product) => [product.id, product]));
 
@@ -328,7 +373,7 @@ export async function createBulkStockOut(_prevState: BulkStockOutState, formData
       return { error: "أحد المنتجات المحددة غير موجود" };
     }
     if (!product.isActive) {
-      return { error: `المنتج "${product.nameAr ?? product.name}" غير مفعّل ولا يمكن إخراج مخزونه` };
+      return { error: `المنتج "${product.nameAr ?? product.name}" غير مفعّل ولا يمكن تعديل مخزونه` };
     }
 
     const usesDeviceColor = product.inventoryTrackingMode === PRODUCT_INVENTORY_TRACKING_MODES.DEVICE_MODEL_COLOR;
@@ -342,7 +387,7 @@ export async function createBulkStockOut(_prevState: BulkStockOutState, formData
 
     if (product.variantMode === PRODUCT_VARIANT_MODES.PHONE_COMPATIBILITY) {
       if (product.variantAllocationStatus !== VARIANT_ALLOCATION_STATUSES.READY) {
-        return { error: `اعتمد توزيع مخزون الـVariants للمنتج "${product.nameAr ?? product.name}" قبل إخراج مخزونه من هنا` };
+        return { error: `اعتمد توزيع مخزون الـVariants للمنتج "${product.nameAr ?? product.name}" قبل تعديل مخزونه من هنا` };
       }
       if (!line.variantId || !product.variants.some((variant) => variant.id === line.variantId)) {
         return { error: `اختر ماركة وموديل الهاتف للمنتج "${product.nameAr ?? product.name}"` };
@@ -359,18 +404,22 @@ export async function createBulkStockOut(_prevState: BulkStockOutState, formData
       for (const line of lines) {
         const key = { productId: line.productId, variantId: line.variantId, deviceColorVariantId: line.deviceColorVariantId, locationId: warehouse.id };
         let change;
-        try {
-          change = await decrementInventoryAtomic(tx, key, line.quantity);
-        } catch (err) {
-          if (err instanceof InsufficientInventoryError) {
-            const product = productById.get(line.productId)!;
-            throw new StockActionError(`الكمية المتوفرة غير كافية للصنف:\n${describeBulkOutLine(product, line)}`);
+        if (isOut) {
+          try {
+            change = await decrementInventoryAtomic(tx, key, line.quantity);
+          } catch (err) {
+            if (err instanceof InsufficientInventoryError) {
+              const product = productById.get(line.productId)!;
+              throw new StockActionError(`الكمية المتوفرة غير كافية للصنف:\n${describeBulkMovementLine(product, line)}`);
+            }
+            throw err;
           }
-          throw err;
+        } else {
+          change = await incrementInventoryUpsert(tx, key, line.quantity);
         }
 
         await recordStockMovement(tx, {
-          type: MANUAL_STOCK_MOVEMENT_TYPES.STOCK_OUT,
+          type: direction,
           productId: line.productId,
           variantId: line.variantId,
           deviceColorVariantId: line.deviceColorVariantId,
@@ -379,7 +428,8 @@ export async function createBulkStockOut(_prevState: BulkStockOutState, formData
           newQuantity: change.newQuantity,
           note: notes,
           createdById: admin.id,
-          fromLocationId: warehouse.id,
+          fromLocationId: isOut ? warehouse.id : undefined,
+          toLocationId: isOut ? undefined : warehouse.id,
         });
       }
     });
@@ -392,5 +442,8 @@ export async function createBulkStockOut(_prevState: BulkStockOutState, formData
   for (const id of distinctProductIds) revalidateInventoryPaths(id);
 
   const totalQuantity = lines.reduce((sum, line) => sum + line.quantity, 0);
-  return { success: `تم إخراج ${lines.length} صنفاً (${totalQuantity} قطعة) من المخزون بنجاح` };
+  const message = isOut
+    ? `تم إخراج ${lines.length} صنفاً (${totalQuantity} قطعة) من المخزون بنجاح`
+    : `تم إدخال ${lines.length} صنفاً (${totalQuantity} قطعة) إلى المخزون بنجاح`;
+  return { success: message };
 }
