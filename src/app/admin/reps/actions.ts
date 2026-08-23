@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth/guards";
-import { ROLES, STOCK_MOVEMENT_TYPES } from "@/lib/constants";
+import { ROLES, STOCK_MOVEMENT_TYPES, REP_LOAD_TYPES, REP_CUSTOMER_ORDER_STATUSES } from "@/lib/constants";
 import { getMainWarehouse } from "@/lib/inventory";
 import { getOrCreateRepLocation } from "@/lib/reps";
 import { repStockTransferBatchSchema } from "@/lib/validation/reps";
@@ -120,6 +120,12 @@ export async function assignStockToRep(
     quantity: item.quantity,
   }));
 
+  const loadType = parsed.data.loadType ?? REP_LOAD_TYPES.CAR_STOCK;
+  const customerName = parsed.data.customerName?.trim() ?? "";
+  if (loadType === REP_LOAD_TYPES.CUSTOMER_ORDER && customerName.length < 2) {
+    return { error: "اسم الزبون مطلوب لتحميل من نوع طلبية زبون" };
+  }
+
   const rep = await prisma.salesRepresentative.findUnique({
     where: { id: repId },
     select: { id: true, isActive: true, user: { select: { id: true, name: true, isActive: true } } },
@@ -167,6 +173,7 @@ export async function assignStockToRep(
           salesRepId: rep.id,
           fromLocationId: warehouse.id,
           toLocationId: repLocation.id,
+          loadType,
           note: notes,
           createdById: admin.id,
         },
@@ -206,6 +213,31 @@ export async function assignStockToRep(
         });
       }
 
+      // Layered on top of the exact same physical transfer above — never a
+      // second inventory bucket, purely a label + intended-quantity record
+      // (see the RepCustomerOrder doc comment in prisma/schema.prisma).
+      // Created in the same transaction so the batch, its movements, and
+      // this template either all commit together or none do.
+      if (loadType === REP_LOAD_TYPES.CUSTOMER_ORDER) {
+        await tx.repCustomerOrder.create({
+          data: {
+            salesRepId: rep.id,
+            customerName,
+            status: REP_CUSTOMER_ORDER_STATUSES.OPEN,
+            transferBatchId: createdBatch.id,
+            createdById: admin.id,
+            items: {
+              create: lines.map((line) => ({
+                productId: line.productId,
+                variantId: line.variantId,
+                deviceColorVariantId: line.deviceColorVariantId,
+                quantity: line.quantity,
+              })),
+            },
+          },
+        });
+      }
+
       return createdBatch;
     });
     batchId = batch.id;
@@ -220,6 +252,9 @@ export async function assignStockToRep(
   }
 
   revalidateRepPaths(repId);
+  if (loadType === REP_LOAD_TYPES.CUSTOMER_ORDER) {
+    revalidatePath("/rep/sales/new");
+  }
   redirect(`/admin/reps/${repId}/transfer-batches/${batchId}/invoice`);
 }
 
@@ -340,4 +375,47 @@ export async function returnStockFromRep(
 
   revalidateRepPaths(repId);
   redirect(`/admin/reps/${repId}/transfer-batches/${batchId}/invoice`);
+}
+
+export interface CancelCustomerOrderState {
+  error?: string;
+  success?: string;
+}
+
+/** Cancels an OPEN customer-order template — never touches physical
+ * inventory (see the RepCustomerOrder doc comment: stock already loaded
+ * into the car simply becomes general car stock; send it back to the
+ * warehouse through the existing Return Stock workflow if needed). Atomic
+ * conditional update (status: OPEN in the where clause) so a concurrent
+ * sale-completion and cancellation on the same order can never both land —
+ * whichever transitions it first wins, the other fails cleanly. */
+export async function cancelRepCustomerOrder(
+  repId: string,
+  customerOrderId: string,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- useActionState requires this signature
+  _prevState: CancelCustomerOrderState,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- no form fields needed, target comes from the bound args
+  _formData: FormData,
+): Promise<CancelCustomerOrderState> {
+  await requireRole([ROLES.ADMIN]);
+
+  const order = await prisma.repCustomerOrder.findUnique({
+    where: { id: customerOrderId },
+    select: { id: true, salesRepId: true },
+  });
+  if (!order || order.salesRepId !== repId) {
+    return { error: "طلبية الزبون غير موجودة" };
+  }
+
+  const result = await prisma.repCustomerOrder.updateMany({
+    where: { id: customerOrderId, status: REP_CUSTOMER_ORDER_STATUSES.OPEN },
+    data: { status: REP_CUSTOMER_ORDER_STATUSES.CANCELLED, cancelledAt: new Date() },
+  });
+  if (result.count === 0) {
+    return { error: "لم يعد بالإمكان إلغاء هذه الطلبية (ربما تم استخدامها أو إلغاؤها بالفعل)" };
+  }
+
+  revalidatePath(`/admin/reps/${repId}`);
+  revalidatePath("/rep/sales/new");
+  return { success: "تم إلغاء طلبية الزبون" };
 }

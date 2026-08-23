@@ -3,6 +3,7 @@ import { ROLES } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { getRepTraderContactsForSaleForm } from "@/lib/rep-merchants";
+import { getOpenCustomerOrdersForRep } from "@/lib/rep-customer-orders";
 import { NewSaleForm } from "../NewSaleForm";
 
 export default async function RepNewSalePage() {
@@ -15,7 +16,7 @@ export default async function RepNewSalePage() {
 
   const locationId = rep?.carStockLocation?.id ?? null;
 
-  const [items, customers] = await Promise.all([
+  const [items, customers, customerOrders] = await Promise.all([
     locationId
       ? prisma.inventoryItem.findMany({
           where: { locationId, quantity: { gt: 0 } },
@@ -60,6 +61,7 @@ export default async function RepNewSalePage() {
     // createRepSale, which resolves/creates the matching Merchant by phone
     // so repeat sales to the same trader never register a duplicate.
     rep ? getRepTraderContactsForSaleForm(rep.id) : Promise.resolve([]),
+    rep ? getOpenCustomerOrdersForRep(rep.id) : Promise.resolve([]),
   ]);
 
   // Group rep-car InventoryItem rows into one option per product — a
@@ -144,7 +146,7 @@ export default async function RepNewSalePage() {
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-6">
       <PageHeader title="بيع مباشر جديد" subtitle="تسجيل عملية بيع من مخزونك الحالي" />
-      <NewSaleForm products={options} customers={customers} />
+      <NewSaleForm products={options} customers={customers} customerOrders={customerOrders} />
     </div>
   );
 }

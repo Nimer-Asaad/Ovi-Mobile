@@ -26,6 +26,11 @@ export const repSaleSchema = z.object({
   city: z.string().optional(),
   address: z.string().optional(),
   notes: z.string().max(500, "الملاحظات طويلة جداً").optional(),
+  /** Set when this sale was started from a customer-order car-load template
+   * (see RepCustomerOrder) — the rep may have added/removed/changed lines
+   * freely first, `items` above always wins as the actual sale content.
+   * Null/omitted for a normal blank sale. */
+  repCustomerOrderId: z.string().nullable().optional(),
 });
 
 export type RepSaleInput = z.infer<typeof repSaleSchema>;

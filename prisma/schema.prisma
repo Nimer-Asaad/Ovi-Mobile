@@ -72,6 +72,7 @@ model User {
   accountPaymentsRecorded        AccountPayment[]                @relation("AccountPaymentCreatedBy")
   completedVariantAllocations    ProductVariantAllocationBatch[] @relation("VariantAllocationCompletedBy")
   repStockTransferBatchesCreated RepStockTransferBatch[]         @relation("RepStockTransferBatchCreatedBy")
+  repCustomerOrdersCreated       RepCustomerOrder[]              @relation("RepCustomerOrderCreatedBy")
 
   @@map("users")
 }
@@ -130,6 +131,7 @@ model SalesRepresentative {
   stockRequests        StockRequest[]
   stockReturns         StockReturn[]
   stockTransferBatches RepStockTransferBatch[]
+  customerOrders       RepCustomerOrder[]
 
   @@map("sales_representatives")
 }
@@ -405,6 +407,7 @@ model Product {
   variants               ProductVariant[]
   variantAllocationBatch ProductVariantAllocationBatch?
   deviceColorVariants    DeviceColorVariant[]
+  repCustomerOrderItems  RepCustomerOrderItem[]
 
   @@map("products")
 }
@@ -432,10 +435,11 @@ model DeviceColorVariant {
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
-  inventoryItems InventoryItem[]
-  stockMovements StockMovement[]
-  cartItems      CartItem[]
-  orderItems     OrderItem[]
+  inventoryItems        InventoryItem[]
+  stockMovements        StockMovement[]
+  cartItems             CartItem[]
+  orderItems            OrderItem[]
+  repCustomerOrderItems RepCustomerOrderItem[]
 
   @@unique([productId, phoneModelId, colorId])
   @@unique([id, productId])
@@ -462,12 +466,13 @@ model ProductVariant {
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
-  inventoryItems    InventoryItem[]
-  cartItems         CartItem[]
-  orderItems        OrderItem[]
-  stockMovements    StockMovement[]
-  stockRequestItems StockRequestItem[]
-  stockReturnItems  StockReturnItem[]
+  inventoryItems        InventoryItem[]
+  cartItems             CartItem[]
+  orderItems            OrderItem[]
+  stockMovements        StockMovement[]
+  stockRequestItems     StockRequestItem[]
+  stockReturnItems      StockReturnItem[]
+  repCustomerOrderItems RepCustomerOrderItem[]
 
   @@unique([productId, phoneModelId])
   @@unique([id, productId])
@@ -700,15 +705,99 @@ model RepStockTransferBatch {
   fromLocation   StockLocation       @relation("RepTransferBatchFromLocation", fields: [fromLocationId], references: [id], onDelete: Restrict)
   toLocationId   String
   toLocation     StockLocation       @relation("RepTransferBatchToLocation", fields: [toLocationId], references: [id], onDelete: Restrict)
+  /// RepLoadType values: "CAR_STOCK" | "CUSTOMER_ORDER" — see
+  /// REP_LOAD_TYPES in src/lib/constants.ts and the RepCustomerOrder doc
+  /// comment below. Only ever meaningful on a REP_ASSIGNMENT batch; a
+  /// REP_RETURN batch always keeps the default CAR_STOCK (returns are never
+  /// customer-order-aware — physical inventory is authoritative there).
+  loadType       String              @default("CAR_STOCK")
   note           String?
   createdById    String?
   createdBy      User?               @relation("RepStockTransferBatchCreatedBy", fields: [createdById], references: [id])
   createdAt      DateTime            @default(now())
 
   stockMovements StockMovement[]
+  customerOrder  RepCustomerOrder?
 
   @@index([salesRepId])
   @@map("rep_stock_transfer_batches")
+}
+
+/// RepCustomerOrderStatus values: "OPEN" | "COMPLETED" | "CANCELLED"
+///
+/// A logical allocation created alongside a REP_ASSIGNMENT
+/// RepStockTransferBatch when the admin picks loadType CUSTOMER_ORDER
+/// instead of CAR_STOCK on /admin/reps/[id]/assign-stock (see
+/// assignStockToRep). Physical inventory for these items moves through the
+/// exact same WAREHOUSE -> REP_CAR path as a normal car load — one shared
+/// InventoryItem bucket at the rep's location, never a second reserved
+/// quantity. This table only records who the admin intended the stock for
+/// and the originally requested items/quantities as a starting template —
+/// see RepCustomerOrderItem.
+///
+/// customerName is free text, the same convention Order.contactName already
+/// uses — deliberately not a hard link to Merchant. At load time the admin
+/// typically only has a name, not the phone/address Merchant requires; real
+/// customer/account reconciliation already happens exactly once elsewhere,
+/// when the rep completes a sale (createRepSale resolves-or-creates a
+/// Merchant by phone) — see repCustomerOrderId on Order below.
+///
+/// status starts OPEN and becomes COMPLETED automatically the moment any
+/// sale is created from it (see createRepSale), regardless of whether the
+/// rep sold the exact original items/quantities — a customer order is a
+/// single-use starting template, not a running tab; unsold physical units
+/// simply remain in the rep's car as general stock. status becomes
+/// CANCELLED only via an explicit admin action (cancelRepCustomerOrder),
+/// which never touches physical inventory — stock already loaded stays in
+/// the car as general car stock (use the existing Return Stock workflow to
+/// send it back to the warehouse).
+model RepCustomerOrder {
+  id              String                @id @default(cuid())
+  salesRepId      String
+  salesRep        SalesRepresentative   @relation(fields: [salesRepId], references: [id], onDelete: Restrict)
+  customerName    String
+  status          String                @default("OPEN")
+  transferBatchId String                @unique
+  transferBatch   RepStockTransferBatch @relation(fields: [transferBatchId], references: [id], onDelete: Restrict)
+  createdById     String?
+  createdBy       User?                 @relation("RepCustomerOrderCreatedBy", fields: [createdById], references: [id])
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+  completedAt     DateTime?
+  cancelledAt     DateTime?
+
+  items     RepCustomerOrderItem[]
+  saleOrder Order?                 @relation("OrderFromCustomerOrder")
+
+  @@index([salesRepId, status])
+  @@map("rep_customer_orders")
+}
+
+/// Snapshot of one intended line at load time. productId/variantId/
+/// deviceColorVariantId identify the exact same InventoryItem bucket the
+/// transfer moved (see the InventoryItem doc comment); quantity is the
+/// originally intended amount — the rep is free to deviate from it when
+/// actually selling (see RepCustomerOrder doc comment above), so this row is
+/// never updated after creation, only read as the sale form's prefill
+/// template. variantId and deviceColorVariantId are mutually exclusive
+/// (enforced by a DB CHECK constraint, see the migration — same convention
+/// as InventoryItem/StockMovement), matching the InventoryKey shape
+/// decrementInventoryAtomic/incrementInventoryUpsert already require.
+model RepCustomerOrderItem {
+  id                   String              @id @default(cuid())
+  repCustomerOrderId   String
+  repCustomerOrder     RepCustomerOrder    @relation(fields: [repCustomerOrderId], references: [id], onDelete: Cascade)
+  productId            String
+  product              Product             @relation(fields: [productId], references: [id])
+  variantId            String?
+  variant              ProductVariant?     @relation(fields: [variantId, productId], references: [id, productId])
+  deviceColorVariantId String?
+  deviceColorVariant   DeviceColorVariant? @relation(fields: [deviceColorVariantId, productId], references: [id, productId])
+  quantity             Int
+
+  @@index([variantId])
+  @@index([deviceColorVariantId])
+  @@map("rep_customer_order_items")
 }
 
 // ---------------------------------------------------------------------------
@@ -734,6 +823,21 @@ model Order {
 
   createdByRepId String?
   createdByRep   SalesRepresentative? @relation("OrderCreatedByRep", fields: [createdByRepId], references: [id])
+
+  /// Set when this rep sale was started from a customer-order car-load
+  /// template (see RepCustomerOrder) — null for a normal blank sale. The
+  /// rep may have changed quantities/items freely before selling; this link
+  /// only records provenance, never constrains what was actually sold.
+  /// @unique is a deliberate DB-level backstop for "one customer order is
+  /// consumed by at most one resulting sale" — a plain UNIQUE index still
+  /// allows unlimited NULLs (standard Postgres semantics), so every ordinary
+  /// blank sale is unaffected; it only ever rejects a second Order somehow
+  /// referencing the same already-used RepCustomerOrder. The real
+  /// enforcement is still the atomic OPEN -> COMPLETED transition in
+  /// createRepSale; this is defense in depth on top of it, not a
+  /// replacement.
+  repCustomerOrderId String?           @unique
+  repCustomerOrder   RepCustomerOrder? @relation("OrderFromCustomerOrder", fields: [repCustomerOrderId], references: [id])
 
   stockLocationId     String?
   stockLocation       StockLocation? @relation(fields: [stockLocationId], references: [id])

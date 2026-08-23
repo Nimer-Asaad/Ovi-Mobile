@@ -7,8 +7,9 @@ import { Textarea } from "@/components/ui/Textarea";
 import { Button } from "@/components/ui/Button";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card";
 import { Spinner } from "@/components/ui/Spinner";
-import { formatCurrencyFromCents } from "@/lib/utils";
+import { cn, formatCurrencyFromCents } from "@/lib/utils";
 import { ProductThumb, ProductQuickPicker, type PickableProduct } from "@/components/reps/ProductQuickPicker";
+import type { RepCustomerOrderOption } from "@/lib/rep-customer-orders";
 
 export interface SaleProductOption extends PickableProduct {
   /** Rep-car stock for a non-variant product — a phone-variant product's
@@ -44,6 +45,10 @@ interface SaleLine {
 interface NewSaleFormProps {
   products: SaleProductOption[];
   customers: SaleCustomerOption[];
+  /** This rep's active (OPEN) customer-order car-load templates — see the
+   * "طلبات الزبائن" panel below. Never another rep's orders (already scoped
+   * server-side by getOpenCustomerOrdersForRep). */
+  customerOrders: RepCustomerOrderOption[];
 }
 
 const initialState: RepSaleState = {};
@@ -57,11 +62,65 @@ function lineKey(productId: string, colorId: string | null, variantId: string | 
   return `${productId}:${variantId ?? `legacy:${colorId ?? ""}`}`;
 }
 
+/** Resolves one customer-order line against this rep's *current* stock
+ * (never the order's stale snapshot) — the order is only ever a starting
+ * template (see the RepCustomerOrder schema doc comment). Returns null with
+ * a human-readable note when the product/option no longer has any car stock
+ * at all, and clamps (with a note) when current stock is less than the
+ * originally intended quantity — either way the rep sees exactly why a line
+ * came in short or missing instead of it silently vanishing. */
+function buildLineFromOrderItem(
+  item: RepCustomerOrderOption["items"][number],
+  products: SaleProductOption[],
+): { line: SaleLine | null; note: string | null } {
+  const product = products.find((candidate) => candidate.id === item.productId);
+  if (!product) {
+    return { line: null, note: `منتج غير متوفر حالياً في سيارتك (${item.quantity} قطعة مطلوبة)` };
+  }
+
+  const variant = item.variantId ? (product.variantOptions?.find((option) => option.id === item.variantId) ?? null) : null;
+  const combo = item.deviceColorVariantId ? (product.deviceColorVariantOptions?.find((option) => option.id === item.deviceColorVariantId) ?? null) : null;
+  const currentStock = variant ? (variant.stock ?? 0) : combo ? (combo.stock ?? 0) : product.repStock;
+  const colorLabel = combo ? `${combo.brandLabel} / ${combo.modelLabel} / ${combo.colorLabel}` : (variant?.label ?? null);
+  const displayName = `${product.nameAr ?? product.name}${colorLabel ? ` — ${colorLabel}` : ""}`;
+
+  if (currentStock <= 0) {
+    return { line: null, note: `${displayName} — غير متوفر حالياً في سيارتك` };
+  }
+
+  const quantity = Math.min(item.quantity, currentStock);
+  return {
+    line: {
+      productId: product.id,
+      colorId: null,
+      variantId: item.variantId,
+      deviceColorVariantId: item.deviceColorVariantId,
+      colorLabel,
+      sku: product.sku,
+      label: product.nameAr ?? product.name,
+      quantity,
+      unitPrice: centsToInputValue(product.retailPriceCents),
+      repStock: currentStock,
+      thumbnailUrl: product.thumbnailUrl,
+      thumbnailAlt: product.thumbnailAlt,
+    },
+    note: quantity < item.quantity ? `${displayName} — الكمية المتاحة الآن (${currentStock}) أقل من طلبية الزبون الأصلية (${item.quantity})` : null,
+  };
+}
+
 /** Multi-line direct-sale form — same search/thumbnail/detail product
  * picker as the stock-request form (ProductQuickPicker), plus a customer
  * name field that suggests this rep's past customers (by phone) so repeat
- * sales don't re-register the same person under slightly different details. */
-export function NewSaleForm({ products, customers }: NewSaleFormProps) {
+ * sales don't re-register the same person under slightly different details.
+ *
+ * Also offers a shortcut: this rep's OPEN customer-order car-load templates
+ * (right panel, "طلبات الزبائن" — see RepCustomerOrder) can be clicked to
+ * prefill customer name + lines in one go. The prefill is only ever a
+ * starting point — every line stays fully editable (quantity/removal/adding
+ * more), and the actual submitted `items` always wins as what was really
+ * sold; see buildLineFromOrderItem above for how prefill quantities are
+ * revalidated against current car stock rather than trusted blindly. */
+export function NewSaleForm({ products, customers, customerOrders }: NewSaleFormProps) {
   const [state, formAction, isPending] = useActionState(createRepSale, initialState);
   const [lines, setLines] = useState<SaleLine[]>([]);
 
@@ -71,6 +130,9 @@ export function NewSaleForm({ products, customers }: NewSaleFormProps) {
   const [address, setAddress] = useState("");
   const [notes, setNotes] = useState("");
   const [customerPicked, setCustomerPicked] = useState(false);
+
+  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
+  const [orderNotices, setOrderNotices] = useState<string[]>([]);
 
   // Variant and color are independent axes now — a product stays pickable
   // until every combination of its variants × colors already has a line
@@ -162,6 +224,42 @@ export function NewSaleForm({ products, customers }: NewSaleFormProps) {
     setCustomerPicked(true);
   }
 
+  /** Selecting a customer order REPLACES the current lines/customer name
+   * with that order's template — it's a fresh starting point, not a merge
+   * with whatever the rep had already been building manually (matches how
+   * clicking a second, different order should behave too). Phone/city/
+   * address are cleared rather than left stale, since the order itself only
+   * ever carries a name — see the RepCustomerOrder doc comment. */
+  function handleSelectOrder(order: RepCustomerOrderOption) {
+    const notices: string[] = [];
+    const nextLines: SaleLine[] = [];
+    for (const item of order.items) {
+      const { line, note } = buildLineFromOrderItem(item, products);
+      if (line) nextLines.push(line);
+      if (note) notices.push(note);
+    }
+    setLines(nextLines);
+    setCustomerName(order.customerName);
+    setCustomerPhone("");
+    setCity("");
+    setAddress("");
+    setCustomerPicked(false);
+    setSelectedOrderId(order.id);
+    setOrderNotices(notices);
+  }
+
+  function handleStartBlankSale() {
+    setLines([]);
+    setCustomerName("");
+    setCustomerPhone("");
+    setCity("");
+    setAddress("");
+    setNotes("");
+    setCustomerPicked(false);
+    setSelectedOrderId(null);
+    setOrderNotices([]);
+  }
+
   const totalCents = lines.reduce(
     (sum, line) => sum + Math.round(Number(line.unitPrice || 0) * 100) * line.quantity,
     0,
@@ -187,151 +285,206 @@ export function NewSaleForm({ products, customers }: NewSaleFormProps) {
   }
 
   return (
-    <form action={formAction} className="flex flex-col gap-6">
-      <input type="hidden" name="items" value={itemsJson} />
+    <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
+      <form action={formAction} className="order-1 flex min-w-0 flex-1 flex-col gap-6 lg:order-2">
+        <input type="hidden" name="items" value={itemsJson} />
+        <input type="hidden" name="repCustomerOrderId" value={selectedOrderId ?? ""} />
 
-      <Card>
-        <CardHeader>
-          <CardTitle>إضافة منتجات للبيع</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <ProductQuickPicker products={products} excludeIds={excludeIds} onPick={handleAddProduct} />
-        </CardContent>
-      </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>إضافة منتجات للبيع</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ProductQuickPicker products={products} excludeIds={excludeIds} onPick={handleAddProduct} />
+          </CardContent>
+        </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>المنتجات المضافة</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {lines.length === 0 ? (
-            <p className="py-6 text-center text-sm text-neutral-bg/50">لم تتم إضافة منتجات بعد</p>
-          ) : (
-            <div className="flex flex-col divide-y divide-navy-soft">
-              {lines.map((line) => (
-                <div
-                  key={lineKey(line.productId, line.colorId, line.variantId, line.deviceColorVariantId)}
-                  className="flex flex-wrap items-center gap-3 py-3 first:pt-0 last:pb-0"
-                >
-                  <ProductThumb product={{ ...line, name: line.label }} className="h-10 w-10" />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium text-neutral-bg">
-                      {line.label}
-                      {line.colorLabel && <span> — {line.colorLabel}</span>}
-                    </p>
-                    <p className="text-xs text-neutral-bg/50">{line.sku} — المتوفر لديك: {line.repStock}</p>
-                  </div>
-                  <div className="w-20">
-                    <Input
-                      type="number"
-                      min={1}
-                      max={line.repStock}
-                      value={line.quantity}
-                      onChange={(event) => handleQuantityChange(line.productId, line.colorId, line.variantId, line.deviceColorVariantId, event.target.value)}
-                      aria-label="الكمية"
-                    />
-                  </div>
-                  <div className="w-24">
-                    <Input
-                      type="number"
-                      min={0.01}
-                      step={0.01}
-                      value={line.unitPrice}
-                      onChange={(event) => handlePriceChange(line.productId, line.colorId, line.variantId, line.deviceColorVariantId, event.target.value)}
-                      aria-label="سعر البيع"
-                    />
-                  </div>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => handleRemoveLine(line.productId, line.colorId, line.variantId, line.deviceColorVariantId)}
-                  >
-                    حذف
-                  </Button>
-                </div>
-              ))}
-              <div className="flex items-center justify-between pt-3 text-sm font-semibold">
-                <span className="text-neutral-bg">الإجمالي</span>
-                <span className="text-gold-champagne">{formatCurrencyFromCents(totalCents)}</span>
+        <Card>
+          <CardHeader>
+            <CardTitle>المنتجات المضافة</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {orderNotices.length > 0 && (
+              <div className="mb-3 flex flex-col gap-1 rounded-card border border-amber-500/25 bg-amber-500/10 px-3 py-2">
+                {orderNotices.map((notice) => (
+                  <p key={notice} className="text-xs text-amber-700">{notice}</p>
+                ))}
               </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>بيانات العميل</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-3">
-          <div>
-            <Input
-              name="customerName"
-              label="اسم العميل"
-              value={customerName}
-              onChange={handleCustomerNameChange}
-              autoComplete="off"
-              required
-            />
-            {filteredCustomers.length > 0 && (
-              <div className="mt-1 max-h-56 overflow-y-auto rounded-card border border-navy-soft">
-                <div className="flex flex-col divide-y divide-navy-soft">
-                  {filteredCustomers.map((customer) => (
-                    <button
-                      key={customer.phone}
+            )}
+            {lines.length === 0 ? (
+              <p className="py-6 text-center text-sm text-neutral-bg/50">لم تتم إضافة منتجات بعد</p>
+            ) : (
+              <div className="flex flex-col divide-y divide-navy-soft">
+                {lines.map((line) => (
+                  <div
+                    key={lineKey(line.productId, line.colorId, line.variantId, line.deviceColorVariantId)}
+                    className="flex flex-wrap items-center gap-3 py-3 first:pt-0 last:pb-0"
+                  >
+                    <ProductThumb product={{ ...line, name: line.label }} className="h-10 w-10" />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-neutral-bg">
+                        {line.label}
+                        {line.colorLabel && <span> — {line.colorLabel}</span>}
+                      </p>
+                      <p className="text-xs text-neutral-bg/50">{line.sku} — المتوفر لديك: {line.repStock}</p>
+                    </div>
+                    <div className="w-20">
+                      <Input
+                        type="number"
+                        min={1}
+                        max={line.repStock}
+                        value={line.quantity}
+                        onChange={(event) => handleQuantityChange(line.productId, line.colorId, line.variantId, line.deviceColorVariantId, event.target.value)}
+                        aria-label="الكمية"
+                      />
+                    </div>
+                    <div className="w-24">
+                      <Input
+                        type="number"
+                        min={0.01}
+                        step={0.01}
+                        value={line.unitPrice}
+                        onChange={(event) => handlePriceChange(line.productId, line.colorId, line.variantId, line.deviceColorVariantId, event.target.value)}
+                        aria-label="سعر البيع"
+                      />
+                    </div>
+                    <Button
                       type="button"
-                      onClick={() => handlePickCustomer(customer)}
-                      className="flex items-center justify-between px-3 py-2 text-start text-sm hover:bg-navy-deep"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleRemoveLine(line.productId, line.colorId, line.variantId, line.deviceColorVariantId)}
                     >
-                      <span className="text-neutral-bg">{customer.name}</span>
-                      <span className="text-xs text-neutral-bg/50">{customer.phone}</span>
-                    </button>
-                  ))}
+                      حذف
+                    </Button>
+                  </div>
+                ))}
+                <div className="flex items-center justify-between pt-3 text-sm font-semibold">
+                  <span className="text-neutral-bg">الإجمالي</span>
+                  <span className="text-gold-champagne">{formatCurrencyFromCents(totalCents)}</span>
                 </div>
               </div>
             )}
-          </div>
+          </CardContent>
+        </Card>
 
-          <Input
-            name="customerPhone"
-            label="هاتف العميل"
-            value={customerPhone}
-            onChange={(event) => setCustomerPhone(event.target.value)}
-            required
-          />
-          <Input
-            name="city"
-            label="المدينة / المنطقة (اختياري)"
-            value={city}
-            onChange={(event) => setCity(event.target.value)}
-          />
-          <Input
-            name="address"
-            label="العنوان (اختياري)"
-            value={address}
-            onChange={(event) => setAddress(event.target.value)}
-          />
-          <Textarea
-            name="notes"
-            label="ملاحظات (اختياري)"
-            rows={3}
-            value={notes}
-            onChange={(event) => setNotes(event.target.value)}
-          />
-        </CardContent>
-      </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>بيانات العميل</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            <div>
+              <Input
+                name="customerName"
+                label="اسم العميل"
+                value={customerName}
+                onChange={handleCustomerNameChange}
+                autoComplete="off"
+                required
+              />
+              {filteredCustomers.length > 0 && (
+                <div className="mt-1 max-h-56 overflow-y-auto rounded-card border border-navy-soft">
+                  <div className="flex flex-col divide-y divide-navy-soft">
+                    {filteredCustomers.map((customer) => (
+                      <button
+                        key={customer.phone}
+                        type="button"
+                        onClick={() => handlePickCustomer(customer)}
+                        className="flex items-center justify-between px-3 py-2 text-start text-sm hover:bg-navy-deep"
+                      >
+                        <span className="text-neutral-bg">{customer.name}</span>
+                        <span className="text-xs text-neutral-bg/50">{customer.phone}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
 
-      {state.error && (
-        <p className="text-sm text-rose-600" role="alert">
-          {state.error}
-        </p>
-      )}
+            <Input
+              name="customerPhone"
+              label="هاتف العميل"
+              value={customerPhone}
+              onChange={(event) => setCustomerPhone(event.target.value)}
+              required
+            />
+            <Input
+              name="city"
+              label="المدينة / المنطقة (اختياري)"
+              value={city}
+              onChange={(event) => setCity(event.target.value)}
+            />
+            <Input
+              name="address"
+              label="العنوان (اختياري)"
+              value={address}
+              onChange={(event) => setAddress(event.target.value)}
+            />
+            <Textarea
+              name="notes"
+              label="ملاحظات (اختياري)"
+              rows={3}
+              value={notes}
+              onChange={(event) => setNotes(event.target.value)}
+            />
+          </CardContent>
+        </Card>
 
-      <Button type="submit" disabled={isPending || lines.length === 0} className="w-full sm:w-auto">
-        {isPending && <Spinner />}
-        {isPending ? "جارٍ الحفظ..." : "إتمام البيع"}
-      </Button>
-    </form>
+        {state.error && (
+          <p className="text-sm text-rose-600" role="alert">
+            {state.error}
+          </p>
+        )}
+
+        <Button type="submit" disabled={isPending || lines.length === 0} className="w-full sm:w-auto">
+          {isPending && <Spinner />}
+          {isPending ? "جارٍ الحفظ..." : "إتمام البيع"}
+        </Button>
+      </form>
+
+      <div className="order-2 flex w-full flex-col gap-3 lg:order-1 lg:w-72 lg:shrink-0">
+        <Button type="button" variant={selectedOrderId ? "outline" : "primary"} onClick={handleStartBlankSale}>
+          بيع جديد فارغ
+        </Button>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>طلبات الزبائن</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {customerOrders.length === 0 ? (
+              <p className="py-6 text-center text-sm text-neutral-bg/50">لا توجد طلبات زبائن نشطة حالياً</p>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {customerOrders.map((order) => {
+                  const isSelected = selectedOrderId === order.id;
+                  return (
+                    <button
+                      key={order.id}
+                      type="button"
+                      onClick={() => handleSelectOrder(order)}
+                      aria-pressed={isSelected}
+                      className={cn(
+                        "rounded-card border px-3 py-2 text-start transition-colors",
+                        isSelected
+                          ? "border-gold-champagne/60 bg-gold-champagne/10"
+                          : "border-navy-soft hover:border-gold-champagne/30",
+                      )}
+                    >
+                      <p className={cn("text-sm font-medium", isSelected ? "text-gold-champagne" : "text-neutral-bg")}>
+                        {order.customerName}
+                      </p>
+                      <p className="mt-0.5 text-xs text-neutral-bg/50">
+                        {order.itemCount} صنف — {order.totalQuantity} قطعة
+                      </p>
+                      <p className="text-xs text-neutral-bg/40">{new Date(order.createdAt).toLocaleDateString("ar")}</p>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    </div>
   );
 }

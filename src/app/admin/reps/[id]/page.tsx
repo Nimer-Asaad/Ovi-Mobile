@@ -12,7 +12,9 @@ import { RepCarStockSummary } from "@/components/reps/RepCarStockSummary";
 import { RepCarProductGrid } from "@/components/reps/RepCarProductGrid";
 import { RepTransferHistory } from "@/components/reps/RepTransferHistory";
 import { RepStockRequestStatusBadge } from "@/components/reps/RepStockRequestStatusBadge";
+import { RepCustomerOrdersCard } from "@/components/reps/RepCustomerOrdersCard";
 import { getActiveRequestCountForRep, getLatestRequestsForRep } from "@/lib/rep-stock-requests";
+import { getRecentCustomerOrdersForRep } from "@/lib/rep-customer-orders";
 import { ORDER_SOURCES, STOCK_MOVEMENT_TYPES } from "@/lib/constants";
 import { formatCurrencyFromCents } from "@/lib/utils";
 import type { RepTransferHistoryRow } from "@/components/reps/RepTransferHistory";
@@ -52,6 +54,7 @@ export default async function AdminRepDetailPage({ params }: AdminRepDetailPageP
     latestRequests,
     todaySales,
     todaySalesAgg,
+    customerOrders,
   ] = await Promise.all([
     getRepStockStats(locationId),
     getRepStockValueCents(locationId),
@@ -112,6 +115,7 @@ export default async function AdminRepDetailPage({ params }: AdminRepDetailPageP
       where: { createdByRepId: rep.id, source: ORDER_SOURCES.REP_SALE, createdAt: { gte: startOfToday } },
       _sum: { totalCents: true },
     }),
+    getRecentCustomerOrdersForRep(rep.id),
   ]);
 
   // Movements sharing a transferBatchId were all created by the same
@@ -305,6 +309,8 @@ export default async function AdminRepDetailPage({ params }: AdminRepDetailPageP
           </CardContent>
         </Card>
       </div>
+
+      <RepCustomerOrdersCard repId={rep.id} orders={customerOrders} />
 
       <RepCarProductGrid items={gridItems} />
 

@@ -7,6 +7,8 @@ import { Textarea } from "@/components/ui/Textarea";
 import { Button } from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Spinner";
 import { ProductThumb, ProductQuickPicker, type PickableProduct } from "@/components/reps/ProductQuickPicker";
+import { REP_LOAD_TYPES } from "@/lib/constants";
+import { cn } from "@/lib/utils";
 
 export interface AssignStockProductOption extends PickableProduct {
   /** Non-variant warehouse stock — a phone-variant or device-color-combo
@@ -50,6 +52,9 @@ export function AssignStockForm({ repId, products }: AssignStockFormProps) {
   const action = assignStockToRep.bind(null, repId);
   const [state, formAction, isPending] = useActionState(action, initialState);
   const [lines, setLines] = useState<TransferLine[]>([]);
+  const [loadType, setLoadType] = useState<string>(REP_LOAD_TYPES.CAR_STOCK);
+  const [customerName, setCustomerName] = useState("");
+  const isCustomerOrder = loadType === REP_LOAD_TYPES.CUSTOMER_ORDER;
 
   const excludeIds = useMemo(() => {
     const usedKeys = new Set(lines.map((line) => lineKey(line.productId, line.variantId, line.deviceColorVariantId)));
@@ -116,6 +121,44 @@ export function AssignStockForm({ repId, products }: AssignStockFormProps) {
   return (
     <form action={formAction} className="flex max-w-xl flex-col gap-4">
       <input type="hidden" name="items" value={itemsJson} />
+      <input type="hidden" name="loadType" value={loadType} />
+      {isCustomerOrder && <input type="hidden" name="customerName" value={customerName} />}
+
+      <div>
+        <p className="mb-1.5 text-sm font-medium text-neutral-bg/80">نوع التحميل</p>
+        <div role="radiogroup" aria-label="نوع التحميل" className="flex gap-2">
+          {[
+            { value: REP_LOAD_TYPES.CAR_STOCK, label: "مخزون سيارة" },
+            { value: REP_LOAD_TYPES.CUSTOMER_ORDER, label: "طلبية زبون" },
+          ].map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              role="radio"
+              aria-checked={loadType === option.value}
+              onClick={() => setLoadType(option.value)}
+              className={cn(
+                "flex-1 rounded-card border px-4 py-2 text-sm transition-colors",
+                loadType === option.value
+                  ? "border-gold-champagne/60 bg-gold-champagne/10 text-gold-champagne"
+                  : "border-navy-soft text-neutral-bg/70 hover:border-gold-champagne/30",
+              )}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {isCustomerOrder && (
+        <Input
+          label="اسم الزبون"
+          value={customerName}
+          onChange={(event) => setCustomerName(event.target.value)}
+          placeholder="مثال: أحمد محمد"
+          required
+        />
+      )}
 
       <ProductQuickPicker products={products} excludeIds={excludeIds} onPick={handleAddProduct} placeholder="ابحث عن منتج لتخصيصه..." />
 
@@ -157,7 +200,10 @@ export function AssignStockForm({ repId, products }: AssignStockFormProps) {
         </p>
       )}
 
-      <Button type="submit" disabled={isPending || lines.length === 0}>
+      <Button
+        type="submit"
+        disabled={isPending || lines.length === 0 || (isCustomerOrder && customerName.trim().length < 2)}
+      >
         {isPending && <Spinner />}
         {isPending ? "جارٍ الحفظ..." : `تخصيص المخزون${lines.length > 0 ? ` (${lines.length})` : ""}`}
       </Button>

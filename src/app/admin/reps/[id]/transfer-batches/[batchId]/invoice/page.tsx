@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { STOCK_MOVEMENT_TYPES } from "@/lib/constants";
+import { STOCK_MOVEMENT_TYPES, REP_LOAD_TYPES } from "@/lib/constants";
 import { PrintTransferInvoiceButton } from "@/components/reps/PrintTransferInvoiceButton";
 import { RepTransferInvoiceView } from "@/components/reps/RepTransferInvoiceView";
 
@@ -22,6 +22,8 @@ export default async function AdminRepTransferBatchInvoicePage({ params }: Admin
       id: true,
       type: true,
       salesRepId: true,
+      loadType: true,
+      customerOrder: { select: { customerName: true } },
       note: true,
       createdAt: true,
       fromLocation: { select: { name: true } },
@@ -56,6 +58,13 @@ export default async function AdminRepTransferBatchInvoicePage({ params }: Admin
     notFound();
   }
 
+  const typeLabel =
+    batch.type === STOCK_MOVEMENT_TYPES.REP_ASSIGNMENT
+      ? batch.loadType === REP_LOAD_TYPES.CUSTOMER_ORDER && batch.customerOrder
+        ? `تخصيص مخزون لمندوب — طلبية زبون: ${batch.customerOrder.customerName}`
+        : "تخصيص مخزون لمندوب — مخزون سيارة"
+      : "إرجاع مخزون من مندوب";
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center justify-between gap-3 print:hidden">
@@ -69,7 +78,7 @@ export default async function AdminRepTransferBatchInvoicePage({ params }: Admin
         movement={{
           id: batch.id,
           createdAt: batch.createdAt,
-          typeLabel: batch.type === STOCK_MOVEMENT_TYPES.REP_ASSIGNMENT ? "تخصيص مخزون لمندوب" : "إرجاع مخزون من مندوب",
+          typeLabel,
           note: batch.note,
           items: batch.stockMovements.map((movement) => ({
             product: movement.product,

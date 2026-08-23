@@ -13,7 +13,14 @@ const transferLineSchema = z.object({
  * bucket moves (see the InventoryItem doc comment in prisma/schema.prisma).
  * Multiple lines in one submission become one RepStockTransferBatch with one
  * StockMovement per line — see assignStockToRep/returnStockFromRep in
- * src/app/admin/reps/actions.ts. */
+ * src/app/admin/reps/actions.ts.
+ *
+ * loadType/customerName are only ever sent (and only ever meaningful) on an
+ * assignStockToRep submission — returnStockFromRep parses the same schema
+ * but never reads either field. loadType defaults to CAR_STOCK (the
+ * original behavior) when omitted; customerName's real "required when
+ * CUSTOMER_ORDER" rule is enforced in assignStockToRep itself, not here,
+ * since that rule doesn't apply to a return submission at all. */
 export const repStockTransferBatchSchema = z.object({
   items: z
     .array(transferLineSchema)
@@ -24,6 +31,8 @@ export const repStockTransferBatchSchema = z.object({
       { message: "لا يمكن تكرار نفس المنتج بنفس الخيارات أكثر من مرة — عدّل الكمية بدلاً من ذلك" },
     ),
   notes: z.string().max(500, "الملاحظات طويلة جداً").optional(),
+  loadType: z.enum(["CAR_STOCK", "CUSTOMER_ORDER"]).optional(),
+  customerName: z.string().trim().max(200, "اسم الزبون طويل جداً").optional(),
 });
 
 export type RepStockTransferBatchInput = z.infer<typeof repStockTransferBatchSchema>;

@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth/guards";
-import { ROLES, MERCHANT_STATUSES, ORDER_SOURCES, ORDER_STATUSES, PAYMENT_METHODS, PAYMENT_STATUSES, STOCK_MOVEMENT_TYPES } from "@/lib/constants";
+import { ROLES, MERCHANT_STATUSES, ORDER_SOURCES, ORDER_STATUSES, PAYMENT_METHODS, PAYMENT_STATUSES, STOCK_MOVEMENT_TYPES, REP_CUSTOMER_ORDER_STATUSES } from "@/lib/constants";
 import { repSaleSchema } from "@/lib/validation/repSale";
 import { decrementInventoryAtomic, recordStockMovement, InsufficientInventoryError } from "@/lib/inventory-transactions";
 import { getOrCreateMerchantAccount, recordInitialAccountPayment } from "@/lib/accounts";
@@ -28,6 +28,7 @@ function generateOrderNumber(): string {
 function revalidateRepSalePaths(orderNumber: string): void {
   revalidatePath("/rep");
   revalidatePath("/rep/sales");
+  revalidatePath("/rep/sales/new");
   revalidatePath(`/rep/sales/${orderNumber}`);
   revalidatePath("/rep/stock");
   revalidatePath("/rep/movements");
@@ -59,13 +60,14 @@ export async function createRepSale(_prevState: RepSaleState, formData: FormData
     city: formData.get("city")?.toString().trim() || undefined,
     address: formData.get("address")?.toString().trim() || undefined,
     notes: formData.get("notes")?.toString().trim() || undefined,
+    repCustomerOrderId: formData.get("repCustomerOrderId")?.toString().trim() || null,
   });
 
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? PARSE_ERROR_MESSAGE };
   }
 
-  const { items: saleItems, customerName, customerPhone, city, address, notes } = parsed.data;
+  const { items: saleItems, customerName, customerPhone, city, address, notes, repCustomerOrderId } = parsed.data;
 
   const rep = await prisma.salesRepresentative.findUnique({
     where: { userId: user.id },
@@ -78,6 +80,28 @@ export async function createRepSale(_prevState: RepSaleState, formData: FormData
   const locationId = rep.carStockLocation?.id ?? null;
   if (!locationId) {
     return { error: "لم يتم العثور على موقع مخزون المندوب" };
+  }
+
+  // A customer order is only ever a starting template (see the
+  // RepCustomerOrder schema doc comment) — the rep may have added, removed,
+  // or changed every line's quantity before submitting, and `saleItems`
+  // above already reflects exactly that. This check exists purely to
+  // authorize *which* template gets linked/completed: never another rep's
+  // order (scoping bug), and never one that's already been used/cancelled
+  // (stale tab, double submit, or a race with an admin cancellation) — the
+  // real single-use enforcement is the atomic conditional update inside the
+  // transaction below, this is just an early, cheap rejection.
+  if (repCustomerOrderId) {
+    const customerOrder = await prisma.repCustomerOrder.findUnique({
+      where: { id: repCustomerOrderId },
+      select: { salesRepId: true, status: true },
+    });
+    if (!customerOrder || customerOrder.salesRepId !== rep.id) {
+      return { error: "طلبية الزبون غير موجودة" };
+    }
+    if (customerOrder.status !== REP_CUSTOMER_ORDER_STATUSES.OPEN) {
+      return { error: "لم تعد هذه الطلبية نشطة" };
+    }
   }
 
   const productIds = saleItems.map((item) => item.productId);
@@ -158,6 +182,20 @@ export async function createRepSale(_prevState: RepSaleState, formData: FormData
           if (activeCombos !== new Set(requestedComboIds).size) throw new Error("INACTIVE_VARIANT");
         }
 
+        // Atomic conditional transition (status: OPEN in the where clause) —
+        // never a stale read-then-write, so two concurrent submits racing to
+        // complete the same customer order (or a submit racing an admin's
+        // cancelRepCustomerOrder) can never both succeed. Whichever lands
+        // first wins; the other's whole sale transaction rolls back via the
+        // thrown error below, exactly like the INACTIVE_VARIANT checks above.
+        if (repCustomerOrderId) {
+          const transitioned = await tx.repCustomerOrder.updateMany({
+            where: { id: repCustomerOrderId, status: REP_CUSTOMER_ORDER_STATUSES.OPEN },
+            data: { status: REP_CUSTOMER_ORDER_STATUSES.COMPLETED, completedAt: new Date() },
+          });
+          if (transitioned.count !== 1) throw new Error("CUSTOMER_ORDER_NOT_OPEN");
+        }
+
         // Resolve this rep's trader for the sale by phone — reuses whichever
         // Merchant already matches (self-registered, added by an admin, or
         // created by this rep on an earlier sale), regardless of whether it
@@ -197,6 +235,7 @@ export async function createRepSale(_prevState: RepSaleState, formData: FormData
             merchantId: merchant.id,
             accountId,
             createdByRepId: rep.id,
+            repCustomerOrderId,
             subtotalCents: totalCents,
             totalCents,
             contactName: customerName,
@@ -283,6 +322,7 @@ export async function createRepSale(_prevState: RepSaleState, formData: FormData
       break;
     } catch (err) {
       if (err instanceof Error && err.message === "INACTIVE_VARIANT") return { error: "أحد خيارات المنتج لم يعد فعالاً؛ أعد اختيار الـVariant" };
+      if (err instanceof Error && err.message === "CUSTOMER_ORDER_NOT_OPEN") return { error: "لم تعد طلبية الزبون هذه نشطة — حدّث الصفحة وحاول مجدداً" };
       if (err instanceof InsufficientInventoryError) {
         return { error: "الكمية المطلوبة أكبر من مخزونك الحالي لأحد المنتجات، حاول مرة أخرى" };
       }

@@ -118,6 +118,21 @@ export const STOCK_RETURN_STATUSES = {
   COMPLETED: "COMPLETED",
 } as const;
 
+/// A car-load's intent, chosen by the admin on /admin/reps/[id]/assign-stock.
+/// CAR_STOCK is the original/default behavior — general car stock, not tied
+/// to any customer. CUSTOMER_ORDER additionally creates a RepCustomerOrder
+/// template — see its schema doc comment.
+export const REP_LOAD_TYPES = {
+  CAR_STOCK: "CAR_STOCK",
+  CUSTOMER_ORDER: "CUSTOMER_ORDER",
+} as const;
+
+export const REP_CUSTOMER_ORDER_STATUSES = {
+  OPEN: "OPEN",
+  COMPLETED: "COMPLETED",
+  CANCELLED: "CANCELLED",
+} as const;
+
 /** Real events actually written today: LOGIN / LOGOUT (see
  * src/lib/auth/session.ts). The rest are modeled and ready for the
  * storefront to start writing, but nothing fabricates them — see the Users
