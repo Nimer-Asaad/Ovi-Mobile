@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useMemo, useState } from "react";
+import { useActionState, useState } from "react";
 import { createStockMovement, type StockAdjustmentState } from "./actions";
 import { Select } from "@/components/ui/Select";
 import { Input } from "@/components/ui/Input";
@@ -13,48 +13,10 @@ import {
   PRODUCT_INVENTORY_TRACKING_MODES,
   VARIANT_ALLOCATION_STATUSES,
 } from "@/lib/constants";
-import { ProductThumb, ProductQuickPicker, type PickableProduct } from "@/components/reps/ProductQuickPicker";
+import { ProductThumb, ProductQuickPicker } from "@/components/reps/ProductQuickPicker";
+import { type AdjustStockProductOption, useDeviceComboCascade, usePhoneVariantCascade } from "./adjustCascades";
 
-export interface AdjustVariantOption {
-  id: string;
-  isActive: boolean;
-  phoneBrandId: string;
-  brandLabel: string;
-  phoneModelId: string;
-  modelLabel: string;
-  stock: number;
-}
-
-export interface AdjustDeviceComboOption {
-  id: string;
-  isActive: boolean;
-  phoneBrandId: string;
-  brandLabel: string;
-  phoneModelId: string;
-  modelLabel: string;
-  colorId: string;
-  colorLabel: string;
-  colorHex: string | null;
-  stock: number;
-}
-
-/** Deliberately never populates PickableProduct's own variantOptions/
- * deviceColorVariantOptions/colorOptions — those would make ProductQuickPicker
- * open its built-in choice modal (which disables zero-stock options, wrong
- * for an admin restocking screen — see Part 11). This form uses its own
- * cascading selects below instead, fed by variantChoices/deviceComboChoices,
- * with every option always selectable regardless of quantity or isActive. */
-export interface AdjustStockProductOption extends PickableProduct {
-  isActive: boolean;
-  /** Plain (non-variant, non-combo) warehouse stock — meaningful only for a
-   * TOTAL_STOCK product. */
-  stock: number;
-  variantMode: string;
-  inventoryTrackingMode: string;
-  variantAllocationStatus: string;
-  variantChoices: AdjustVariantOption[];
-  deviceComboChoices: AdjustDeviceComboOption[];
-}
+export type { AdjustVariantOption, AdjustDeviceComboOption, AdjustStockProductOption } from "./adjustCascades";
 
 interface AdjustStockFormProps {
   products: AdjustStockProductOption[];
@@ -63,90 +25,16 @@ interface AdjustStockFormProps {
 
 const initialState: StockAdjustmentState = {};
 
-/** الماركة → الموديل → اللون cascade for a DEVICE_MODEL_COLOR product.
- * Nothing defaults to "first option" — every step starts empty so the admin
- * must actively pick the exact combination a movement will apply to. */
-function useDeviceComboCascade(product: AdjustStockProductOption | null) {
-  const [brandId, setBrandId] = useState("");
-  const [modelId, setModelId] = useState("");
-  const [colorId, setColorId] = useState("");
-
-  const combos = useMemo(() => product?.deviceComboChoices ?? [], [product]);
-
-  const brands = useMemo(() => {
-    const seen = new Map<string, string>();
-    for (const combo of combos) if (!seen.has(combo.phoneBrandId)) seen.set(combo.phoneBrandId, combo.brandLabel);
-    return [...seen.entries()].map(([id, label]) => ({ id, label }));
-  }, [combos]);
-
-  const models = useMemo(() => {
-    const seen = new Map<string, string>();
-    for (const combo of combos) {
-      if (combo.phoneBrandId === brandId && !seen.has(combo.phoneModelId)) seen.set(combo.phoneModelId, combo.modelLabel);
-    }
-    return [...seen.entries()].map(([id, label]) => ({ id, label }));
-  }, [combos, brandId]);
-
-  const colors = useMemo(() => combos.filter((combo) => combo.phoneModelId === modelId), [combos, modelId]);
-  const resolved = useMemo(() => colors.find((combo) => combo.colorId === colorId) ?? null, [colors, colorId]);
-
-  function reset() {
-    setBrandId("");
-    setModelId("");
-    setColorId("");
-  }
-
-  function pickBrand(id: string) {
-    setBrandId(id);
-    setModelId("");
-    setColorId("");
-  }
-
-  function pickModel(id: string) {
-    setModelId(id);
-    setColorId("");
-  }
-
-  return { brandId, modelId, colorId, brands, models, colors, resolved, reset, pickBrand, pickModel, setColorId };
-}
-
-/** الماركة → الموديل cascade for a PHONE_COMPATIBILITY product — no color
- * step, since a ProductVariant's identity is product + phone model only. */
-function usePhoneVariantCascade(product: AdjustStockProductOption | null) {
-  const [brandId, setBrandId] = useState("");
-  const [modelId, setModelId] = useState("");
-
-  const variants = useMemo(() => product?.variantChoices ?? [], [product]);
-
-  const brands = useMemo(() => {
-    const seen = new Map<string, string>();
-    for (const variant of variants) if (!seen.has(variant.phoneBrandId)) seen.set(variant.phoneBrandId, variant.brandLabel);
-    return [...seen.entries()].map(([id, label]) => ({ id, label }));
-  }, [variants]);
-
-  const models = useMemo(() => variants.filter((variant) => variant.phoneBrandId === brandId), [variants, brandId]);
-  const resolved = useMemo(() => models.find((variant) => variant.phoneModelId === modelId) ?? null, [models, modelId]);
-
-  function reset() {
-    setBrandId("");
-    setModelId("");
-  }
-
-  function pickBrand(id: string) {
-    setBrandId(id);
-    setModelId("");
-  }
-
-  return { brandId, modelId, brands, models, resolved, reset, pickBrand, setModelId };
-}
-
-/** Unified stock-movement form for every inventory tracking mode: a plain
- * TOTAL_STOCK product needs only the product itself; PHONE_COMPATIBILITY
- * needs brand+model; DEVICE_MODEL_COLOR needs brand+model+color. Whichever
- * applies, the resolved variantId/deviceColorVariantId travels to
- * createStockMovement via a hidden input — the server re-validates it
- * belongs to the product and applies the same IN/OUT/ADJUSTMENT semantics
- * either way (see actions.ts). */
+/** Single-item stock-movement form for IN and Correction (final-balance
+ * adjustment) — OUT moved to the dedicated multi-item BulkStockOutForm (see
+ * AdjustStockPanel), since removing several different items in one visit is
+ * the common case for a warehouse OUT and forcing one submission per item
+ * was the exact problem that form was replaced for. Still handles every
+ * inventory tracking mode: a plain TOTAL_STOCK product needs only the
+ * product itself; PHONE_COMPATIBILITY needs brand+model; DEVICE_MODEL_COLOR
+ * needs brand+model+color. Whichever applies, the resolved variantId/
+ * deviceColorVariantId travels to createStockMovement via a hidden input —
+ * the server re-validates it belongs to the product (see actions.ts). */
 export function AdjustStockForm({ products, selectedProductId }: AdjustStockFormProps) {
   const [state, formAction, isPending] = useActionState(createStockMovement, initialState);
   const preselected = selectedProductId ? products.find((product) => product.id === selectedProductId) : undefined;
@@ -186,14 +74,7 @@ export function AdjustStockForm({ products, selectedProductId }: AdjustStockForm
     !variantNotReady &&
     (usesDeviceColor ? Boolean(deviceCombo.resolved) : usesPhoneVariant ? Boolean(phoneVariant.resolved) : true);
 
-  const parsedQuantity = Number(quantity);
-  const quantityExceedsStock =
-    movementType === MANUAL_STOCK_MOVEMENT_TYPES.STOCK_OUT &&
-    currentStock !== null &&
-    Number.isFinite(parsedQuantity) &&
-    parsedQuantity > currentStock;
-
-  const canSubmit = targetFullyResolved && quantity.trim() !== "" && !quantityExceedsStock;
+  const canSubmit = targetFullyResolved && quantity.trim() !== "";
 
   return (
     <form action={formAction} className="flex max-w-xl flex-col gap-4">
@@ -303,7 +184,6 @@ export function AdjustStockForm({ products, selectedProductId }: AdjustStockForm
 
       <Select name="movementType" label="نوع الحركة" value={movementType} onChange={(event) => setMovementType(event.target.value)}>
         <option value={MANUAL_STOCK_MOVEMENT_TYPES.STOCK_IN}>إدخال مخزون</option>
-        <option value={MANUAL_STOCK_MOVEMENT_TYPES.STOCK_OUT}>إخراج مخزون</option>
         <option value={MANUAL_STOCK_MOVEMENT_TYPES.ADJUSTMENT}>تعديل إلى رصيد نهائي</option>
       </Select>
 
@@ -320,10 +200,8 @@ export function AdjustStockForm({ products, selectedProductId }: AdjustStockForm
           onChange={(event) => setQuantity(event.target.value)}
         />
         <p className="mt-1.5 text-xs text-neutral-bg/50">
-          لإدخال أو إخراج مخزون: أدخل الكمية المراد إضافتها أو خصمها. لتعديل الرصيد: أدخل الرصيد النهائي المطلوب
-          للمخزون.
+          لإدخال مخزون: أدخل الكمية المراد إضافتها. لتعديل الرصيد: أدخل الرصيد النهائي المطلوب للمخزون.
         </p>
-        {quantityExceedsStock && <p className="mt-1 text-xs text-rose-500">الكمية المطلوبة أكبر من المتوفر</p>}
       </div>
 
       <Textarea name="notes" label="ملاحظات / السبب (اختياري)" rows={3} />

@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { getMainWarehouse } from "@/lib/inventory";
-import { AdjustStockForm, type AdjustStockProductOption } from "../AdjustStockForm";
+import { AdjustStockPanel } from "../AdjustStockPanel";
+import type { AdjustStockProductOption } from "../adjustCascades";
 
 interface AdminInventoryAdjustPageProps {
   searchParams: Promise<{ productId?: string }>;
@@ -124,7 +125,7 @@ export default async function AdminInventoryAdjustPage({ searchParams }: AdminIn
         <h2 className="text-xl font-semibold text-neutral-bg">تعديل المخزون</h2>
         <p className="mt-1 text-sm text-neutral-bg/60">تسجيل إدخال أو إخراج أو تصحيح مخزون في {warehouse.name}</p>
       </div>
-      <AdjustStockForm products={options} selectedProductId={productId} />
+      <AdjustStockPanel products={options} selectedProductId={productId} />
     </div>
   );
 }
