@@ -259,7 +259,7 @@ export function ProductQuickPicker<T extends PickableProduct>({
           <div
             role="dialog"
             aria-modal="true"
-            className="relative w-full max-w-sm rounded-card border border-navy-soft bg-navy-surface p-5 shadow-card"
+            className="relative flex max-h-[85vh] w-full max-w-sm flex-col rounded-card border border-navy-soft bg-navy-surface shadow-card"
             onClick={(event) => event.stopPropagation()}
           >
             <button
@@ -271,21 +271,29 @@ export function ProductQuickPicker<T extends PickableProduct>({
               <CloseIcon />
             </button>
 
-            <ProductThumb product={detailProduct} className="mx-auto h-40 w-40" />
+            {/* Non-scrolling header (thumbnail/name/badges) — the choice
+             * list below it is what grows long (many models/colors), so
+             * only that part scrolls internally. min-h-0 on the sibling
+             * below is required or overflow-y-auto silently fails to
+             * constrain inside this flex column. */}
+            <div className="shrink-0 px-5 pt-5">
+              <ProductThumb product={detailProduct} className="mx-auto h-40 w-40" />
 
-            <div className="mt-4 text-center">
-              <p className="text-base font-semibold text-neutral-bg">
-                {detailProduct.nameAr ?? detailProduct.name}
-              </p>
-              <p className="mt-1 text-xs text-neutral-bg/50">{detailProduct.sku}</p>
-              {(detailProduct.categoryLabel || detailProduct.brandLabel) && (
-                <div className="mt-3 flex flex-wrap justify-center gap-2">
-                  {detailProduct.categoryLabel && <Badge variant="neutral">{detailProduct.categoryLabel}</Badge>}
-                  {detailProduct.brandLabel && <Badge variant="neutral">{detailProduct.brandLabel}</Badge>}
-                </div>
-              )}
+              <div className="mt-4 text-center">
+                <p className="text-base font-semibold text-neutral-bg">
+                  {detailProduct.nameAr ?? detailProduct.name}
+                </p>
+                <p className="mt-1 text-xs text-neutral-bg/50">{detailProduct.sku}</p>
+                {(detailProduct.categoryLabel || detailProduct.brandLabel) && (
+                  <div className="mt-3 flex flex-wrap justify-center gap-2">
+                    {detailProduct.categoryLabel && <Badge variant="neutral">{detailProduct.categoryLabel}</Badge>}
+                    {detailProduct.brandLabel && <Badge variant="neutral">{detailProduct.brandLabel}</Badge>}
+                  </div>
+                )}
+              </div>
             </div>
 
+            <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-5 pt-4">
             {detailProduct.variantOptions && detailProduct.variantOptions.length > 0 && pendingVariantId === null ? (
               <div className="mt-5 flex flex-col gap-2">
                 <p className="text-center text-xs text-neutral-bg/50">اختر ماركة / موديل الهاتف</p>
@@ -377,6 +385,7 @@ export function ProductQuickPicker<T extends PickableProduct>({
                 إضافة
               </Button>
             )}
+            </div>
           </div>
         </div>
       )}
