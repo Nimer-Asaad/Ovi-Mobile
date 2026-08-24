@@ -109,6 +109,9 @@ export default async function AdminInventoryPage({ searchParams }: AdminInventor
         subtitle={`مستوى المخزون الحالي في ${warehouse.name}`}
         actions={
           <>
+            <Link href="/admin/inventory/overview">
+              <Button variant="outline">مخزون الشركة</Button>
+            </Link>
             <Link href="/admin/inventory/movements">
               <Button variant="outline">سجل الحركات</Button>
             </Link>

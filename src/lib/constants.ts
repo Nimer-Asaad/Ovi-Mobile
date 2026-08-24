@@ -225,6 +225,7 @@ export const ADMIN_NAV_ITEMS = [
   { label: "Phone Compatibility", labelAr: "ماركات وموديلات الهواتف", href: "/admin/phone-devices" },
   { label: "Suppliers", labelAr: "الموردون", href: "/admin/suppliers" },
   { label: "Inventory", labelAr: "المخزون", href: "/admin/inventory" },
+  { label: "Company Inventory", labelAr: "مخزون الشركة", href: "/admin/inventory/overview" },
   { label: "Orders", labelAr: "الطلبات", href: "/admin/orders" },
   { label: "Users", labelAr: "المستخدمون", href: "/admin/users" },
   { label: "Merchants", labelAr: "التجار", href: "/admin/merchants" },
@@ -247,6 +248,7 @@ export const ADMIN_ASSISTANT_NAV_ITEMS = [
   { label: "Inventory", labelAr: "المخزون", href: "/admin/inventory" },
   { label: "Stock Out", labelAr: "إخراج من المخزون", href: "/admin/inventory/adjust" },
   { label: "Movement Log", labelAr: "حركات المخزون", href: "/admin/inventory/movements" },
+  { label: "Company Inventory", labelAr: "مخزون الشركة", href: "/admin/inventory/overview" },
   { label: "Load Rep Car", labelAr: "تعبئة سيارة / طلبية زبون", href: "/admin/reps" },
   { label: "Office Sale", labelAr: "بيع من المكتب", href: "/admin/orders/new" },
 ] as const;
