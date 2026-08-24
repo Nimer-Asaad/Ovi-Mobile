@@ -45,11 +45,27 @@ export default async function NewManualOrderPage({ searchParams }: NewManualOrde
       select: { id: true, name: true, email: true, phone: true },
       orderBy: { name: "asc" },
     }),
+    // status: APPROVED is the full eligibility rule — a merchant does not
+    // need a linked User to be sold to from the office (see the userId
+    // doc comment on the Merchant model: a login-less/offline trader,
+    // userId null, is still a fully legitimate merchant once approved).
+    // Previously this filtered `user: { isActive: true }` too, which is a
+    // Prisma relation filter — it silently excluded every merchant without
+    // a linked User entirely, not just inactive ones. `user` stays an
+    // optional relation select below; it comes back null for an offline
+    // merchant, which the mapping and ManualOrderForm both handle.
     prisma.merchant.findMany({
-      where: { status: MERCHANT_STATUSES.APPROVED, user: { isActive: true } },
+      // No linked User (userId null) is included unconditionally — it's a
+      // legitimate offline trader, not a disabled account. A merchant that
+      // DOES have a linked User must still have it active, matching the
+      // pre-existing online-merchant eligibility rule (an approved merchant
+      // whose online login was disabled shouldn't reappear here just
+      // because the userId-null filter was fixed).
+      where: { status: MERCHANT_STATUSES.APPROVED, OR: [{ userId: null }, { user: { isActive: true } }] },
       select: {
         id: true,
         businessName: true,
+        contactPhone: true,
         user: { select: { id: true, name: true, email: true, phone: true } },
       },
       orderBy: { businessName: "asc" },
@@ -158,11 +174,10 @@ export default async function NewManualOrderPage({ searchParams }: NewManualOrde
       : [],
   }));
 
-  // The query above filters `user: { isActive: true }`, which only matches
-  // merchants with a real linked User row — a login-less trader (userId
-  // null) can never appear here, so `user` is guaranteed non-null at this
-  // point despite Merchant.user now being an optional relation in general.
-  const merchantOptions = merchants.map((merchant) => ({ ...merchant, user: merchant.user! }));
+  // user stays nullable here — an offline/login-less merchant has none, and
+  // ManualOrderForm/createManualOrder both fall back to businessName/
+  // contactPhone in that case rather than assuming a linked User exists.
+  const merchantOptions = merchants;
 
   return (
     <div className="flex flex-col gap-6">

@@ -131,10 +131,24 @@ export async function createManualOrder(
       where: { id: parsed.data.merchantId },
       select: { id: true, status: true, userId: true, user: { select: { isActive: true } } },
     });
-    if (!merchant || merchant.status !== MERCHANT_STATUSES.APPROVED || !merchant.user?.isActive) {
+    // A merchant with no linked User (userId null — a login-less/offline
+    // trader, see the Merchant model's doc comment) is still fully eligible
+    // once APPROVED; `merchant.user` is only checked when it actually
+    // exists, matching the merchant dropdown query in ../new/page.tsx.
+    // Rejecting on `!merchant.user?.isActive` unconditionally (the previous
+    // behavior) wrongly rejected every offline merchant, since an absent
+    // user made that check `!undefined === true`.
+    if (!merchant || merchant.status !== MERCHANT_STATUSES.APPROVED || (merchant.user && !merchant.user.isActive)) {
       return { error: "التاجر المحدد غير معتمد أو غير صالح" };
     }
     resolvedMerchantId = merchant.id;
+    // Order.merchantId (set from resolvedMerchantId above) is the real,
+    // direct link to the merchant — customerId is a separate, independently
+    // nullable field that only matters when the merchant also happens to
+    // have a linked User. An offline merchant leaves this null, and the
+    // order is still fully traceable to it via merchant/merchantId (see the
+    // order detail page's isWholesaleOrder branch, which reads
+    // order.merchant.businessName, never order.customer for this).
     resolvedCustomerId = merchant.userId;
   }
   // WALK_IN: both stay null — matches the existing rep-sale pattern.

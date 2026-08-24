@@ -23,7 +23,13 @@ export interface ManualOrderCustomerOption {
 export interface ManualOrderMerchantOption {
   id: string;
   businessName: string;
-  user: ManualOrderCustomerOption;
+  /** Contact phone for a login-less/offline merchant (see the Merchant
+   * model's userId doc comment) — null for an online merchant, whose
+   * contact info lives on `user` instead. */
+  contactPhone: string | null;
+  /** Null for an offline merchant with no linked login account — still a
+   * fully legitimate, sellable merchant once approved. */
+  user: ManualOrderCustomerOption | null;
 }
 
 export interface ManualOrderWalkInAccountOption {
@@ -171,10 +177,10 @@ export function ManualOrderForm({
   const [selectedCustomerId, setSelectedCustomerId] = useState(initialCustomer?.id ?? "");
   const [selectedMerchantId, setSelectedMerchantId] = useState(initialMerchant?.id ?? "");
   const [contactName, setContactName] = useState(
-    initialMerchant?.user.name ?? initialCustomer?.name ?? initialWalkIn?.displayName ?? "",
+    initialMerchant?.user?.name ?? initialMerchant?.businessName ?? initialCustomer?.name ?? initialWalkIn?.displayName ?? "",
   );
   const [contactPhone, setContactPhone] = useState(
-    initialMerchant?.user.phone ?? initialCustomer?.phone ?? initialWalkIn?.phone ?? "",
+    initialMerchant?.user?.phone ?? initialMerchant?.contactPhone ?? initialCustomer?.phone ?? initialWalkIn?.phone ?? "",
   );
   const [city, setCity] = useState("");
   const [address, setAddress] = useState("");
@@ -215,8 +221,11 @@ export function ManualOrderForm({
     setSelectedMerchantId(id);
     const merchant = merchants.find((m) => m.id === id);
     if (merchant) {
-      setContactName(merchant.user.name);
-      setContactPhone(merchant.user.phone ?? "");
+      // Offline merchant (no linked User) falls back to its own
+      // businessName/contactPhone — same fields used for the account it
+      // already has (see getOrCreateMerchantAccount).
+      setContactName(merchant.user?.name ?? merchant.businessName);
+      setContactPhone(merchant.user?.phone ?? merchant.contactPhone ?? "");
     }
   }
 
@@ -352,11 +361,18 @@ export function ManualOrderForm({
                 onChange={(event) => handleSelectMerchant(event.target.value)}
               >
                 <option value="">— اختر —</option>
-                {merchants.map((merchant) => (
-                  <option key={merchant.id} value={merchant.id}>
-                    {merchant.businessName} — {merchant.user.name}
-                  </option>
-                ))}
+                {merchants.map((merchant) => {
+                  // Owner name for an online merchant, contact phone for an
+                  // offline one — never both, and never a dangling "— " when
+                  // neither is available.
+                  const suffix = merchant.user?.name ?? merchant.contactPhone;
+                  return (
+                    <option key={merchant.id} value={merchant.id}>
+                      {merchant.businessName}
+                      {suffix ? ` — ${suffix}` : ""}
+                    </option>
+                  );
+                })}
               </Select>
             )}
 
