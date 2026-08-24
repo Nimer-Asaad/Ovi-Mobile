@@ -75,21 +75,35 @@ export function AssignStockForm({ repId, products }: AssignStockFormProps) {
   function handleAddProduct(product: AssignStockProductOption, _colorId: string | null, variantId: string | null, deviceColorVariantId: string | null) {
     const variant = product.variantOptions?.find((option) => option.id === variantId) ?? null;
     const combo = product.deviceColorVariantOptions?.find((option) => option.id === deviceColorVariantId) ?? null;
-    setLines((prev) => [
-      ...prev,
-      {
-        productId: product.id,
-        variantId,
-        deviceColorVariantId,
-        label: product.nameAr ?? product.name,
-        optionLabel: variant?.label ?? (combo ? `${combo.brandLabel} / ${combo.modelLabel} / ${combo.colorLabel}` : null),
-        sku: product.sku,
-        quantity: 1,
-        maxStock: variant ? (variant.stock ?? 0) : combo ? (combo.stock ?? 0) : product.warehouseStock,
-        thumbnailUrl: product.thumbnailUrl,
-        thumbnailAlt: product.thumbnailAlt,
-      },
-    ]);
+    const key = lineKey(product.id, variantId, deviceColorVariantId);
+
+    setLines((prev) => {
+      // The picker's detail modal never disables an option just because
+      // it's already in this list (only out-of-stock options are disabled),
+      // so re-picking the exact same product+variant+combo is always
+      // possible — merge into the existing line instead of adding a second
+      // one with the same exact target, which the server would otherwise
+      // have to reject outright.
+      const alreadyExists = prev.some((line) => lineKey(line.productId, line.variantId, line.deviceColorVariantId) === key);
+      if (alreadyExists) {
+        return prev.map((line) => (lineKey(line.productId, line.variantId, line.deviceColorVariantId) === key ? { ...line, quantity: line.quantity + 1 } : line));
+      }
+      return [
+        ...prev,
+        {
+          productId: product.id,
+          variantId,
+          deviceColorVariantId,
+          label: product.nameAr ?? product.name,
+          optionLabel: variant?.label ?? (combo ? `${combo.brandLabel} / ${combo.modelLabel} / ${combo.colorLabel}` : null),
+          sku: product.sku,
+          quantity: 1,
+          maxStock: variant ? (variant.stock ?? 0) : combo ? (combo.stock ?? 0) : product.warehouseStock,
+          thumbnailUrl: product.thumbnailUrl,
+          thumbnailAlt: product.thumbnailAlt,
+        },
+      ];
+    });
   }
 
   function handleRemoveLine(productId: string, variantId: string | null, deviceColorVariantId: string | null) {

@@ -7,7 +7,7 @@ import { requireRole } from "@/lib/auth/guards";
 import { ROLES, STOCK_MOVEMENT_TYPES, REP_LOAD_TYPES, REP_CUSTOMER_ORDER_STATUSES } from "@/lib/constants";
 import { getMainWarehouse } from "@/lib/inventory";
 import { getOrCreateRepLocation } from "@/lib/reps";
-import { repStockTransferBatchSchema } from "@/lib/validation/reps";
+import { repStockTransferBatchSchema, type RepStockTransferBatchInput } from "@/lib/validation/reps";
 import {
   decrementInventoryAtomic,
   incrementInventoryUpsert,
@@ -20,6 +20,16 @@ export interface RepStockTransferState {
 }
 
 const PARSE_ERROR_MESSAGE = "بيانات التحويل غير صالحة";
+const ITEMS_PARSE_ERROR_MESSAGE = "بيانات الأصناف غير صالحة، حاول إعادة إضافة الأصناف";
+const AGGREGATED_QUANTITY_ERROR_MESSAGE = "الكمية غير صالحة لأحد الأصناف بعد دمج التكرارات، حاول إعادة إدخال الكمية";
+
+/** Postgres INTEGER's max value — the actual column type behind
+ * StockMovement.quantity/InventoryItem.quantity (see schema.prisma).
+ * aggregateTransferLines below sums a duplicate exact target's quantities;
+ * this re-verifies the resulting total is still a safe, storable positive
+ * integer — the same defense-in-depth already applied to bulk warehouse IN/
+ * OUT in src/app/admin/inventory/actions.ts. */
+const MAX_TRANSFER_LINE_QUANTITY = 2_147_483_647;
 
 function revalidateRepPaths(repId: string): void {
   revalidatePath("/admin/reps");
@@ -41,10 +51,55 @@ function parseTransferBatchForm(formData: FormData) {
   } catch {
     return null;
   }
+  // loadType/customerName were previously never read here at all — every
+  // submission silently fell back to loadType=CAR_STOCK regardless of what
+  // AssignStockForm's radio selection actually sent, and customerName was
+  // always discarded. returnStockFromRep never sends either field, so
+  // reading them here is harmless there (both simply come back undefined).
   return repStockTransferBatchSchema.safeParse({
     items,
     notes: formData.get("notes")?.toString().trim() || undefined,
+    loadType: formData.get("loadType")?.toString() || undefined,
+    customerName: formData.get("customerName")?.toString().trim() || undefined,
   });
+}
+
+/** Aggregates duplicate exact inventory targets (productId + variantId +
+ * deviceColorVariantId) from a parsed transfer batch into one effective
+ * line per target, summing quantities — see repStockTransferBatchSchema's
+ * doc comment for why this replaced an outright-reject uniqueness check.
+ * Shared by assignStockToRep and returnStockFromRep. Callers must run the
+ * result through findAggregatedQuantityError before using it — a summed
+ * quantity was never itself re-checked against the schema's per-line
+ * positive-integer rule. */
+function aggregateTransferLines(items: RepStockTransferBatchInput["items"]): TransferLine[] {
+  const aggregatedByKey = new Map<string, TransferLine>();
+  for (const item of items) {
+    const variantId = item.variantId ?? null;
+    const deviceColorVariantId = item.deviceColorVariantId ?? null;
+    const key = `${item.productId}:${variantId ?? ""}:${deviceColorVariantId ?? ""}`;
+    const existing = aggregatedByKey.get(key);
+    if (existing) {
+      existing.quantity += item.quantity;
+    } else {
+      aggregatedByKey.set(key, { productId: item.productId, variantId, deviceColorVariantId, quantity: item.quantity });
+    }
+  }
+  return [...aggregatedByKey.values()];
+}
+
+/** Re-verifies every aggregated line's summed quantity is still finite,
+ * an integer, positive, and within Postgres INTEGER range — a manipulated
+ * payload with many duplicate lines for the same exact target could
+ * otherwise sum past what the column can store, surfacing as a raw,
+ * unhandled database error later instead of a clean message here. */
+function findAggregatedQuantityError(lines: TransferLine[]): string | null {
+  for (const line of lines) {
+    if (!Number.isSafeInteger(line.quantity) || line.quantity <= 0 || line.quantity > MAX_TRANSFER_LINE_QUANTITY) {
+      return AGGREGATED_QUANTITY_ERROR_MESSAGE;
+    }
+  }
+  return null;
 }
 
 /** Shared product-select shape for validating every line in a transfer
@@ -109,16 +164,18 @@ export async function assignStockToRep(
   const admin = await requireRole([ROLES.ADMIN]);
 
   const parsed = parseTransferBatchForm(formData);
-  if (!parsed || !parsed.success) {
-    return { error: PARSE_ERROR_MESSAGE };
+  if (!parsed) {
+    return { error: ITEMS_PARSE_ERROR_MESSAGE };
+  }
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? PARSE_ERROR_MESSAGE };
   }
   const { notes } = parsed.data;
-  const lines: TransferLine[] = parsed.data.items.map((item) => ({
-    productId: item.productId,
-    variantId: item.variantId ?? null,
-    deviceColorVariantId: item.deviceColorVariantId ?? null,
-    quantity: item.quantity,
-  }));
+  const lines = aggregateTransferLines(parsed.data.items);
+  const quantityError = findAggregatedQuantityError(lines);
+  if (quantityError) {
+    return { error: quantityError };
+  }
 
   const loadType = parsed.data.loadType ?? REP_LOAD_TYPES.CAR_STOCK;
   const customerName = parsed.data.customerName?.trim() ?? "";
@@ -266,16 +323,18 @@ export async function returnStockFromRep(
   const admin = await requireRole([ROLES.ADMIN]);
 
   const parsed = parseTransferBatchForm(formData);
-  if (!parsed || !parsed.success) {
-    return { error: PARSE_ERROR_MESSAGE };
+  if (!parsed) {
+    return { error: ITEMS_PARSE_ERROR_MESSAGE };
+  }
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? PARSE_ERROR_MESSAGE };
   }
   const { notes } = parsed.data;
-  const lines: TransferLine[] = parsed.data.items.map((item) => ({
-    productId: item.productId,
-    variantId: item.variantId ?? null,
-    deviceColorVariantId: item.deviceColorVariantId ?? null,
-    quantity: item.quantity,
-  }));
+  const lines = aggregateTransferLines(parsed.data.items);
+  const quantityError = findAggregatedQuantityError(lines);
+  if (quantityError) {
+    return { error: quantityError };
+  }
 
   const rep = await prisma.salesRepresentative.findUnique({
     where: { id: repId },
