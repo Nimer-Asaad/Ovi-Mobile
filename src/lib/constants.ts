@@ -247,6 +247,7 @@ export const ADMIN_ASSISTANT_NAV_ITEMS = [
   { label: "Inventory", labelAr: "المخزون", href: "/admin/inventory" },
   { label: "Stock Out", labelAr: "إخراج من المخزون", href: "/admin/inventory/adjust" },
   { label: "Movement Log", labelAr: "حركات المخزون", href: "/admin/inventory/movements" },
+  { label: "Load Rep Car", labelAr: "تعبئة سيارة / طلبية زبون", href: "/admin/reps" },
 ] as const;
 
 /** Rep dashboard sidebar/topbar navigation — same shape as ADMIN_NAV_ITEMS,

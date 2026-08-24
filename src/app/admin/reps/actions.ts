@@ -161,7 +161,10 @@ export async function assignStockToRep(
   _prevState: RepStockTransferState,
   formData: FormData,
 ): Promise<RepStockTransferState> {
-  const admin = await requireRole([ROLES.ADMIN]);
+  // ADMIN_ASSISTANT may load a rep's car (CAR_STOCK or CUSTOMER_ORDER) —
+  // the one rep-mutation carved out for it. Every other action in this file
+  // (returnStockFromRep, cancelRepCustomerOrder) stays ADMIN-only.
+  const actor = await requireRole([ROLES.ADMIN, ROLES.ADMIN_ASSISTANT]);
 
   const parsed = parseTransferBatchForm(formData);
   if (!parsed) {
@@ -232,7 +235,7 @@ export async function assignStockToRep(
           toLocationId: repLocation.id,
           loadType,
           note: notes,
-          createdById: admin.id,
+          createdById: actor.id,
         },
       });
 
@@ -266,7 +269,7 @@ export async function assignStockToRep(
           previousQuantity: change.previousQuantity,
           newQuantity: change.newQuantity,
           note: notes,
-          createdById: admin.id,
+          createdById: actor.id,
         });
       }
 
@@ -282,7 +285,7 @@ export async function assignStockToRep(
             customerName,
             status: REP_CUSTOMER_ORDER_STATUSES.OPEN,
             transferBatchId: createdBatch.id,
-            createdById: admin.id,
+            createdById: actor.id,
             items: {
               create: lines.map((line) => ({
                 productId: line.productId,

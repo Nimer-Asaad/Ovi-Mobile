@@ -15,15 +15,23 @@ import { RepStockRequestStatusBadge } from "@/components/reps/RepStockRequestSta
 import { RepCustomerOrdersCard } from "@/components/reps/RepCustomerOrdersCard";
 import { getActiveRequestCountForRep, getLatestRequestsForRep } from "@/lib/rep-stock-requests";
 import { getRecentCustomerOrdersForRep } from "@/lib/rep-customer-orders";
-import { ORDER_SOURCES, STOCK_MOVEMENT_TYPES } from "@/lib/constants";
+import { ORDER_SOURCES, STOCK_MOVEMENT_TYPES, ROLES } from "@/lib/constants";
 import { formatCurrencyFromCents } from "@/lib/utils";
+import { requireRole } from "@/lib/auth/guards";
 import type { RepTransferHistoryRow } from "@/components/reps/RepTransferHistory";
 
 interface AdminRepDetailPageProps {
   params: Promise<{ id: string }>;
 }
 
+// Full rep management dashboard (stock requests, sales, customer-order
+// cancellation, return-stock link) — ADMIN_ASSISTANT never needs any of it
+// and reaches assign-stock directly from the minimal /admin/reps list
+// instead (see that page.tsx). Explicit re-guard here even though the
+// nested layout.tsx now allows both roles, since this specific page must
+// stay narrower than the rest of the subtree.
 export default async function AdminRepDetailPage({ params }: AdminRepDetailPageProps) {
+  await requireRole([ROLES.ADMIN]);
   const { id } = await params;
 
   const rep = await prisma.salesRepresentative.findUnique({

@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { STOCK_MOVEMENT_TYPES } from "@/lib/constants";
+import { STOCK_MOVEMENT_TYPES, ROLES } from "@/lib/constants";
+import { requireRole } from "@/lib/auth/guards";
 import { PrintTransferInvoiceButton } from "@/components/reps/PrintTransferInvoiceButton";
 import { RepTransferInvoiceView } from "@/components/reps/RepTransferInvoiceView";
 
@@ -9,7 +10,12 @@ interface AdminRepTransferInvoicePageProps {
   params: Promise<{ id: string; movementId: string }>;
 }
 
+// ADMIN-only — legacy pre-batching invoices can only be REP_ASSIGNMENT or
+// REP_RETURN movements created before RepStockTransferBatch existed.
+// ADMIN_ASSISTANT's only rep-mutation (assignStockToRep) always creates a
+// batch now, so it never needs this route; no reason to widen it.
 export default async function AdminRepTransferInvoicePage({ params }: AdminRepTransferInvoicePageProps) {
+  await requireRole([ROLES.ADMIN]);
   const { id, movementId } = await params;
 
   const movement = await prisma.stockMovement.findUnique({

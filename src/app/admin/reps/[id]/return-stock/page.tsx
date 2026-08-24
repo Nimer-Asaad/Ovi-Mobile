@@ -1,5 +1,7 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
+import { requireRole } from "@/lib/auth/guards";
+import { ROLES } from "@/lib/constants";
 import { RepCarHero } from "@/components/reps/RepCarHero";
 import { ReturnStockForm, type ReturnStockProductOption } from "../../ReturnStockForm";
 
@@ -7,7 +9,11 @@ interface AdminRepReturnStockPageProps {
   params: Promise<{ id: string }>;
 }
 
+// ADMIN-only — returning stock from a rep car is explicitly not part of
+// ADMIN_ASSISTANT's permission set (matches returnStockFromRep's own
+// requireRole in actions.ts).
 export default async function AdminRepReturnStockPage({ params }: AdminRepReturnStockPageProps) {
+  await requireRole([ROLES.ADMIN]);
   const { id } = await params;
 
   const rep = await prisma.salesRepresentative.findUnique({

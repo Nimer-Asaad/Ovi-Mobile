@@ -1,6 +1,8 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { getMainWarehouse } from "@/lib/inventory";
+import { requireRole } from "@/lib/auth/guards";
+import { ROLES } from "@/lib/constants";
 import { RepCarHero } from "@/components/reps/RepCarHero";
 import { AssignStockForm, type AssignStockProductOption } from "../../AssignStockForm";
 
@@ -8,7 +10,12 @@ interface AdminRepAssignStockPageProps {
   params: Promise<{ id: string }>;
 }
 
+// The one rep-mutation page ADMIN_ASSISTANT is allowed to reach — matches
+// assignStockToRep's own requireRole in actions.ts. Explicit guard here too
+// (not just relying on the layout) since this page sits in a subtree where
+// most sibling pages are ADMIN-only.
 export default async function AdminRepAssignStockPage({ params }: AdminRepAssignStockPageProps) {
+  await requireRole([ROLES.ADMIN, ROLES.ADMIN_ASSISTANT]);
   const { id } = await params;
 
   const rep = await prisma.salesRepresentative.findUnique({

@@ -1,13 +1,64 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { Badge } from "@/components/ui/Badge";
+import { Button } from "@/components/ui/Button";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { AdminTable, AdminTableHead, AdminTableBody, AdminEmptyRow } from "@/components/admin/AdminTable";
 import { AdminStatusBadge } from "@/components/admin/AdminStatusBadge";
 import { formatCurrencyFromCents } from "@/lib/utils";
 import { getRepStockStats, getRepStockValueCents } from "@/lib/reps";
+import { requireRole } from "@/lib/auth/guards";
+import { ROLES } from "@/lib/constants";
 
 export default async function AdminRepsPage() {
+  const user = await requireRole([ROLES.ADMIN, ROLES.ADMIN_ASSISTANT]);
+
+  // ADMIN_ASSISTANT gets a minimal, operational rep picker — just enough to
+  // choose the right rep and jump straight to loading their car. It skips
+  // /admin/reps/[id] entirely (that page is full rep management, ADMIN-only)
+  // rather than trying to hide controls on a page built for admins.
+  if (user.role === ROLES.ADMIN_ASSISTANT) {
+    const reps = await prisma.salesRepresentative.findMany({
+      where: { isActive: true, user: { isActive: true } },
+      orderBy: { createdAt: "asc" },
+      select: {
+        id: true,
+        employeeCode: true,
+        user: { select: { name: true, phone: true } },
+      },
+    });
+
+    return (
+      <div className="flex flex-col gap-6">
+        <PageHeader title="تعبئة سيارات المندوبين" subtitle="اختر مندوباً لتحميل مخزون سيارة أو طلبية زبون" />
+        <AdminTable>
+          <AdminTableHead>
+            <th className="px-4 py-3 text-start">الاسم</th>
+            <th className="px-4 py-3 text-start">الهاتف</th>
+            <th className="px-4 py-3 text-start"></th>
+          </AdminTableHead>
+          <AdminTableBody>
+            {reps.map((rep) => (
+              <tr key={rep.id}>
+                <td className="px-4 py-3 text-neutral-bg">
+                  {rep.user.name}
+                  <span className="ms-2 text-xs text-neutral-bg/50">{rep.employeeCode}</span>
+                </td>
+                <td className="px-4 py-3 text-neutral-bg/70">{rep.user.phone ?? "—"}</td>
+                <td className="px-4 py-3">
+                  <Link href={`/admin/reps/${rep.id}/assign-stock`}>
+                    <Button size="sm">تعبئة السيارة</Button>
+                  </Link>
+                </td>
+              </tr>
+            ))}
+            {reps.length === 0 && <AdminEmptyRow colSpan={3} message="لا يوجد مندوبون نشطون حالياً" />}
+          </AdminTableBody>
+        </AdminTable>
+      </div>
+    );
+  }
+
   const reps = await prisma.salesRepresentative.findMany({
     orderBy: { createdAt: "asc" },
     select: {
