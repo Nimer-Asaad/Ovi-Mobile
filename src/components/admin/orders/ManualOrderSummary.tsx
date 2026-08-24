@@ -10,6 +10,10 @@ export interface ManualOrderSummaryProps {
   subtotalCents: number;
   discountInput: string;
   onDiscountChange: (value: string) => void;
+  /** False for ADMIN_ASSISTANT — createManualOrder always forces discountCents
+   * to 0 for that role (see actions.ts), so the field is disabled here rather
+   * than left editable but silently ignored. */
+  discountEditable?: boolean;
   paidInput: string;
   onPaidChange: (value: string) => void;
 }
@@ -26,6 +30,7 @@ export function ManualOrderSummary({
   subtotalCents,
   discountInput,
   onDiscountChange,
+  discountEditable = true,
   paidInput,
   onPaidChange,
 }: ManualOrderSummaryProps) {
@@ -51,7 +56,8 @@ export function ManualOrderSummary({
           min={0}
           step="0.01"
           value={discountInput}
-          onChange={(event) => onDiscountChange(event.target.value)}
+          onChange={discountEditable ? (event) => onDiscountChange(event.target.value) : undefined}
+          disabled={!discountEditable}
         />
         <Input
           label="المبلغ المستلم (₪)"

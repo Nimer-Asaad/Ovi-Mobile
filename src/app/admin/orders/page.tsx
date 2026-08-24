@@ -29,9 +29,10 @@ interface AdminOrdersPageProps {
 
 export default async function AdminOrdersPage({ searchParams }: AdminOrdersPageProps) {
   // ADMIN and ADMIN_ASSISTANT both have read access to this list (order
-  // preparation) — requireRole here only resolves which role is signed in,
-  // to decide whether to show the ADMIN-only "طلب يدوي جديد" creation
-  // button below. /admin/orders/new itself carries its own ADMIN-only guard
+  // preparation) and both may now reach the manual-order/office-sale page
+  // (see /admin/orders/new — ADMIN_ASSISTANT's own guard there mirrors this
+  // one). requireRole here also resolves the role for the button below,
+  // which is presentational only — /admin/orders/new carries its own guard
   // regardless of whether this button is rendered.
   const user = await requireRole([ROLES.ADMIN, ROLES.ADMIN_ASSISTANT]);
 
@@ -79,11 +80,9 @@ export default async function AdminOrdersPage({ searchParams }: AdminOrdersPageP
         title="الطلبات"
         subtitle="إدارة طلبات العملاء والتجار"
         actions={
-          user.role === ROLES.ADMIN ? (
-            <Link href="/admin/orders/new">
-              <Button>طلب يدوي جديد</Button>
-            </Link>
-          ) : undefined
+          <Link href="/admin/orders/new">
+            <Button>{user.role === ROLES.ADMIN_ASSISTANT ? "بيع من المكتب" : "طلب يدوي جديد"}</Button>
+          </Link>
         }
       />
 

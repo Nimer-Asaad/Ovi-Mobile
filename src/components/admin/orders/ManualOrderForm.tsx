@@ -110,6 +110,14 @@ export interface ManualOrderFormProps {
   initialMerchantId?: string;
   initialCustomerId?: string;
   initialWalkInAccountId?: string;
+  /** ADMIN_ASSISTANT using this form for an office sale on ADMIN's behalf —
+   * narrows the UI to exactly what createManualOrder still trusts from this
+   * role (see actions.ts): no "عميل مسجّل" tab (server rejects that mode for
+   * this role), no manual unit-price entry (server always recomputes from
+   * the product's retail/wholesale price for this role), no discount. Every
+   * other field (contact info, products/quantities, payment/debt tracking)
+   * behaves identically to ADMIN. */
+  isAssistant?: boolean;
 }
 
 const MODE_TABS = [
@@ -129,20 +137,27 @@ export function ManualOrderForm({
   initialMerchantId,
   initialCustomerId,
   initialWalkInAccountId,
+  isAssistant = false,
 }: ManualOrderFormProps) {
   const [state, formAction, isPending] = useActionState(createManualOrder, initialState);
+
+  const visibleModeTabs = isAssistant
+    ? MODE_TABS.filter((tab) => tab.value !== MANUAL_ORDER_CUSTOMER_MODES.EXISTING_CUSTOMER)
+    : MODE_TABS;
 
   // Resolve a "طلبية جديدة" deep link against the preloaded option lists —
   // an unknown/stale id (e.g. a merchant removed since the link was made)
   // just falls back to an empty walk-in start, same as visiting this page
-  // directly.
+  // directly. isAssistant never resolves to EXISTING_CUSTOMER (that tab isn't
+  // offered and the server rejects it for this role), regardless of what a
+  // deep link's mode/customerId query params claim.
   const initialMerchant = initialMerchantId ? merchants.find((m) => m.id === initialMerchantId) : undefined;
-  const initialCustomer = initialCustomerId ? customers.find((c) => c.id === initialCustomerId) : undefined;
+  const initialCustomer = !isAssistant && initialCustomerId ? customers.find((c) => c.id === initialCustomerId) : undefined;
   const initialWalkIn = initialWalkInAccountId
     ? walkInAccounts.find((a) => a.id === initialWalkInAccountId)
     : undefined;
   const resolvedInitialMode =
-    initialMode && (Object.values(MANUAL_ORDER_CUSTOMER_MODES) as string[]).includes(initialMode)
+    initialMode && (Object.values(MANUAL_ORDER_CUSTOMER_MODES) as string[]).includes(initialMode) && !(isAssistant && initialMode === MANUAL_ORDER_CUSTOMER_MODES.EXISTING_CUSTOMER)
       ? initialMode
       : initialMerchant
         ? MANUAL_ORDER_CUSTOMER_MODES.EXISTING_MERCHANT
@@ -296,7 +311,7 @@ export function ManualOrderForm({
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
             <div className="flex flex-wrap gap-2">
-              {MODE_TABS.map((tab) => (
+              {visibleModeTabs.map((tab) => (
                 <button
                   key={tab.value}
                   type="button"
@@ -375,7 +390,13 @@ export function ManualOrderForm({
               </p>
             )}
 
-            {(isWalkInMode || customerMode === MANUAL_ORDER_CUSTOMER_MODES.EXISTING_CUSTOMER) && (
+            {isAssistant && isWalkInMode && (
+              <p className="text-xs text-neutral-bg/60">
+                البيع المباشر من قبل مساعد الأدمن يتطلب استلام كامل المبلغ نقداً — لا يمكن تسجيله كدين.
+              </p>
+            )}
+
+            {!isAssistant && (isWalkInMode || customerMode === MANUAL_ORDER_CUSTOMER_MODES.EXISTING_CUSTOMER) && (
               <div className="flex flex-col gap-3 rounded-card border border-navy-soft p-3">
                 <label className="flex items-center gap-2 text-sm text-neutral-bg">
                   <input
@@ -460,7 +481,12 @@ export function ManualOrderForm({
                         min={0}
                         step="0.01"
                         value={line.unitPriceCents / 100}
-                        onChange={(event) => handleUnitPriceChange(line.productId, line.colorId, line.variantId, line.deviceColorVariantId, event.target.value)}
+                        onChange={
+                          isAssistant
+                            ? undefined
+                            : (event) => handleUnitPriceChange(line.productId, line.colorId, line.variantId, line.deviceColorVariantId, event.target.value)
+                        }
+                        disabled={isAssistant}
                         aria-label="سعر الوحدة"
                       />
                     </div>
@@ -502,6 +528,7 @@ export function ManualOrderForm({
               subtotalCents={subtotalCents}
               discountInput={discountInput}
               onDiscountChange={setDiscountInput}
+              discountEditable={!isAssistant}
               paidInput={paidInput}
               onPaidChange={setPaidInput}
             />

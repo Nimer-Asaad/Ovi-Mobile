@@ -47,7 +47,13 @@ export async function createManualOrder(
   _prevState: ManualOrderState,
   formData: FormData,
 ): Promise<ManualOrderState> {
-  const admin = await requireRole([ROLES.ADMIN]);
+  // ADMIN_ASSISTANT may create an office sale on ADMIN's behalf — every
+  // other order mutation (status/payment changes in ../actions.ts, this
+  // order's printable invoice) stays ADMIN-only. Price/discount trust and
+  // the allowed customerMode set are narrowed for this role further below,
+  // right where each is resolved.
+  const actor = await requireRole([ROLES.ADMIN, ROLES.ADMIN_ASSISTANT]);
+  const isAssistant = actor.role === ROLES.ADMIN_ASSISTANT;
 
   let items: unknown;
   try {
@@ -74,9 +80,29 @@ export async function createManualOrder(
     return { error: parsed.error.issues[0]?.message ?? PARSE_ERROR_MESSAGE };
   }
 
-  const { customerMode, contactName, contactPhone, city, address, notes, discountCents, paidAmountCents } =
-    parsed.data;
-  const trackAsAccountDebt = parsed.data.trackAsAccountDebt;
+  const { customerMode, contactName, contactPhone, city, address, notes, paidAmountCents } = parsed.data;
+  // ADMIN_ASSISTANT never carries a discount — forced to 0 here regardless
+  // of what the client sent, since the discount input is disabled (not
+  // removed) client-side; this is the actual enforcement (see PRICE
+  // SECURITY / DISCOUNTS in the office-sale feature report).
+  const discountCents = isAssistant ? 0 : parsed.data.discountCents;
+  // ADMIN_ASSISTANT + WALK_IN is never allowed to leave an untracked debt:
+  // no account opt-in, full cash payment required (enforced below, once
+  // totalCents is known). Forcing this false here also means the
+  // walk-in-account resolution block right below (gated on this same flag)
+  // never runs for this role, so a manipulated walkInAccountId can't attach
+  // the sale to an arbitrary account either. Harmless for EXISTING_MERCHANT,
+  // which always tracks regardless of this flag (see the transaction below).
+  const trackAsAccountDebt = isAssistant ? false : parsed.data.trackAsAccountDebt;
+
+  // ADMIN_ASSISTANT may only sell to a direct/walk-in customer or an
+  // existing approved merchant — matches ManualOrderForm's visibleModeTabs,
+  // which never offers "عميل مسجّل" (EXISTING_CUSTOMER) for this role. This
+  // is the actual enforcement: the client-side tab hiding alone wouldn't
+  // stop a manipulated customerMode value in FormData.
+  if (isAssistant && customerMode === MANUAL_ORDER_CUSTOMER_MODES.EXISTING_CUSTOMER) {
+    return { error: "هذا النوع من العملاء غير متاح لمساعد الأدمن" };
+  }
 
   // ---------------------------------------------------------------------
   // Resolve customer/merchant identity server-side — the client only
@@ -148,6 +174,8 @@ export async function createManualOrder(
       nameAr: true,
       variantMode: true,
       inventoryTrackingMode: true,
+      retailPriceCents: true,
+      wholesalePriceCents: true,
       colorOptions: { select: { colorId: true, color: { select: { name: true, nameAr: true } } } },
       variants: { where: { isActive: true }, select: { id: true, variantCode: true, phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } } } },
       // Active only — order creation is a sale-facing flow, same eligibility
@@ -189,6 +217,20 @@ export async function createManualOrder(
     }
     if (product.variantMode === "PHONE_COMPATIBILITY" && (!item.variantId || !product.variants.some((variant) => variant.id === item.variantId))) return { error: `اختر Variant صالحاً للمنتج "${product.nameAr ?? product.name}"` };
     if (product.variantMode !== "PHONE_COMPATIBILITY" && item.variantId) return { error: `Variant لا يتبع المنتج "${product.nameAr ?? product.name}"` };
+  }
+
+  // ADMIN_ASSISTANT never gets to set its own unit price — every line's
+  // client-supplied unitPriceCents is discarded and replaced with the
+  // product's own server-side retail/wholesale price (matching
+  // ManualOrderForm's priceMode: wholesale only for EXISTING_MERCHANT).
+  // ADMIN keeps full manual price-override capability, unchanged. This is
+  // the real enforcement — the price input being disabled client-side is
+  // only a UX hint, not a security boundary on its own.
+  if (isAssistant) {
+    for (const item of lines) {
+      const product = productById.get(item.productId)!;
+      item.unitPriceCents = customerMode === MANUAL_ORDER_CUSTOMER_MODES.EXISTING_MERCHANT ? product.wholesalePriceCents : product.retailPriceCents;
+    }
   }
 
   const warehouse = await getMainWarehouse();
@@ -275,6 +317,16 @@ export async function createManualOrder(
     return { error: "المبلغ المستلم أكبر من إجمالي الطلب" };
   }
 
+  // ADMIN_ASSISTANT + WALK_IN must never leave an untracked remainder — with
+  // trackAsAccountDebt already forced false above, an unpaid/partially-paid
+  // walk-in sale from this role would create debt no CustomerAccount is
+  // watching. Require full cash payment instead (merchant sales are exempt:
+  // the merchant's account always tracks the remainder, so partial payment
+  // there is the intended, safe behavior — see the transaction below).
+  if (isAssistant && customerMode === MANUAL_ORDER_CUSTOMER_MODES.WALK_IN && paidAmountCents !== totalCents) {
+    return { error: "يجب استلام كامل مبلغ الطلب عند البيع المباشر من قبل مساعد الأدمن" };
+  }
+
   let paymentStatus: string = PAYMENT_STATUSES.PENDING;
   if (paidAmountCents >= totalCents && totalCents > 0) {
     paymentStatus = PAYMENT_STATUSES.PAID;
@@ -347,7 +399,7 @@ export async function createManualOrder(
         });
 
         if (accountId && paidAmountCents > 0) {
-          await recordInitialAccountPayment(tx, accountId, paidAmountCents, admin.id);
+          await recordInitialAccountPayment(tx, accountId, paidAmountCents, actor.id);
         }
 
         // Atomic conditional decrement per line — never writes an absolute
@@ -373,7 +425,7 @@ export async function createManualOrder(
             previousQuantity: change.previousQuantity,
             newQuantity: change.newQuantity,
             note: `طلب يدوي — طلب ${orderNumber}`,
-            createdById: admin.id,
+            createdById: actor.id,
           });
         }
       });
@@ -400,5 +452,12 @@ export async function createManualOrder(
   }
 
   revalidateManualOrderPaths(orderNumber);
-  redirect(`/admin/orders/${orderNumber}/invoice`);
+  // The printable invoice stays ADMIN-only (see invoice/page.tsx) — Order
+  // has no createdBy/actor field to scope it to "orders this assistant
+  // created" (only createdByRepId, which doesn't apply here), and opening it
+  // up unscoped would let any ADMIN_ASSISTANT print any order's full
+  // financial invoice. The order detail page is ADMIN_ASSISTANT-readable
+  // already and shows enough (items, quantities, customer/merchant) to
+  // confirm the sale went through.
+  redirect(isAssistant ? `/admin/orders/${orderNumber}` : `/admin/orders/${orderNumber}/invoice`);
 }

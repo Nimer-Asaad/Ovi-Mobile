@@ -28,13 +28,15 @@ const BRAND_MODEL_ORDER = [
   { sortOrder: "asc" as const },
 ];
 
-// Manual order creation is an ADMIN-only capability — narrows the outer
-// /admin layout's ADMIN | ADMIN_ASSISTANT gate back down to ADMIN alone.
-// The rest of /admin/orders stays reachable by ADMIN_ASSISTANT for
-// order-preparation read access; only this specific creation page and its
-// server action (see ../new/actions.ts) are restricted.
+// ADMIN_ASSISTANT may use this page too — an "office sale" made on behalf
+// of ADMIN (see ManualOrderForm's isAssistant prop and ../new/actions.ts's
+// own requireRole for the actual narrowing: assistant-created orders always
+// use the server-computed retail/wholesale price and never carry a
+// discount, and the assistant can't pick the EXISTING_CUSTOMER tab). Every
+// other order mutation (status/payment changes, the printable invoice) stays
+// ADMIN-only.
 export default async function NewManualOrderPage({ searchParams }: NewManualOrderPageProps) {
-  await requireRole([ROLES.ADMIN]);
+  const user = await requireRole([ROLES.ADMIN, ROLES.ADMIN_ASSISTANT]);
 
   const { mode, merchantId, customerId, walkInAccountId } = await searchParams;
   const [customers, merchants, products, walkInAccounts] = await Promise.all([
@@ -174,6 +176,7 @@ export default async function NewManualOrderPage({ searchParams }: NewManualOrde
         initialMerchantId={merchantId}
         initialCustomerId={customerId}
         initialWalkInAccountId={walkInAccountId}
+        isAssistant={user.role === ROLES.ADMIN_ASSISTANT}
       />
     </div>
   );
