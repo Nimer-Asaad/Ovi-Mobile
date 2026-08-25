@@ -115,6 +115,47 @@ export async function setDeviceColorComboQuantity(tx: Tx, input: SetDeviceColorC
   return { changed: true };
 }
 
+export interface UpdateDeviceColorComboColorInput {
+  comboId: string;
+  colorId: string;
+}
+
+/** Corrects an existing combination's color WITHOUT deleting/recreating the
+ * row — id, InventoryItem quantities, and StockMovement history all stay
+ * exactly as they are; only DeviceColorVariant.colorId changes. Safe because
+ * the identity-lock trigger (20260814120000 migration, relaxed in
+ * 20260825120000) only guards productId/phoneModelId now — colorId was
+ * carved out specifically for this. productId/phoneModelId are re-derived
+ * from the existing row here, never taken from a caller-supplied value, so
+ * this can never move a combination to a different product or model no
+ * matter what the caller passes. Duplicate-checked against the same
+ * [productId, phoneModelId, colorId] uniqueness createDeviceColorCombo
+ * enforces — reuses the same DuplicateDeviceColorComboError so callers
+ * already handling that error from create get the color-edit case for
+ * free. No inventory is read, moved, or written, and no StockMovement is
+ * created — this is metadata-only, never a stock event. */
+export async function updateDeviceColorComboColor(tx: Tx, input: UpdateDeviceColorComboColorInput): Promise<void> {
+  const combo = await tx.deviceColorVariant.findUniqueOrThrow({
+    where: { id: input.comboId },
+    select: { productId: true, phoneModelId: true, colorId: true },
+  });
+  if (combo.colorId === input.colorId) return;
+
+  const existing = await tx.deviceColorVariant.findUnique({
+    where: {
+      productId_phoneModelId_colorId: { productId: combo.productId, phoneModelId: combo.phoneModelId, colorId: input.colorId },
+    },
+  });
+  if (existing) throw new DuplicateDeviceColorComboError();
+
+  try {
+    await tx.deviceColorVariant.update({ where: { id: input.comboId }, data: { colorId: input.colorId } });
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") throw new DuplicateDeviceColorComboError();
+    throw err;
+  }
+}
+
 export type RemoveDeviceColorComboResult = { mode: "deleted" } | { mode: "deactivated" };
 
 /** Safe disable/delete for a combination: hard-deletes only when it has no

@@ -8,6 +8,7 @@ import { getMainWarehouse } from "@/lib/inventory";
 import {
   createDeviceColorCombo,
   setDeviceColorComboQuantity,
+  updateDeviceColorComboColor,
   removeOrDeactivateDeviceColorCombo,
   DuplicateDeviceColorComboError,
 } from "@/lib/inventory-tracking";
@@ -108,6 +109,46 @@ export async function updateComboQuantity(
 
   revalidateComboPaths(productId);
   return { success: "تم حفظ الكمية" };
+}
+
+/** Corrects an existing combination's color in place — never deletes/
+ * recreates the row, never touches inventory, never records a StockMovement
+ * (this is metadata editing, not a stock event). combo.productId is
+ * re-verified against the productId this action was bound to (see
+ * DeviceInventoryManager.tsx's .bind(null, combo.id, productId)) before any
+ * write happens, and updateDeviceColorComboColor itself re-derives
+ * productId/phoneModelId from the DB row rather than trusting any input —
+ * so a manipulated request can only ever change this exact row's colorId,
+ * never move it to a different product/model. */
+export async function updateComboColor(
+  comboId: string,
+  productId: string,
+  _prevState: ComboActionState,
+  formData: FormData,
+): Promise<ComboActionState> {
+  await requireRole([ROLES.ADMIN]);
+  await requireDeviceModelColorProduct(productId);
+
+  const colorId = formData.get("colorId")?.toString() ?? "";
+  if (!colorId) return { error: "اختر لوناً" };
+
+  const combo = await prisma.deviceColorVariant.findUnique({ where: { id: comboId }, select: { id: true, productId: true } });
+  if (!combo || combo.productId !== productId) return { error: "التركيبة غير موجودة" };
+
+  const color = await prisma.color.findUnique({ where: { id: colorId }, select: { id: true } });
+  if (!color) return { error: "اللون المحدد غير موجود" };
+
+  try {
+    await prisma.$transaction((tx) => updateDeviceColorComboColor(tx, { comboId, colorId }));
+  } catch (error) {
+    if (error instanceof DuplicateDeviceColorComboError) {
+      return { error: "هذا اللون موجود مسبقاً لهذا الموديل" };
+    }
+    throw error;
+  }
+
+  revalidateComboPaths(productId);
+  return { success: "تم تحديث اللون" };
 }
 
 export async function toggleComboActive(comboId: string, productId: string): Promise<void> {

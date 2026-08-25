@@ -84,6 +84,7 @@ export default async function DeviceInventoryPage({ params }: { params: Promise<
             phoneModelId: combo.phoneModelId,
             brandLabel: combo.phoneModel.phoneBrand.nameAr ?? combo.phoneModel.phoneBrand.name,
             modelLabel: combo.phoneModel.nameAr ?? combo.phoneModel.name,
+            colorId: combo.colorId,
             colorLabel: combo.color.nameAr ?? combo.color.name,
             colorHex: combo.color.hexCode,
             quantity: combo.inventoryItems.reduce((sum, item) => sum + item.quantity, 0),

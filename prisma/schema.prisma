@@ -420,8 +420,16 @@ model Product {
 /// comment) — so it cannot represent "the same model in two colors", which
 /// this mode requires. isActive lets a combination be retired without
 /// deleting historical InventoryItem/StockMovement rows that reference it;
-/// identity (productId/phoneModelId/colorId) is immutable once referenced by
-/// either, enforced by a trigger — see the migration.
+/// productId/phoneModelId are immutable once referenced by either (changing
+/// either would genuinely make this track a different device), enforced by a
+/// trigger — see the 20260814120000 migration. colorId is deliberately NOT
+/// part of that lock (relaxed in the 20260825120000 migration): correcting a
+/// wrongly-assigned color doesn't move or represent different physical
+/// stock, only relabels the same InventoryItem/StockMovement bucket — see
+/// updateDeviceColorComboColor in src/lib/inventory-tracking.ts. Trade-off:
+/// StockMovement/order history resolves this row's color live, not from a
+/// stored snapshot, so a correction also changes how past movements for the
+/// same combination display, not just future ones.
 model DeviceColorVariant {
   id           String     @id @default(cuid())
   productId    String

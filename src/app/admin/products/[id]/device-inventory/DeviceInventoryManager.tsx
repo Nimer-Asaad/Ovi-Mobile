@@ -1,8 +1,8 @@
 "use client";
 
-import { useActionState, useMemo, useState } from "react";
+import { useActionState, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { createCombo, updateComboQuantity, toggleComboActive, removeCombo, type ComboActionState } from "./actions";
+import { createCombo, updateComboQuantity, updateComboColor, toggleComboActive, removeCombo, type ComboActionState } from "./actions";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { Input } from "@/components/ui/Input";
@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
 
 type DeviceBrand = { id: string; name: string; nameAr: string | null; models: { id: string; name: string; nameAr: string | null }[] };
 type ColorOption = { id: string; name: string; nameAr: string | null; hexCode: string | null };
-type Combo = { id: string; isActive: boolean; phoneModelId: string; brandLabel: string; modelLabel: string; colorLabel: string; colorHex: string | null; quantity: number };
+type Combo = { id: string; isActive: boolean; phoneModelId: string; brandLabel: string; modelLabel: string; colorId: string; colorLabel: string; colorHex: string | null; quantity: number };
 
 const initial: ComboActionState = {};
 
@@ -19,11 +19,22 @@ const initial: ComboActionState = {};
  * (color / quantity+save / status actions) on every row across every group,
  * so everything lines up regardless of label length. Still one independent
  * DeviceColorVariant record per row; grouping by model is purely visual. */
-function ComboRow({ productId, combo }: { productId: string; combo: Combo }) {
+function ComboRow({ productId, combo, colors }: { productId: string; combo: Combo; colors: ColorOption[] }) {
   const [quantity, setQuantity] = useState(combo.quantity);
   const [qtyState, qtyAction, qtyPending] = useActionState(updateComboQuantity.bind(null, combo.id, productId), initial);
   const [removeMessage, setRemoveMessage] = useState<string | null>(null);
   const [removing, setRemoving] = useState(false);
+
+  const [editingColor, setEditingColor] = useState(false);
+  const [selectedColorId, setSelectedColorId] = useState(combo.colorId);
+  const [colorState, colorAction, colorPending] = useActionState(updateComboColor.bind(null, combo.id, productId), initial);
+
+  // Closes the editor once the update actually lands — combo.colorLabel
+  // reflects the new color as soon as revalidatePath refreshes this page's
+  // server-fetched props, so there's nothing left to edit.
+  useEffect(() => {
+    if (colorState.success) setEditingColor(false);
+  }, [colorState.success]);
 
   async function handleRemove() {
     setRemoving(true);
@@ -39,18 +50,64 @@ function ComboRow({ productId, combo }: { productId: string; combo: Combo }) {
         !combo.isActive && "opacity-60",
       )}
     >
-      <div className="flex flex-wrap items-center gap-1.5">
-        {combo.colorHex && (
-          <span aria-hidden="true" className="h-3 w-3 shrink-0 rounded-full border border-navy-soft" style={{ backgroundColor: combo.colorHex }} />
-        )}
-        <span className="text-sm font-medium text-neutral-bg">{combo.colorLabel}</span>
-        {/* Disabled is the manual admin control; out-of-stock is purely
-         * informational — quantity 0 never flips isActive on its own (see
-         * updateComboQuantity in ./actions.ts), so both can appear
-         * independently of each other. */}
-        {!combo.isActive && <Badge variant="neutral">معطل</Badge>}
-        {combo.isActive && combo.quantity === 0 && <Badge variant="warning">نفد المخزون</Badge>}
-      </div>
+      {editingColor ? (
+        <form action={colorAction} className="flex flex-col gap-1.5">
+          <div className="flex items-center gap-2">
+            <Select
+              name="colorId"
+              value={selectedColorId}
+              onChange={(event) => setSelectedColorId(event.target.value)}
+              className="h-9 w-auto"
+              aria-label="اللون الجديد"
+            >
+              {!colors.some((color) => color.id === combo.colorId) && (
+                <option value={combo.colorId}>{combo.colorLabel}</option>
+              )}
+              {colors.map((color) => (
+                <option key={color.id} value={color.id}>
+                  {color.nameAr ?? color.name}
+                </option>
+              ))}
+            </Select>
+            <Button type="submit" size="sm" variant="outline" disabled={colorPending}>
+              {colorPending ? "..." : "حفظ"}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              disabled={colorPending}
+              onClick={() => {
+                setEditingColor(false);
+                setSelectedColorId(combo.colorId);
+              }}
+            >
+              إلغاء
+            </Button>
+          </div>
+          {colorState.error && <span className="text-xs text-rose-500">{colorState.error}</span>}
+        </form>
+      ) : (
+        <div className="flex flex-wrap items-center gap-1.5">
+          {combo.colorHex && (
+            <span aria-hidden="true" className="h-3 w-3 shrink-0 rounded-full border border-navy-soft" style={{ backgroundColor: combo.colorHex }} />
+          )}
+          <span className="text-sm font-medium text-neutral-bg">{combo.colorLabel}</span>
+          {/* Disabled is the manual admin control; out-of-stock is purely
+           * informational — quantity 0 never flips isActive on its own (see
+           * updateComboQuantity in ./actions.ts), so both can appear
+           * independently of each other. */}
+          {!combo.isActive && <Badge variant="neutral">معطل</Badge>}
+          {combo.isActive && combo.quantity === 0 && <Badge variant="warning">نفد المخزون</Badge>}
+          <button
+            type="button"
+            onClick={() => setEditingColor(true)}
+            className="text-xs text-gold-champagne hover:underline"
+          >
+            تعديل اللون
+          </button>
+        </div>
+      )}
 
       <form action={qtyAction} className="flex flex-wrap items-center gap-2">
         <span className="text-xs text-neutral-bg/50 sm:hidden">الكمية</span>
@@ -190,7 +247,7 @@ export function DeviceInventoryManager({
                 <span className="ms-auto text-xs text-neutral-bg/50">{group.combos.length} لون</span>
               </div>
               <div className="bg-navy-surface">
-                {group.combos.map((combo) => <ComboRow key={combo.id} productId={productId} combo={combo} />)}
+                {group.combos.map((combo) => <ComboRow key={combo.id} productId={productId} combo={combo} colors={colors} />)}
               </div>
             </div>
           ))}
