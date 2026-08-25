@@ -17,8 +17,13 @@ interface AdminInventoryMovementsPageProps {
     from?: string;
     to?: string;
     productId?: string;
+    page?: string;
+    pageSize?: string;
   }>;
 }
+
+const PAGE_SIZE_OPTIONS = [25, 50, 100] as const;
+const DEFAULT_PAGE_SIZE = 50;
 
 // Read-only for both roles — no forms here mutate anything, so ADMIN and
 // ADMIN_ASSISTANT get identical access. This explicit guard is otherwise
@@ -29,52 +34,79 @@ interface AdminInventoryMovementsPageProps {
 export default async function AdminInventoryMovementsPage({ searchParams }: AdminInventoryMovementsPageProps) {
   await requireRole([ROLES.ADMIN, ROLES.ADMIN_ASSISTANT]);
 
-  const { q, type, from, to, productId } = await searchParams;
+  const params = await searchParams;
+  const { q, type, from, to, productId } = params;
   const trimmedQuery = q?.trim();
+  const page = Math.max(1, Number.parseInt(params.page ?? "1", 10) || 1);
+  const pageSize = PAGE_SIZE_OPTIONS.includes(Number(params.pageSize) as (typeof PAGE_SIZE_OPTIONS)[number])
+    ? Number(params.pageSize)
+    : DEFAULT_PAGE_SIZE;
 
   const fromDate = from ? new Date(from) : undefined;
   const toDate = to ? new Date(to) : undefined;
   if (toDate) toDate.setHours(23, 59, 59, 999);
 
-  const movements = await prisma.stockMovement.findMany({
-    where: {
-      ...(productId ? { productId } : {}),
-      ...(type ? { type } : {}),
-      ...(fromDate || toDate
-        ? { createdAt: { ...(fromDate ? { gte: fromDate } : {}), ...(toDate ? { lte: toDate } : {}) } }
-        : {}),
-      ...(trimmedQuery
-        ? {
-            product: {
-              OR: [
-                { name: { contains: trimmedQuery, mode: "insensitive" as const } },
-                { sku: { contains: trimmedQuery, mode: "insensitive" as const } },
-              ],
-            },
-          }
-        : {}),
-    },
-    orderBy: { createdAt: "desc" },
-    select: {
-      id: true,
-      type: true,
-      quantity: true,
-      previousQuantity: true,
-      newQuantity: true,
-      note: true,
-      createdAt: true,
-      product: { select: { sku: true, name: true, nameAr: true } },
-      variant: { select: { phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } } } },
-      deviceColorVariant: { select: { phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } }, color: { select: { name: true, nameAr: true } } } },
-      fromLocation: { select: { name: true } },
-      toLocation: { select: { name: true } },
-      createdBy: { select: { name: true, email: true } },
-    },
-  });
+  const where = {
+    ...(productId ? { productId } : {}),
+    ...(type ? { type } : {}),
+    ...(fromDate || toDate
+      ? { createdAt: { ...(fromDate ? { gte: fromDate } : {}), ...(toDate ? { lte: toDate } : {}) } }
+      : {}),
+    ...(trimmedQuery
+      ? {
+          product: {
+            OR: [
+              { name: { contains: trimmedQuery, mode: "insensitive" as const } },
+              { sku: { contains: trimmedQuery, mode: "insensitive" as const } },
+            ],
+          },
+        }
+      : {}),
+  };
 
-  const filteredProductLabel = productId
-    ? (await prisma.product.findUnique({ where: { id: productId }, select: { name: true, sku: true } })) ?? null
-    : null;
+  // count + the current page's rows only, in parallel — never the full
+  // history. StockMovement is an append-only audit ledger (see its doc
+  // comment in schema.prisma) that only grows, so an unbounded findMany here
+  // was the actual bottleneck this page used to have: every visit re-scanned
+  // and serialized the entire filtered history regardless of how much of it
+  // was ever shown.
+  const [totalCount, movements, filteredProductLabel] = await Promise.all([
+    prisma.stockMovement.count({ where }),
+    prisma.stockMovement.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+      select: {
+        id: true,
+        type: true,
+        quantity: true,
+        previousQuantity: true,
+        newQuantity: true,
+        note: true,
+        createdAt: true,
+        product: { select: { sku: true, name: true, nameAr: true } },
+        variant: { select: { phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } } } },
+        deviceColorVariant: { select: { phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } }, color: { select: { name: true, nameAr: true } } } },
+        fromLocation: { select: { name: true } },
+        toLocation: { select: { name: true } },
+        createdBy: { select: { name: true } },
+      },
+    }),
+    productId ? prisma.product.findUnique({ where: { id: productId }, select: { name: true, sku: true } }) : Promise.resolve(null),
+  ]);
+
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+
+  function buildUrl(overrides: Record<string, string | undefined>): string {
+    const next = new URLSearchParams();
+    const current = { ...params, ...overrides };
+    for (const [key, value] of Object.entries(current)) {
+      if (value) next.set(key, value);
+    }
+    const qs = next.toString();
+    return qs ? `/admin/inventory/movements?${qs}` : "/admin/inventory/movements";
+  }
 
   return (
     <div className="flex flex-col gap-6">
@@ -82,8 +114,8 @@ export default async function AdminInventoryMovementsPage({ searchParams }: Admi
         title="سجل حركات المخزون"
         subtitle={
           filteredProductLabel
-            ? `سجل الحركات الخاص بـ ${filteredProductLabel.name} (${filteredProductLabel.sku})`
-            : "سجل تدقيق كامل لكل حركات المخزون — للقراءة فقط"
+            ? `سجل الحركات الخاص بـ ${filteredProductLabel.name} (${filteredProductLabel.sku}) — ${totalCount} حركة`
+            : `سجل تدقيق كامل لكل حركات المخزون — للقراءة فقط — ${totalCount} حركة`
         }
       />
 
@@ -108,6 +140,14 @@ export default async function AdminInventoryMovementsPage({ searchParams }: Admi
 
         <Input name="from" type="date" label="من تاريخ" defaultValue={from ?? ""} />
         <Input name="to" type="date" label="إلى تاريخ" defaultValue={to ?? ""} />
+
+        <Select name="pageSize" label="عدد الصفوف" defaultValue={String(pageSize)}>
+          {PAGE_SIZE_OPTIONS.map((size) => (
+            <option key={size} value={size}>
+              {size}
+            </option>
+          ))}
+        </Select>
 
         <div className="flex items-end gap-2 lg:col-span-5">
           <Button type="submit">تصفية</Button>
@@ -164,6 +204,30 @@ export default async function AdminInventoryMovementsPage({ searchParams }: Admi
           {movements.length === 0 && <AdminEmptyRow colSpan={10} message="لا توجد حركات مخزون مطابقة" />}
         </AdminTableBody>
       </AdminTable>
+
+      {totalPages > 1 && (
+        <div className="flex flex-wrap items-center justify-between gap-4 text-sm text-neutral-bg/70">
+          <span>
+            صفحة {page} من {totalPages}
+          </span>
+          <div className="flex gap-2">
+            {page > 1 && (
+              <Link href={buildUrl({ page: String(page - 1) })}>
+                <Button variant="outline" size="sm" type="button">
+                  السابق
+                </Button>
+              </Link>
+            )}
+            {page < totalPages && (
+              <Link href={buildUrl({ page: String(page + 1) })}>
+                <Button variant="outline" size="sm" type="button">
+                  التالي
+                </Button>
+              </Link>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
