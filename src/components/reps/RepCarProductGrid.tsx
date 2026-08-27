@@ -145,7 +145,7 @@ export function RepCarProductGrid({
           <div
             role="dialog"
             aria-modal="true"
-            className="relative w-full max-w-sm rounded-card border border-navy-soft bg-navy-surface p-5 shadow-card"
+            className="relative flex max-h-[85vh] w-full max-w-sm flex-col rounded-card border border-navy-soft bg-navy-surface shadow-card"
             onClick={(event) => event.stopPropagation()}
           >
             <button
@@ -157,29 +157,37 @@ export function RepCarProductGrid({
               ✕
             </button>
 
-            <div className="text-center">
+            {/* Non-scrolling header (name/SKU) — the lines list below is
+             * what grows long (many models/colors), so only that part
+             * scrolls internally. min-h-0 on the sibling below is required
+             * or overflow-y-auto silently fails to constrain inside this
+             * flex column — see the same fix already applied to
+             * ProductQuickPicker's detail modal. */}
+            <div className="shrink-0 px-5 pt-5 text-center">
               <p className="text-base font-semibold text-neutral-bg">
                 {detailProduct.nameAr ?? detailProduct.name}
               </p>
               <p className="mt-1 text-xs text-neutral-bg/50">{detailProduct.sku}</p>
             </div>
 
-            <div className="mt-4 flex flex-col divide-y divide-navy-soft">
-              {detailProduct.lines.map((line) => {
-                const label = lineLabel(line);
-                const lowStockLine = line.quantity < LOW_STOCK_THRESHOLD;
-                return (
-                  <div
-                    key={`${line.variantId ?? ""}:${line.deviceColorVariantId ?? ""}`}
-                    className="flex items-center justify-between gap-3 py-2.5 first:pt-0 last:pb-0"
-                  >
-                    <span className="text-sm text-neutral-bg/80">{label ?? "بدون تصنيف"}</span>
-                    <span className={`inline-flex min-w-8 items-center justify-center rounded-full px-2 py-0.5 text-xs font-semibold ${lowStockLine ? "bg-amber-500/20 text-amber-400" : "bg-chrome/20 text-neutral-bg"}`}>
-                      {line.quantity}
-                    </span>
-                  </div>
-                );
-              })}
+            <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-5 pt-4">
+              <div className="flex flex-col divide-y divide-navy-soft">
+                {detailProduct.lines.map((line) => {
+                  const label = lineLabel(line);
+                  const lowStockLine = line.quantity < LOW_STOCK_THRESHOLD;
+                  return (
+                    <div
+                      key={`${line.variantId ?? ""}:${line.deviceColorVariantId ?? ""}`}
+                      className="flex items-center justify-between gap-3 py-2.5 first:pt-0 last:pb-0"
+                    >
+                      <span className="text-sm text-neutral-bg/80">{label ?? "بدون تصنيف"}</span>
+                      <span className={`inline-flex min-w-8 items-center justify-center rounded-full px-2 py-0.5 text-xs font-semibold ${lowStockLine ? "bg-amber-500/20 text-amber-400" : "bg-chrome/20 text-neutral-bg"}`}>
+                        {line.quantity}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </div>
         </div>
