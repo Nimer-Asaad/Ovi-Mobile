@@ -110,8 +110,9 @@ model Merchant {
   createdAt     DateTime             @default(now())
   updatedAt     DateTime             @updatedAt
 
-  orders  Order[]          @relation("OrderMerchant")
-  account CustomerAccount?
+  orders            Order[]            @relation("OrderMerchant")
+  account           CustomerAccount?
+  repCustomerOrders RepCustomerOrder[] @relation("RepCustomerOrderMerchant")
 
   @@map("merchants")
 }
@@ -744,11 +745,30 @@ model RepStockTransferBatch {
 /// see RepCustomerOrderItem.
 ///
 /// customerName is free text, the same convention Order.contactName already
-/// uses — deliberately not a hard link to Merchant. At load time the admin
-/// typically only has a name, not the phone/address Merchant requires; real
-/// customer/account reconciliation already happens exactly once elsewhere,
-/// when the rep completes a sale (createRepSale resolves-or-creates a
-/// Merchant by phone) — see repCustomerOrderId on Order below.
+/// uses — kept purely for display even now that merchantId exists below,
+/// since a legacy row predating this field may still have no merchant link
+/// at all.
+///
+/// merchantId is nullable IN THE SCHEMA only to keep every row created
+/// before this field existed valid (see below) — assignStockToRep no longer
+/// permits a NEW CUSTOMER_ORDER submission to leave it null. Every new one
+/// resolves a real Merchant one of two ways: an existing trader picked by
+/// its stable id (used directly, never re-derived from name/phone text), or
+/// enough data (customerName + a phone) to resolve/create one via
+/// resolveOrCreateRepMerchant in src/lib/rep-merchants.ts — the exact same
+/// phone-based rule createRepSale already uses to resolve a sale's trader —
+/// so a rep's pending customer-order template and their eventual completed
+/// sale share one real trader identity end to end, instead of two
+/// disconnected free-text names. Every row created before this rule existed
+/// has merchantId = null and is never auto-backfilled by matching
+/// customerName text (that would risk merging two different real customers
+/// who happened to type the same generic name) — an ADMIN can explicitly
+/// link such a row to a real Merchant afterward (see
+/// linkRepCustomerOrderMerchant in src/app/admin/reps/actions.ts). Never
+/// required for the customer-order lifecycle itself (completion via
+/// createRepSale, or cancellation) to function — those work identically
+/// whether or not it's set; it exists purely as a display/grouping identity
+/// for /admin/reps/[id].
 ///
 /// status starts OPEN and becomes COMPLETED automatically the moment any
 /// sale is created from it (see createRepSale), regardless of whether the
@@ -764,6 +784,8 @@ model RepCustomerOrder {
   salesRepId      String
   salesRep        SalesRepresentative   @relation(fields: [salesRepId], references: [id], onDelete: Restrict)
   customerName    String
+  merchantId      String?
+  merchant        Merchant?             @relation("RepCustomerOrderMerchant", fields: [merchantId], references: [id], onDelete: SetNull)
   status          String                @default("OPEN")
   transferBatchId String                @unique
   transferBatch   RepStockTransferBatch @relation(fields: [transferBatchId], references: [id], onDelete: Restrict)
@@ -778,6 +800,7 @@ model RepCustomerOrder {
   saleOrder Order?                 @relation("OrderFromCustomerOrder")
 
   @@index([salesRepId, status])
+  @@index([merchantId])
   @@map("rep_customer_orders")
 }
 

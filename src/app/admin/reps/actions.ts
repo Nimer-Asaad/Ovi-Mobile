@@ -7,6 +7,7 @@ import { requireRole } from "@/lib/auth/guards";
 import { ROLES, STOCK_MOVEMENT_TYPES, REP_LOAD_TYPES, REP_CUSTOMER_ORDER_STATUSES } from "@/lib/constants";
 import { getMainWarehouse } from "@/lib/inventory";
 import { getOrCreateRepLocation } from "@/lib/reps";
+import { resolveOrCreateRepMerchant } from "@/lib/rep-merchants";
 import { repStockTransferBatchSchema, type RepStockTransferBatchInput } from "@/lib/validation/reps";
 import {
   decrementInventoryAtomic,
@@ -51,16 +52,19 @@ function parseTransferBatchForm(formData: FormData) {
   } catch {
     return null;
   }
-  // loadType/customerName were previously never read here at all — every
-  // submission silently fell back to loadType=CAR_STOCK regardless of what
-  // AssignStockForm's radio selection actually sent, and customerName was
-  // always discarded. returnStockFromRep never sends either field, so
-  // reading them here is harmless there (both simply come back undefined).
+  // loadType/customerName/customerPhone/merchantId were previously never
+  // read here at all — every submission silently fell back to
+  // loadType=CAR_STOCK regardless of what AssignStockForm's radio selection
+  // actually sent, and customerName was always discarded. returnStockFromRep
+  // never sends any of them, so reading them here is harmless there (all
+  // simply come back undefined).
   return repStockTransferBatchSchema.safeParse({
     items,
     notes: formData.get("notes")?.toString().trim() || undefined,
     loadType: formData.get("loadType")?.toString() || undefined,
     customerName: formData.get("customerName")?.toString().trim() || undefined,
+    customerPhone: formData.get("customerPhone")?.toString().trim() || undefined,
+    merchantId: formData.get("merchantId")?.toString().trim() || undefined,
   });
 }
 
@@ -182,8 +186,26 @@ export async function assignStockToRep(
 
   const loadType = parsed.data.loadType ?? REP_LOAD_TYPES.CAR_STOCK;
   const customerName = parsed.data.customerName?.trim() ?? "";
-  if (loadType === REP_LOAD_TYPES.CUSTOMER_ORDER && customerName.length < 2) {
+  const customerPhone = parsed.data.customerPhone?.trim() ?? "";
+  const selectedMerchantId = parsed.data.merchantId?.trim() || null;
+  const isCustomerOrder = loadType === REP_LOAD_TYPES.CUSTOMER_ORDER;
+
+  if (isCustomerOrder && customerName.length < 2) {
     return { error: "اسم الزبون مطلوب لتحميل من نوع طلبية زبون" };
+  }
+  // Every NEW CUSTOMER_ORDER must resolve to a real Merchant identity —
+  // either an existing trader picked by stable merchantId (preferred, see
+  // AssignStockForm's autocomplete), or enough data (customerName +
+  // customerPhone) to resolve/create one below via the exact same rule
+  // createRepSale already uses. A CUSTOMER_ORDER is never created with
+  // merchantId left null going forward — that would recreate the exact
+  // "طلبات الزبائن" duplicate-row bug this feature exists to fix. This does
+  // NOT apply retroactively: legacy rows created before this rule existed
+  // keep merchantId = null until an ADMIN explicitly links one (see
+  // linkRepCustomerOrderMerchant) — and it never applies to CAR_STOCK at
+  // all, which carries no customer/trader identity of any kind.
+  if (isCustomerOrder && !selectedMerchantId && customerPhone.length < 7) {
+    return { error: "يجب اختيار التاجر أو إدخال رقم هاتف صحيح للزبون" };
   }
 
   const rep = await prisma.salesRepresentative.findUnique({
@@ -195,6 +217,22 @@ export async function assignStockToRep(
   }
   if (!rep.isActive || !rep.user.isActive) {
     return { error: "لا يمكن تخصيص مخزون لمندوب غير مفعل" };
+  }
+
+  // Verified up front (never trusting the client's word that a picked
+  // trader is real or actually theirs) — an existing merchantId is used
+  // directly below, with no re-resolution by phone/name at all, exactly
+  // once we know it's legitimate.
+  let verifiedMerchantId: string | null = null;
+  if (isCustomerOrder && selectedMerchantId) {
+    const selectedMerchant = await prisma.merchant.findUnique({
+      where: { id: selectedMerchantId },
+      select: { id: true, assignedRepId: true },
+    });
+    if (!selectedMerchant || selectedMerchant.assignedRepId !== rep.id) {
+      return { error: "التاجر المختار غير صالح لهذا المندوب" };
+    }
+    verifiedMerchantId = selectedMerchant.id;
   }
 
   const products = await prisma.product.findMany({
@@ -279,10 +317,26 @@ export async function assignStockToRep(
       // Created in the same transaction so the batch, its movements, and
       // this template either all commit together or none do.
       if (loadType === REP_LOAD_TYPES.CUSTOMER_ORDER) {
+        // Every branch here ends with a real, non-null Merchant.id — the
+        // validation above already rejected any submission that couldn't
+        // reach one. An already-verified existing merchantId is used
+        // directly (no re-resolution by phone/name — see requirement G);
+        // otherwise this resolves the exact same real trader identity a
+        // completed sale for this same customer would, via the same shared
+        // helper createRepSale uses.
+        const merchant = verifiedMerchantId
+          ? { id: verifiedMerchantId }
+          : await resolveOrCreateRepMerchant(tx, {
+              salesRepId: rep.id,
+              businessName: customerName,
+              contactPhone: customerPhone,
+            });
+
         await tx.repCustomerOrder.create({
           data: {
             salesRepId: rep.id,
             customerName,
+            merchantId: merchant.id,
             status: REP_CUSTOMER_ORDER_STATUSES.OPEN,
             transferBatchId: createdBatch.id,
             createdById: actor.id,
@@ -480,4 +534,61 @@ export async function cancelRepCustomerOrder(
   revalidatePath(`/admin/reps/${repId}`);
   revalidatePath("/rep/sales/new");
   return { success: "تم إلغاء طلبية الزبون" };
+}
+
+export interface LinkCustomerOrderMerchantState {
+  error?: string;
+  success?: string;
+}
+
+/** ADMIN-only: links a legacy (or otherwise unlinked) RepCustomerOrder to a
+ * real Merchant so it can join that trader's grouped "طلبات الزبائن" row on
+ * /admin/reps/[id] — see the RepCustomerOrder.merchantId doc comment in
+ * schema.prisma. Deliberately the ONLY thing this changes: customerName,
+ * status, items, inventory, and every timestamp are left exactly as they
+ * were. Never infers the link from customerName/businessName text — the
+ * admin explicitly picks the Merchant.
+ *
+ * Ownership is verified on both sides so a manipulated repId/customerOrderId/
+ * merchantId combination can't cross a boundary a legitimate admin action
+ * never could: the order must belong to this rep, and the target Merchant
+ * must be assigned to this SAME rep (Merchant.assignedRepId — the existing
+ * ownership model getMerchantsForRep already relies on), never a merchant
+ * belonging to a different rep. */
+export async function linkRepCustomerOrderMerchant(
+  repId: string,
+  customerOrderId: string,
+  _prevState: LinkCustomerOrderMerchantState,
+  formData: FormData,
+): Promise<LinkCustomerOrderMerchantState> {
+  await requireRole([ROLES.ADMIN]);
+
+  const merchantId = formData.get("merchantId")?.toString().trim() ?? "";
+  if (!merchantId) {
+    return { error: "اختر التاجر أولاً" };
+  }
+
+  const order = await prisma.repCustomerOrder.findUnique({
+    where: { id: customerOrderId },
+    select: { id: true, salesRepId: true },
+  });
+  if (!order || order.salesRepId !== repId) {
+    return { error: "طلبية الزبون غير موجودة" };
+  }
+
+  const merchant = await prisma.merchant.findUnique({
+    where: { id: merchantId },
+    select: { id: true, assignedRepId: true },
+  });
+  if (!merchant || merchant.assignedRepId !== repId) {
+    return { error: "التاجر غير موجود ضمن تجار هذا المندوب" };
+  }
+
+  await prisma.repCustomerOrder.update({
+    where: { id: customerOrderId },
+    data: { merchantId: merchant.id },
+  });
+
+  revalidateRepPaths(repId);
+  return { success: "تم ربط الطلبية بالتاجر" };
 }

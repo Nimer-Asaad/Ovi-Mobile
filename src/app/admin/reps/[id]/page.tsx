@@ -15,6 +15,7 @@ import { RepStockRequestStatusBadge } from "@/components/reps/RepStockRequestSta
 import { RepCustomerOrdersCard } from "@/components/reps/RepCustomerOrdersCard";
 import { getActiveRequestCountForRep, getLatestRequestsForRep } from "@/lib/rep-stock-requests";
 import { getRepCustomerEngagementRows } from "@/lib/rep-customer-orders";
+import { getMerchantsForRep } from "@/lib/rep-merchants";
 import { ORDER_SOURCES, STOCK_MOVEMENT_TYPES, ROLES } from "@/lib/constants";
 import { requireRole } from "@/lib/auth/guards";
 import type { RepTransferHistoryRow } from "@/components/reps/RepTransferHistory";
@@ -61,6 +62,7 @@ export default async function AdminRepDetailPage({ params }: AdminRepDetailPageP
     latestRequests,
     todaySalesCount,
     customerEngagementRows,
+    repMerchants,
   ] = await Promise.all([
     getRepStockStats(locationId),
     getRepStockValueCents(locationId),
@@ -120,6 +122,7 @@ export default async function AdminRepDetailPage({ params }: AdminRepDetailPageP
       where: { createdByRepId: rep.id, source: ORDER_SOURCES.REP_SALE, createdAt: { gte: startOfToday } },
     }),
     getRepCustomerEngagementRows(rep.id),
+    getMerchantsForRep(rep.id),
   ]);
 
   // Movements sharing a transferBatchId were all created by the same
@@ -292,7 +295,7 @@ export default async function AdminRepDetailPage({ params }: AdminRepDetailPageP
        * workflow at different lifecycle stages) in two disconnected places.
        * See getRepCustomerEngagementRows for how the two sources are merged
        * without ever duplicating one real event. */}
-      <RepCustomerOrdersCard repId={rep.id} rows={customerEngagementRows} />
+      <RepCustomerOrdersCard repId={rep.id} rows={customerEngagementRows} merchants={repMerchants} />
 
       <RepCarProductGrid items={gridItems} />
 

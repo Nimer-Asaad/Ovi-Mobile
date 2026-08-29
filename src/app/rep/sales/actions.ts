@@ -5,10 +5,11 @@ import { redirect } from "next/navigation";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth/guards";
-import { ROLES, MERCHANT_STATUSES, ORDER_SOURCES, ORDER_STATUSES, PAYMENT_METHODS, PAYMENT_STATUSES, STOCK_MOVEMENT_TYPES, REP_CUSTOMER_ORDER_STATUSES } from "@/lib/constants";
+import { ROLES, ORDER_SOURCES, ORDER_STATUSES, PAYMENT_METHODS, PAYMENT_STATUSES, STOCK_MOVEMENT_TYPES, REP_CUSTOMER_ORDER_STATUSES } from "@/lib/constants";
 import { repSaleSchema } from "@/lib/validation/repSale";
 import { decrementInventoryAtomic, recordStockMovement, InsufficientInventoryError } from "@/lib/inventory-transactions";
 import { getOrCreateMerchantAccount, recordInitialAccountPayment } from "@/lib/accounts";
+import { resolveOrCreateRepMerchant } from "@/lib/rep-merchants";
 
 export interface RepSaleState {
   error?: string;
@@ -201,28 +202,17 @@ export async function createRepSale(_prevState: RepSaleState, formData: FormData
         // created by this rep on an earlier sale), regardless of whether it
         // has a login. No match creates a new login-less trader, approved
         // immediately and assigned to this rep, visible in /admin/merchants
-        // right away — see the Merchant model doc comment.
-        let merchant = await tx.merchant.findFirst({
-          where: {
-            assignedRepId: rep.id,
-            OR: [{ contactPhone: customerPhone }, { user: { phone: customerPhone } }],
-          },
-          select: { id: true, userId: true },
+        // right away — see the Merchant model doc comment. Shared with
+        // assignStockToRep's CUSTOMER_ORDER path (src/app/admin/reps/actions.ts)
+        // via resolveOrCreateRepMerchant so both flows resolve the exact same
+        // trader identity by the exact same rule.
+        const merchant = await resolveOrCreateRepMerchant(tx, {
+          salesRepId: rep.id,
+          businessName: customerName,
+          contactPhone: customerPhone,
+          city,
+          address,
         });
-        if (!merchant) {
-          merchant = await tx.merchant.create({
-            data: {
-              businessName: customerName,
-              contactPhone: customerPhone,
-              city,
-              address,
-              assignedRepId: rep.id,
-              status: MERCHANT_STATUSES.APPROVED,
-              approvedAt: new Date(),
-            },
-            select: { id: true, userId: true },
-          });
-        }
         const accountId = await getOrCreateMerchantAccount(tx, merchant.id);
 
         await tx.order.create({

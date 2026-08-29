@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getMainWarehouse } from "@/lib/inventory";
 import { requireRole } from "@/lib/auth/guards";
 import { ROLES } from "@/lib/constants";
+import { getRepTraderContactsForSaleForm } from "@/lib/rep-merchants";
 import { RepCarHero } from "@/components/reps/RepCarHero";
 import { AssignStockForm, type AssignStockProductOption } from "../../AssignStockForm";
 
@@ -28,6 +29,7 @@ export default async function AdminRepAssignStockPage({ params }: AdminRepAssign
   }
 
   const warehouse = await getMainWarehouse();
+  const traderContacts = await getRepTraderContactsForSaleForm(rep.id);
 
   const products = await prisma.product.findMany({
     where: { isActive: true },
@@ -102,7 +104,7 @@ export default async function AdminRepAssignStockPage({ params }: AdminRepAssign
         title="تحميل مخزون إلى السيارة"
         subtitle={`انقل من ${warehouse.name} إلى سيارة ${rep.user.name} — ينشئ سجل حركة يمكن طباعته كإشعار تحويل`}
       />
-      <AssignStockForm repId={rep.id} products={options} />
+      <AssignStockForm repId={rep.id} products={options} traderContacts={traderContacts} />
     </div>
   );
 }

@@ -64,22 +64,53 @@ interface RepCustomerEngagementRowBase {
  * exactly how that's prevented) — the discriminated `kind` lets the card
  * render each with its own real status/action instead of pretending they're
  * identical. */
+export type RepCustomerOrderEngagementRow = RepCustomerEngagementRowBase & {
+  kind: "customerOrder";
+  /** REP_CUSTOMER_ORDER_STATUSES value. */
+  status: string;
+  /** Set once this template's status is COMPLETED — the real Order it
+   * produced (via Order.repCustomerOrderId), so the row can link
+   * straight to it instead of just showing a static "مكتمل" badge. */
+  saleOrderNumber: string | null;
+  /** Real trader identity, when one has been resolved/linked (see the
+   * RepCustomerOrder.merchantId doc comment) — null for a legacy or
+   * genuinely unlinked row, which stays standalone (see
+   * getRepCustomerEngagementRows' grouping step below; never guessed from
+   * customerName). */
+  merchantId: string | null;
+};
+
 export type RepCustomerEngagementRow =
-  | (RepCustomerEngagementRowBase & {
-      kind: "customerOrder";
-      /** REP_CUSTOMER_ORDER_STATUSES value. */
-      status: string;
-      /** Set once this template's status is COMPLETED — the real Order it
-       * produced (via Order.repCustomerOrderId), so the row can link
-       * straight to it instead of just showing a static "مكتمل" badge. */
-      saleOrderNumber: string | null;
-    })
+  | RepCustomerOrderEngagementRow
   | (RepCustomerEngagementRowBase & {
       kind: "sale";
       orderNumber: string;
       /** ORDER_STATUSES value. */
       orderStatus: string;
-    });
+    })
+  | {
+      kind: "merchantGroup";
+      /** Synthetic id — never a real record's own id, so it can never be
+       * confused with (or bound to a cancel/link action meant for) an
+       * individual RepCustomerOrder. */
+      id: string;
+      merchantId: string;
+      /** Merchant.businessName — the one real, non-guessed identity all of
+       * this group's children share. */
+      customerName: string;
+      /** Latest of the group's children's own createdAt, so the group sorts
+       * exactly where its most recent activity would have on its own. */
+      createdAt: Date;
+      /** Sum of each child's own itemCount (RepCustomerOrderItem line
+       * count) — "1 صنف" + "17 صنف" reads as "18 صنف" here, never a
+       * quantity-unit total (see RepCustomerOrderOption's own itemCount for
+       * the same convention). */
+      itemCount: number;
+      /** Every underlying OPEN RepCustomerOrder this trader currently has —
+       * each keeps its own date/item count/status/cancel action; there is
+       * deliberately no group-level cancel. */
+      children: RepCustomerOrderEngagementRow[];
+    };
 
 /** Recent customer-order car-loads (any status, newest `customerOrderLimit`)
  * PLUS every ad-hoc rep sale made TODAY that never went through a
@@ -123,6 +154,8 @@ export async function getRepCustomerEngagementRows(salesRepId: string, customerO
         customerName: true,
         status: true,
         createdAt: true,
+        merchantId: true,
+        merchant: { select: { businessName: true } },
         items: { select: { id: true } },
         saleOrder: { select: { orderNumber: true } },
       },
@@ -140,34 +173,77 @@ export async function getRepCustomerEngagementRows(salesRepId: string, customerO
     }),
   ]);
 
-  const rows: RepCustomerEngagementRow[] = [
-    ...customerOrders.map(
-      (order): RepCustomerEngagementRow => ({
-        kind: "customerOrder",
-        id: order.id,
-        customerName: order.customerName,
-        createdAt: order.createdAt,
-        itemCount: order.items.length,
-        status: order.status,
-        saleOrderNumber: order.saleOrder?.orderNumber ?? null,
-      }),
-    ),
-    ...adHocSalesToday.map(
-      (order): RepCustomerEngagementRow => ({
-        kind: "sale",
-        id: order.orderNumber,
-        // contactName is a required field on the rep-sale form (min 2
-        // chars) — never actually null in practice for a REP_SALE order,
-        // but the column itself is nullable, so this mirrors the same "—"
-        // fallback the old "مبيعات اليوم" card used, never a fabricated name.
-        customerName: order.contactName ?? "—",
-        createdAt: order.createdAt,
-        itemCount: order.items.length,
-        orderNumber: order.orderNumber,
-        orderStatus: order.status,
-      }),
-    ),
-  ];
+  const customerOrderRows: RepCustomerOrderEngagementRow[] = customerOrders.map((order) => ({
+    kind: "customerOrder",
+    id: order.id,
+    customerName: order.customerName,
+    createdAt: order.createdAt,
+    itemCount: order.items.length,
+    status: order.status,
+    saleOrderNumber: order.saleOrder?.orderNumber ?? null,
+    merchantId: order.merchantId,
+  }));
+  const merchantNameById = new Map(customerOrders.filter((order) => order.merchantId).map((order) => [order.merchantId as string, order.merchant!.businessName]));
+
+  const saleRows: RepCustomerEngagementRow[] = adHocSalesToday.map((order) => ({
+    kind: "sale",
+    id: order.orderNumber,
+    // contactName is a required field on the rep-sale form (min 2
+    // chars) — never actually null in practice for a REP_SALE order,
+    // but the column itself is nullable, so this mirrors the same "—"
+    // fallback the old "مبيعات اليوم" card used, never a fabricated name.
+    customerName: order.contactName ?? "—",
+    createdAt: order.createdAt,
+    itemCount: order.items.length,
+    orderNumber: order.orderNumber,
+    orderStatus: order.status,
+  }));
+
+  // Group ONLY multiple OPEN templates sharing a real (non-null) merchantId
+  // into one parent "merchantGroup" row — the whole point of merchantId
+  // existing (see the RepCustomerOrder doc comment). Deliberately narrow:
+  //   - COMPLETED/CANCELLED rows never join a group, even if they share a
+  //     merchantId with an OPEN one — their lifecycle already reads fine as
+  //     its own row (saleOrderNumber link / CANCELLED badge), and folding a
+  //     finished request into an "active" parent would misrepresent it.
+  //   - A merchantId with only ONE open row stays a plain "customerOrder"
+  //     row, not a one-child group — grouping exists to combine multiple
+  //     rows, not to wrap a single one in extra UI.
+  //   - null-merchantId rows (every legacy row, and any new one an admin
+  //     created without a phone) are NEVER grouped with each other either —
+  //     there is no stable identity proving two null-merchantId rows are the
+  //     same trader (see the "طلبات الزبائن" grouping investigation).
+  const openByMerchant = new Map<string, RepCustomerOrderEngagementRow[]>();
+  const ungroupedCustomerOrderRows: RepCustomerOrderEngagementRow[] = [];
+  for (const row of customerOrderRows) {
+    if (row.status === REP_CUSTOMER_ORDER_STATUSES.OPEN && row.merchantId) {
+      const bucket = openByMerchant.get(row.merchantId) ?? [];
+      bucket.push(row);
+      openByMerchant.set(row.merchantId, bucket);
+    } else {
+      ungroupedCustomerOrderRows.push(row);
+    }
+  }
+
+  const groupRows: RepCustomerEngagementRow[] = [];
+  for (const [merchantId, children] of openByMerchant) {
+    if (children.length < 2) {
+      ungroupedCustomerOrderRows.push(...children);
+      continue;
+    }
+    const sortedChildren = children.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    groupRows.push({
+      kind: "merchantGroup",
+      id: `merchant-group:${merchantId}`,
+      merchantId,
+      customerName: merchantNameById.get(merchantId) ?? "—",
+      createdAt: sortedChildren[0]!.createdAt,
+      itemCount: children.reduce((sum, child) => sum + child.itemCount, 0),
+      children: sortedChildren,
+    });
+  }
+
+  const rows: RepCustomerEngagementRow[] = [...ungroupedCustomerOrderRows, ...groupRows, ...saleRows];
 
   // No slice here — every row already survived one of the two sources' own
   // pre-existing visibility rule above (count-bounded for templates,
