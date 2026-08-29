@@ -1,0 +1,24 @@
+/* Route-scoped print rules for the rep inventory-count sheet only —
+ * imported solely by RepInventorySheetView.tsx, which nothing outside
+ * /admin/reps/[id]/inventory-sheet renders. Deliberately NOT in
+ * globals.css: @page is not a DOM-scoped rule, so declaring it globally
+ * would affect every print route in the app (order invoices, rep transfer
+ * invoices, stock-request print pages) the moment any page's stylesheet
+ * loaded it. Next.js only bundles a route's own imported CSS into that
+ * route, so this file is never sent to, or applied on, any other page. */
+
+@media print {
+  @page {
+    size: A4;
+    margin: 12mm;
+  }
+
+  /* Applied via styles.avoidBreak below to a single inventory row or the
+   * signature block — never a blanket `tr` selector, so nothing here can
+   * affect a different component even if this file were ever imported
+   * elsewhere. */
+  .avoidBreak {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+}

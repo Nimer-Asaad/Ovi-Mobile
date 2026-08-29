@@ -214,6 +214,9 @@ export default async function AdminRepDetailPage({ params }: AdminRepDetailPageP
             <Link href={`/admin/reps/${rep.id}/return-stock`}>
               <Button variant="outline">إرجاع من السيارة</Button>
             </Link>
+            <Link href={`/admin/reps/${rep.id}/inventory-sheet`}>
+              <Button variant="outline">طباعة كشف الجرد</Button>
+            </Link>
           </>
         }
       />
