@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useActionState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { cancelRepCustomerOrder, type CancelCustomerOrderState } from "@/app/admin/reps/actions";
@@ -10,7 +11,8 @@ import { Spinner } from "@/components/ui/Spinner";
 import { ConfirmDialog } from "@/components/admin/ConfirmDialog";
 import { REP_CUSTOMER_ORDER_STATUSES } from "@/lib/constants";
 import { getRepCustomerOrderStatusLabel, getRepCustomerOrderStatusBadgeVariant } from "@/lib/rep-customer-order-labels";
-import type { RepCustomerOrderSummary } from "@/lib/rep-customer-orders";
+import { getOrderStatusLabel, getOrderStatusBadgeVariant } from "@/lib/order-labels";
+import type { RepCustomerEngagementRow } from "@/lib/rep-customer-orders";
 
 const initialState: CancelCustomerOrderState = {};
 
@@ -50,36 +52,59 @@ function CancelOrderButton({ repId, orderId }: { repId: string; orderId: string 
 
 export interface RepCustomerOrdersCardProps {
   repId: string;
-  orders: RepCustomerOrderSummary[];
+  rows: RepCustomerEngagementRow[];
 }
 
-/** Admin-facing visibility into this rep's customer-order car-loads (see
- * RepCustomerOrder) — distinguishes them from plain car-stock transfers,
- * which never appear here. Cancellation only ever available while OPEN. */
-export function RepCustomerOrdersCard({ repId, orders }: RepCustomerOrdersCardProps) {
+/** Admin-facing visibility into this rep's customer engagement — merges two
+ * genuinely different underlying entities into one chronological display:
+ * RepCustomerOrder car-load templates (kind: "customerOrder" — OPEN/
+ * COMPLETED/CANCELLED, cancellable only while OPEN) and ad-hoc rep sales
+ * that never went through a template (kind: "sale" — always a completed
+ * Order, opens straight to its admin order-detail page). A completed
+ * template's own resulting sale is never listed a second time here — see
+ * getRepCustomerEngagementRows for exactly how that's prevented — so every
+ * row still represents exactly one real event, just with each kind showing
+ * its own real status/action rather than a fabricated shared one. */
+export function RepCustomerOrdersCard({ repId, rows }: RepCustomerOrdersCardProps) {
   return (
     <Card>
       <CardHeader>
         <CardTitle>طلبات الزبائن</CardTitle>
       </CardHeader>
       <CardContent>
-        {orders.length === 0 ? (
+        {rows.length === 0 ? (
           <p className="py-6 text-center text-sm text-neutral-bg/50">لا توجد طلبات زبائن بعد</p>
         ) : (
           <div className="flex flex-col divide-y divide-navy-soft">
-            {orders.map((order) => (
-              <div key={order.id} className="flex flex-wrap items-center justify-between gap-3 py-3 first:pt-0 last:pb-0">
+            {rows.map((row) => (
+              <div key={row.id} className="flex flex-wrap items-center justify-between gap-3 py-3 first:pt-0 last:pb-0">
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm text-neutral-bg">{order.customerName}</p>
+                  <p className="text-sm text-neutral-bg">{row.customerName}</p>
                   <p className="text-xs text-neutral-bg/50">
-                    {new Date(order.createdAt).toLocaleDateString("ar")} — {order.itemCount} صنف
+                    {new Date(row.createdAt).toLocaleDateString("ar")} — {row.itemCount} صنف
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Badge variant={getRepCustomerOrderStatusBadgeVariant(order.status)}>
-                    {getRepCustomerOrderStatusLabel(order.status)}
-                  </Badge>
-                  {order.status === REP_CUSTOMER_ORDER_STATUSES.OPEN && <CancelOrderButton repId={repId} orderId={order.id} />}
+                  {row.kind === "customerOrder" ? (
+                    <>
+                      <Badge variant={getRepCustomerOrderStatusBadgeVariant(row.status)}>
+                        {getRepCustomerOrderStatusLabel(row.status)}
+                      </Badge>
+                      {row.status === REP_CUSTOMER_ORDER_STATUSES.OPEN && <CancelOrderButton repId={repId} orderId={row.id} />}
+                      {row.saleOrderNumber && (
+                        <Link href={`/admin/orders/${row.saleOrderNumber}`} className="text-xs text-gold-champagne hover:underline">
+                          فتح الطلب
+                        </Link>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <Badge variant={getOrderStatusBadgeVariant(row.orderStatus)}>{getOrderStatusLabel(row.orderStatus)}</Badge>
+                      <Link href={`/admin/orders/${row.orderNumber}`} className="text-xs text-gold-champagne hover:underline">
+                        فتح الطلب
+                      </Link>
+                    </>
+                  )}
                 </div>
               </div>
             ))}

@@ -14,9 +14,8 @@ import { RepTransferHistory } from "@/components/reps/RepTransferHistory";
 import { RepStockRequestStatusBadge } from "@/components/reps/RepStockRequestStatusBadge";
 import { RepCustomerOrdersCard } from "@/components/reps/RepCustomerOrdersCard";
 import { getActiveRequestCountForRep, getLatestRequestsForRep } from "@/lib/rep-stock-requests";
-import { getRecentCustomerOrdersForRep } from "@/lib/rep-customer-orders";
+import { getRepCustomerEngagementRows } from "@/lib/rep-customer-orders";
 import { ORDER_SOURCES, STOCK_MOVEMENT_TYPES, ROLES } from "@/lib/constants";
-import { formatCurrencyFromCents } from "@/lib/utils";
 import { requireRole } from "@/lib/auth/guards";
 import type { RepTransferHistoryRow } from "@/components/reps/RepTransferHistory";
 
@@ -60,9 +59,8 @@ export default async function AdminRepDetailPage({ params }: AdminRepDetailPageP
     movements,
     activeRequestCount,
     latestRequests,
-    todaySales,
-    todaySalesAgg,
-    customerOrders,
+    todaySalesCount,
+    customerEngagementRows,
   ] = await Promise.all([
     getRepStockStats(locationId),
     getRepStockValueCents(locationId),
@@ -114,16 +112,14 @@ export default async function AdminRepDetailPage({ params }: AdminRepDetailPageP
       : Promise.resolve([]),
     getActiveRequestCountForRep(rep.id),
     getLatestRequestsForRep(rep.id, 5),
-    prisma.order.findMany({
+    // Count only — the "عدد مبيعات اليوم" stat tile is the sole remaining
+    // use of this query now that the separate "مبيعات اليوم" card (which
+    // needed the full row list) has been folded into the unified "طلبات
+    // الزبائن" card below via getRepCustomerEngagementRows.
+    prisma.order.count({
       where: { createdByRepId: rep.id, source: ORDER_SOURCES.REP_SALE, createdAt: { gte: startOfToday } },
-      orderBy: { createdAt: "desc" },
-      select: { orderNumber: true, totalCents: true, contactName: true, createdAt: true },
     }),
-    prisma.order.aggregate({
-      where: { createdByRepId: rep.id, source: ORDER_SOURCES.REP_SALE, createdAt: { gte: startOfToday } },
-      _sum: { totalCents: true },
-    }),
-    getRecentCustomerOrdersForRep(rep.id),
+    getRepCustomerEngagementRows(rep.id),
   ]);
 
   // Movements sharing a transferBatchId were all created by the same
@@ -232,7 +228,7 @@ export default async function AdminRepDetailPage({ params }: AdminRepDetailPageP
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <StatCard label="طلبات مخزون نشطة" value={String(activeRequestCount)} />
-        <StatCard label="عدد مبيعات اليوم" value={String(todaySales.length)} />
+        <StatCard label="عدد مبيعات اليوم" value={String(todaySalesCount)} />
       </div>
 
       <Card>
@@ -257,71 +253,46 @@ export default async function AdminRepDetailPage({ params }: AdminRepDetailPageP
         </CardContent>
       </Card>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>طلبات مخزون السيارة</CardTitle>
-            <Link href={`/admin/rep-requests?salesRepId=${rep.id}`} className="text-sm text-gold-champagne hover:underline">
-              عرض الكل
-            </Link>
-          </CardHeader>
-          <CardContent>
-            {latestRequests.length === 0 ? (
-              <p className="py-6 text-center text-sm text-neutral-bg/50">لا توجد طلبات بعد</p>
-            ) : (
-              <div className="flex flex-col divide-y divide-navy-soft">
-                {latestRequests.map((request) => (
-                  <Link
-                    key={request.id}
-                    href={`/admin/rep-requests/${request.id}`}
-                    className="flex items-center justify-between py-2 first:pt-0 last:pb-0 hover:opacity-80"
-                  >
-                    <div>
-                      <p className="text-sm text-neutral-bg">{request.requestNumber ?? request.id}</p>
-                      <p className="text-xs text-neutral-bg/50">
-                        {new Date(request.createdAt).toLocaleDateString("ar")} — {request.itemCount} منتج
-                      </p>
-                    </div>
-                    <RepStockRequestStatusBadge status={request.status} />
-                  </Link>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle>طلبات مخزون السيارة</CardTitle>
+          <Link href={`/admin/rep-requests?salesRepId=${rep.id}`} className="text-sm text-gold-champagne hover:underline">
+            عرض الكل
+          </Link>
+        </CardHeader>
+        <CardContent>
+          {latestRequests.length === 0 ? (
+            <p className="py-6 text-center text-sm text-neutral-bg/50">لا توجد طلبات بعد</p>
+          ) : (
+            <div className="flex flex-col divide-y divide-navy-soft">
+              {latestRequests.map((request) => (
+                <Link
+                  key={request.id}
+                  href={`/admin/rep-requests/${request.id}`}
+                  className="flex items-center justify-between py-2 first:pt-0 last:pb-0 hover:opacity-80"
+                >
+                  <div>
+                    <p className="text-sm text-neutral-bg">{request.requestNumber ?? request.id}</p>
+                    <p className="text-xs text-neutral-bg/50">
+                      {new Date(request.createdAt).toLocaleDateString("ar")} — {request.itemCount} منتج
+                    </p>
+                  </div>
+                  <RepStockRequestStatusBadge status={request.status} />
+                </Link>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>مبيعات اليوم</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="mb-3 text-sm text-neutral-bg/70">
-              {todaySales.length} طلب — إجمالي {formatCurrencyFromCents(todaySalesAgg._sum.totalCents ?? 0)}
-            </p>
-            {todaySales.length === 0 ? (
-              <p className="py-6 text-center text-sm text-neutral-bg/50">لا توجد مبيعات اليوم بعد</p>
-            ) : (
-              <div className="flex flex-col divide-y divide-navy-soft">
-                {todaySales.map((order) => (
-                  <Link
-                    key={order.orderNumber}
-                    href={`/admin/orders/${order.orderNumber}`}
-                    className="flex items-center justify-between py-2 first:pt-0 last:pb-0 hover:opacity-80"
-                  >
-                    <div>
-                      <p className="text-sm text-neutral-bg">{order.orderNumber}</p>
-                      <p className="text-xs text-neutral-bg/50">{order.contactName ?? "—"}</p>
-                    </div>
-                    <span className="text-sm text-neutral-bg">{formatCurrencyFromCents(order.totalCents)}</span>
-                  </Link>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      <RepCustomerOrdersCard repId={rep.id} orders={customerOrders} />
+      {/* Unified "customer engagement" list — replaces the two previously
+       * separate sections (a "طلبات الزبائن" card for RepCustomerOrder
+       * templates and a "مبيعات اليوم" card for today's ad-hoc rep sales),
+       * which showed overlapping/related records (the same named-customer
+       * workflow at different lifecycle stages) in two disconnected places.
+       * See getRepCustomerEngagementRows for how the two sources are merged
+       * without ever duplicating one real event. */}
+      <RepCustomerOrdersCard repId={rep.id} rows={customerEngagementRows} />
 
       <RepCarProductGrid items={gridItems} />
 
