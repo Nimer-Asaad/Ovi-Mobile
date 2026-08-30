@@ -428,7 +428,11 @@ export interface ProductSalePickerProps {
   onProductPriceChange: (productKey: string, value: string) => void;
 }
 
-/** The rep-sale product picker — a flat, searchable list of PRODUCTS (e.g.
+function groupHasSelection(group: SaleProductGroup, quantities: Record<string, number>): boolean {
+  return group.rows.some((row) => (quantities[row.key] ?? 0) > 0);
+}
+
+/** The rep-sale product picker — a searchable list of PRODUCTS (e.g.
  * "OVI 04", "OVI 63", "Privacy Glass"), each either showing its quantity
  * stepper directly (a plain product with one implicit row) or a button that
  * opens a model-selection popup scoped to that one product (see
@@ -436,16 +440,30 @@ export interface ProductSalePickerProps {
  * product's own phone-model/variant/color rows, never the whole catalog).
  * Pricing is entered ONCE per product on its own card, applied to every
  * selected row underneath it regardless of how many distinct phone models
- * were picked inside the popup. */
+ * were picked inside the popup.
+ *
+ * The list is deliberately never a full always-visible catalog dump: with
+ * an empty search box it shows ONLY products that already have a selected
+ * quantity somewhere (manually picked, or preloaded from a RepCustomerOrder
+ * — either way, `quantities` already reflects it, so this needs no extra
+ * "is this preloaded" concept of its own). Typing narrows/adds matching
+ * products on top of whatever is already selected, deduplicated — a
+ * selected product never silently drops off screen just because it stopped
+ * matching the current query. */
 export function ProductSalePicker({ groups, quantities, onQuantityChange, productPrices, onProductPriceChange }: ProductSalePickerProps) {
   const [search, setSearch] = useState("");
   const [openProductKey, setOpenProductKey] = useState<string | null>(null);
 
   const normalizedSearch = search.trim().toLowerCase();
   const visibleGroups = useMemo(() => {
-    if (!normalizedSearch) return groups;
-    return groups.filter((group) => group.label.toLowerCase().includes(normalizedSearch) || group.product.sku.toLowerCase().includes(normalizedSearch));
-  }, [groups, normalizedSearch]);
+    const selected = groups.filter((group) => groupHasSelection(group, quantities));
+    if (!normalizedSearch) return selected;
+
+    const matches = groups.filter((group) => group.label.toLowerCase().includes(normalizedSearch) || group.product.sku.toLowerCase().includes(normalizedSearch));
+    const matchKeys = new Set(matches.map((group) => group.key));
+    const selectedNotMatched = selected.filter((group) => !matchKeys.has(group.key));
+    return [...selectedNotMatched, ...matches];
+  }, [groups, normalizedSearch, quantities]);
 
   const openGroup = groups.find((group) => group.key === openProductKey) ?? null;
 
@@ -457,19 +475,25 @@ export function ProductSalePicker({ groups, quantities, onQuantityChange, produc
     <div className="flex flex-col gap-3">
       <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="ابحث عن منتج..." aria-label="ابحث عن منتج" />
 
-      <div className="flex flex-col gap-2">
-        {visibleGroups.map((group) => (
-          <ProductCard
-            key={group.key}
-            group={group}
-            quantities={quantities}
-            onQuantityChange={onQuantityChange}
-            priceValue={productPrices[group.key] ?? ""}
-            onPriceChange={(value) => onProductPriceChange(group.key, value)}
-            onOpenModal={() => setOpenProductKey(group.key)}
-          />
-        ))}
-      </div>
+      {visibleGroups.length === 0 ? (
+        <p className="py-3 text-center text-xs text-neutral-bg/50">
+          {normalizedSearch ? "لا توجد نتائج مطابقة" : "ابحث عن صنف لإضافته للبيع"}
+        </p>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {visibleGroups.map((group) => (
+            <ProductCard
+              key={group.key}
+              group={group}
+              quantities={quantities}
+              onQuantityChange={onQuantityChange}
+              priceValue={productPrices[group.key] ?? ""}
+              onPriceChange={(value) => onProductPriceChange(group.key, value)}
+              onOpenModal={() => setOpenProductKey(group.key)}
+            />
+          ))}
+        </div>
+      )}
 
       {/* key={openGroup.key} forces a fresh mount (and thus a fresh, empty
        * search box) every time a different product's popup opens — see the
