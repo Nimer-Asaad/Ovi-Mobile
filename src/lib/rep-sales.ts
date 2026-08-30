@@ -7,7 +7,37 @@ import type { RepSaleInput } from "@/lib/validation/repSale";
 import { decrementInventoryAtomic, recordStockMovement, InsufficientInventoryError } from "@/lib/inventory-transactions";
 import { getOrCreateMerchantAccount, recordInitialAccountPayment } from "@/lib/accounts";
 import { resolveOrCreateRepMerchant } from "@/lib/rep-merchants";
-import type { SaleProductOption } from "@/components/reps/NewSaleForm";
+import type { SaleProductOption, SaleProductCategory } from "@/components/reps/NewSaleForm";
+
+/** Resolves every category's TOP-LEVEL ancestor (walks parentId until null,
+ * however many levels that actually takes — see the Category.parentId
+ * self-relation in schema.prisma) from ONE query over the whole category
+ * table, never one query per product/category. Safe to call once per
+ * catalog fetch: the category table is small (every category a business
+ * actually uses, not per-product), so loading it whole is cheap and this is
+ * the only place in the app that needs root resolution at all (see the
+ * SaleGroupPicker.tsx doc comment for why the root — not the leaf — is the
+ * price-entry section). Guards against a corrupted parentId cycle with a
+ * visited-set so a bad row can never hang this in an infinite loop. */
+async function resolveCategoryRoots(): Promise<Map<string, { id: string; name: string; nameAr: string | null }>> {
+  const categories = await prisma.category.findMany({ select: { id: true, name: true, nameAr: true, parentId: true } });
+  const byId = new Map(categories.map((category) => [category.id, category]));
+  const rootById = new Map<string, { id: string; name: string; nameAr: string | null }>();
+
+  for (const category of categories) {
+    if (rootById.has(category.id)) continue;
+    const visited = new Set<string>();
+    let current = category;
+    while (current.parentId && !visited.has(current.id)) {
+      visited.add(current.id);
+      const parent = byId.get(current.parentId);
+      if (!parent) break;
+      current = parent;
+    }
+    rootById.set(category.id, { id: current.id, name: current.name, nameAr: current.nameAr });
+  }
+  return rootById;
+}
 
 function generateOrderNumber(): string {
   const now = new Date();
@@ -43,48 +73,74 @@ export function revalidateRepSalePaths(orderNumber: string): void {
  * in-stock rows are ever included (quantity > 0) — a sale, unlike a stock
  * request, can only draw from what's physically in that car right now.
  * `colorOptions` is independent of stock — it's the product's descriptive
- * color pick-list (ProductColorOption), never a stock dimension. Returns
- * an empty catalog for a rep with no car location at all. */
+ * color pick-list (ProductColorOption), never a stock dimension. `category`
+ * (the product's own leaf category, plus its resolved top-level ancestor —
+ * see resolveCategoryRoots) rides along purely so the sale form can group
+ * models into price-entry sections (see SaleGroupPicker.tsx) — it has no
+ * effect on stock or price here. Returns an empty catalog for a rep with no
+ * car location at all. */
 export async function getRepCarSaleProducts(locationId: string | null): Promise<SaleProductOption[]> {
   if (!locationId) return [];
 
-  const items = await prisma.inventoryItem.findMany({
-    where: { locationId, quantity: { gt: 0 } },
-    orderBy: { updatedAt: "desc" },
-    select: {
-      quantity: true,
-      variantId: true,
-      variant: { select: { id: true, phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } } } },
-      deviceColorVariantId: true,
-      deviceColorVariant: {
-        select: {
-          id: true,
-          phoneModel: { select: { id: true, name: true, nameAr: true, phoneBrandId: true, phoneBrand: { select: { id: true, name: true, nameAr: true } } } },
-          color: { select: { id: true, name: true, nameAr: true, hexCode: true } },
-        },
-      },
-      product: {
-        select: {
-          id: true,
-          sku: true,
-          name: true,
-          nameAr: true,
-          retailPriceCents: true,
-          isActive: true,
-          inventoryTrackingMode: true,
-          images: {
-            select: { url: true, altText: true },
-            orderBy: [{ isMain: "desc" }, { sortOrder: "asc" }],
-            take: 1,
-          },
-          colorOptions: {
-            select: { color: { select: { id: true, name: true, nameAr: true, hexCode: true } } },
-            orderBy: { sortOrder: "asc" },
+  const [items, categoryRoots] = await Promise.all([
+    prisma.inventoryItem.findMany({
+      where: { locationId, quantity: { gt: 0 } },
+      orderBy: { updatedAt: "desc" },
+      select: {
+        quantity: true,
+        variantId: true,
+        variant: { select: { id: true, phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } } } },
+        deviceColorVariantId: true,
+        deviceColorVariant: {
+          select: {
+            id: true,
+            phoneModel: { select: { id: true, name: true, nameAr: true, phoneBrandId: true, phoneBrand: { select: { id: true, name: true, nameAr: true } } } },
+            color: { select: { id: true, name: true, nameAr: true, hexCode: true } },
           },
         },
+        product: {
+          select: {
+            id: true,
+            sku: true,
+            name: true,
+            nameAr: true,
+            retailPriceCents: true,
+            isActive: true,
+            inventoryTrackingMode: true,
+            images: {
+              select: { url: true, altText: true },
+              orderBy: [{ isMain: "desc" }, { sortOrder: "asc" }],
+              take: 1,
+            },
+            colorOptions: {
+              select: { color: { select: { id: true, name: true, nameAr: true, hexCode: true } } },
+              orderBy: { sortOrder: "asc" },
+            },
+            // Only the product's own leaf category — its top-level ancestor
+            // (however many parent levels away) comes from
+            // resolveCategoryRoots below instead, so this never needs to
+            // hard-code a parent-select depth.
+            category: { select: { id: true, name: true, nameAr: true } },
+          },
+        },
       },
-    },
-  });
+    }),
+    resolveCategoryRoots(),
+  ]);
+
+  function resolveCategory(category: { id: string; name: string; nameAr: string | null } | null): SaleProductCategory | null {
+    if (!category) return null;
+    return {
+      id: category.id,
+      name: category.name,
+      nameAr: category.nameAr,
+      // Defensive fallback (root's own record, i.e. treat it as its own
+      // root) — resolveCategoryRoots resolves every category it fetched, so
+      // this only ever triggers if the category was deleted between the two
+      // queries above, an unavoidable, harmless race.
+      root: categoryRoots.get(category.id) ?? { id: category.id, name: category.name, nameAr: category.nameAr },
+    };
+  }
 
   const byProductId = new Map<string, SaleProductOption>();
   for (const item of items) {
@@ -97,6 +153,7 @@ export async function getRepCarSaleProducts(locationId: string | null): Promise<
       retailPriceCents: item.product.retailPriceCents,
       thumbnailUrl: item.product.images[0]?.url ?? null,
       thumbnailAlt: item.product.images[0]?.altText ?? null,
+      category: resolveCategory(item.product.category),
       repStock: 0,
       colorOptions:
         item.product.inventoryTrackingMode === "DEVICE_MODEL_COLOR"

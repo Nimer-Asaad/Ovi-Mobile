@@ -8,38 +8,23 @@ import { Button } from "@/components/ui/Button";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card";
 import { Spinner } from "@/components/ui/Spinner";
 import { cn, formatCurrencyFromCents } from "@/lib/utils";
-import { ProductThumb, ProductQuickPicker, type PickableProduct } from "@/components/reps/ProductQuickPicker";
+import {
+  SaleGroupPicker,
+  buildSaleSections,
+  buildSaleSubmitLines,
+  summarizeSaleSections,
+  findSaleRow,
+  type SaleProductOption,
+} from "@/components/reps/SaleGroupPicker";
 import type { RepCustomerOrderOption } from "@/lib/rep-customer-orders";
 
-export interface SaleProductOption extends PickableProduct {
-  /** Rep-car stock for a non-variant product — a phone-variant product's
-   * stock lives per-model on `variantOptions[].stock` instead. Color never
-   * carries stock either way. */
-  repStock: number;
-  retailPriceCents: number;
-}
+export type { SaleProductOption, SaleProductCategory } from "@/components/reps/SaleGroupPicker";
 
 export interface SaleCustomerOption {
   name: string;
   phone: string;
   city: string | null;
   address: string | null;
-}
-
-interface SaleLine {
-  productId: string;
-  colorId: string | null;
-  variantId: string | null;
-  deviceColorVariantId: string | null;
-  colorLabel: string | null;
-  sku: string;
-  label: string;
-  quantity: number;
-  /** NIS decimal string, e.g. "89.90" — converted to integer cents on submit. */
-  unitPrice: string;
-  repStock: number;
-  thumbnailUrl: string | null;
-  thumbnailAlt: string | null;
 }
 
 interface NewSaleFormProps {
@@ -63,76 +48,44 @@ interface NewSaleFormProps {
 
 const initialState: RepSaleState = {};
 
-function centsToInputValue(cents: number): string {
-  return (cents / 100).toFixed(2);
-}
-
-function lineKey(productId: string, colorId: string | null, variantId: string | null = null, deviceColorVariantId: string | null = null): string {
-  if (deviceColorVariantId) return `${productId}:combo:${deviceColorVariantId}`;
-  return `${productId}:${variantId ?? `legacy:${colorId ?? ""}`}`;
-}
-
-/** Resolves one customer-order line against this rep's *current* stock
- * (never the order's stale snapshot) — the order is only ever a starting
- * template (see the RepCustomerOrder schema doc comment). Returns null with
- * a human-readable note when the product/option no longer has any car stock
- * at all, and clamps (with a note) when current stock is less than the
- * originally intended quantity — either way the rep sees exactly why a line
- * came in short or missing instead of it silently vanishing. */
-function buildLineFromOrderItem(
-  item: RepCustomerOrderOption["items"][number],
-  products: SaleProductOption[],
-): { line: SaleLine | null; note: string | null } {
-  const product = products.find((candidate) => candidate.id === item.productId);
-  if (!product) {
-    return { line: null, note: `منتج غير متوفر حالياً في سيارتك (${item.quantity} قطعة مطلوبة)` };
-  }
-
-  const variant = item.variantId ? (product.variantOptions?.find((option) => option.id === item.variantId) ?? null) : null;
-  const combo = item.deviceColorVariantId ? (product.deviceColorVariantOptions?.find((option) => option.id === item.deviceColorVariantId) ?? null) : null;
-  const currentStock = variant ? (variant.stock ?? 0) : combo ? (combo.stock ?? 0) : product.repStock;
-  const colorLabel = combo ? `${combo.brandLabel} / ${combo.modelLabel} / ${combo.colorLabel}` : (variant?.label ?? null);
-  const displayName = `${product.nameAr ?? product.name}${colorLabel ? ` — ${colorLabel}` : ""}`;
-
-  if (currentStock <= 0) {
-    return { line: null, note: `${displayName} — غير متوفر حالياً في سيارتك` };
-  }
-
-  const quantity = Math.min(item.quantity, currentStock);
-  return {
-    line: {
-      productId: product.id,
-      colorId: null,
-      variantId: item.variantId,
-      deviceColorVariantId: item.deviceColorVariantId,
-      colorLabel,
-      sku: product.sku,
-      label: product.nameAr ?? product.name,
-      quantity,
-      unitPrice: centsToInputValue(product.retailPriceCents),
-      repStock: currentStock,
-      thumbnailUrl: product.thumbnailUrl,
-      thumbnailAlt: product.thumbnailAlt,
-    },
-    note: quantity < item.quantity ? `${displayName} — الكمية المتاحة الآن (${currentStock}) أقل من طلبية الزبون الأصلية (${item.quantity})` : null,
-  };
-}
-
-/** Multi-line direct-sale form — same search/thumbnail/detail product
- * picker as the stock-request form (ProductQuickPicker), plus a customer
- * name field that suggests this rep's past customers (by phone) so repeat
- * sales don't re-register the same person under slightly different details.
+/** Multi-line direct-sale form — products are organized into collapsible
+ * TOP-LEVEL category sections (see SaleGroupPicker.tsx: "الشفاف" / "اللزقات",
+ * derived straight from the real Category hierarchy, never hard-coded
+ * here), plus a customer name field that suggests this rep's past customers
+ * (by phone) so repeat sales don't re-register the same person under
+ * slightly different details.
+ *
+ * PRICE is entered ONCE per MAIN SECTION, not once per selected phone
+ * model/color and not once per subtype (e.g. "اللزقات" has exactly one
+ * price field even though it may contain "Privacy"/"Ceramic"/"Normal"
+ * subtypes) — every selected model anywhere in that section shares that one
+ * typed unit price, but each stays its own separate OrderItem/inventory
+ * line underneath (see buildSaleSubmitLines) — stock accuracy never depends
+ * on how prices happen to be grouped.
  *
  * Also offers a shortcut: this rep's OPEN customer-order car-load templates
  * (right panel, "طلبات الزبائن" — see RepCustomerOrder) can be clicked to
- * prefill customer name + lines in one go. The prefill is only ever a
- * starting point — every line stays fully editable (quantity/removal/adding
- * more), and the actual submitted `items` always wins as what was really
- * sold; see buildLineFromOrderItem above for how prefill quantities are
- * revalidated against current car stock rather than trusted blindly. */
+ * prefill customer name + quantities in one go. The prefill is only ever a
+ * starting point — every quantity stays fully editable, and the actual
+ * submitted `items` always wins as what was really sold; see
+ * handleSelectOrder below for how prefill quantities are revalidated
+ * against current car stock rather than trusted blindly. Section prices are
+ * NEVER prefilled from a customer order (it never carried one) — the rep
+ * still types each section's price once after preloading, even when the
+ * preload spans multiple subtypes under that one section. */
 export function NewSaleForm({ products, customers, customerOrders, action = createRepSale }: NewSaleFormProps) {
   const [state, formAction, isPending] = useActionState(action, initialState);
-  const [lines, setLines] = useState<SaleLine[]>([]);
+
+  const sections = useMemo(() => buildSaleSections(products), [products]);
+
+  // quantities/sectionPrices are the entire "what's selected, at what
+  // price" state — keyed by ModelRow.key / SaleSection.key respectively.
+  // Nothing else needs to track selection: every row already carries its
+  // own productId/colorId/variantId/deviceColorVariantId, so building the
+  // submit payload is a pure read of `sections` + these two maps (see
+  // buildSaleSubmitLines).
+  const [quantities, setQuantities] = useState<Record<string, number>>({});
+  const [sectionPrices, setSectionPrices] = useState<Record<string, string>>({});
 
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
@@ -144,72 +97,12 @@ export function NewSaleForm({ products, customers, customerOrders, action = crea
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [orderNotices, setOrderNotices] = useState<string[]>([]);
 
-  // Variant and color are independent axes now — a product stays pickable
-  // until every combination of its variants × colors already has a line
-  // (each defaulting to a single "none" slot when the product has no
-  // options on that axis).
-  const excludeIds = useMemo(() => {
-    const usedKeys = new Set(lines.map((line) => lineKey(line.productId, line.colorId, line.variantId, line.deviceColorVariantId)));
-    const ids = new Set<string>();
-    for (const product of products) {
-      if (product.deviceColorVariantOptions?.length) {
-        const allUsed = product.deviceColorVariantOptions.every((combo) => usedKeys.has(lineKey(product.id, null, null, combo.id)));
-        if (allUsed) ids.add(product.id);
-        continue;
-      }
-      const variantIds: (string | null)[] = product.variantOptions?.length ? product.variantOptions.map((variant) => variant.id) : [null];
-      const colorIds: (string | null)[] = product.colorOptions?.length ? product.colorOptions.map((color) => color.id) : [null];
-      const allUsed = variantIds.every((variantId) => colorIds.every((colorId) => usedKeys.has(lineKey(product.id, colorId, variantId))));
-      if (allUsed) ids.add(product.id);
-    }
-    return ids;
-  }, [lines, products]);
-
-  function handleAddProduct(product: SaleProductOption, colorId: string | null, variantId: string | null, deviceColorVariantId: string | null) {
-    const color = product.colorOptions?.find((option) => option.id === colorId) ?? null;
-    const variant = product.variantOptions?.find((option) => option.id === variantId) ?? null;
-    const combo = product.deviceColorVariantOptions?.find((option) => option.id === deviceColorVariantId) ?? null;
-    const colorLabel = combo
-      ? `${combo.brandLabel} / ${combo.modelLabel} / ${combo.colorLabel}`
-      : [variant?.label, color ? (color.nameAr ?? color.name) : null].filter(Boolean).join(" — ") || null;
-    setLines((prev) => [
-      ...prev,
-      {
-        productId: product.id,
-        colorId,
-        variantId,
-        deviceColorVariantId,
-        colorLabel,
-        sku: product.sku,
-        label: product.nameAr ?? product.name,
-        quantity: 1,
-        unitPrice: centsToInputValue(product.retailPriceCents),
-        repStock: variant ? (variant.stock ?? 0) : combo ? (combo.stock ?? 0) : product.repStock,
-        thumbnailUrl: product.thumbnailUrl,
-        thumbnailAlt: product.thumbnailAlt,
-      },
-    ]);
+  function handleQuantityChange(row: { key: string }, quantity: number) {
+    setQuantities((prev) => ({ ...prev, [row.key]: quantity }));
   }
 
-  function handleRemoveLine(productId: string, colorId: string | null, variantId: string | null, deviceColorVariantId: string | null) {
-    setLines((prev) => prev.filter((line) => lineKey(line.productId, line.colorId, line.variantId, line.deviceColorVariantId) !== lineKey(productId, colorId, variantId, deviceColorVariantId)));
-  }
-
-  function handleQuantityChange(productId: string, colorId: string | null, variantId: string | null, deviceColorVariantId: string | null, value: string) {
-    const quantity = Math.max(1, Math.floor(Number(value) || 1));
-    setLines((prev) =>
-      prev.map((line) =>
-        lineKey(line.productId, line.colorId, line.variantId, line.deviceColorVariantId) === lineKey(productId, colorId, variantId, deviceColorVariantId) ? { ...line, quantity } : line,
-      ),
-    );
-  }
-
-  function handlePriceChange(productId: string, colorId: string | null, variantId: string | null, deviceColorVariantId: string | null, value: string) {
-    setLines((prev) =>
-      prev.map((line) =>
-        lineKey(line.productId, line.colorId, line.variantId, line.deviceColorVariantId) === lineKey(productId, colorId, variantId, deviceColorVariantId) ? { ...line, unitPrice: value } : line,
-      ),
-    );
+  function handleSectionPriceChange(sectionKey: string, value: string) {
+    setSectionPrices((prev) => ({ ...prev, [sectionKey]: value }));
   }
 
   function handleCustomerNameChange(event: ChangeEvent<HTMLInputElement>) {
@@ -234,21 +127,37 @@ export function NewSaleForm({ products, customers, customerOrders, action = crea
     setCustomerPicked(true);
   }
 
-  /** Selecting a customer order REPLACES the current lines/customer name
+  /** Selecting a customer order REPLACES the current selection/customer name
    * with that order's template — it's a fresh starting point, not a merge
    * with whatever the rep had already been building manually (matches how
    * clicking a second, different order should behave too). Phone/city/
    * address are cleared rather than left stale, since the order itself only
-   * ever carries a name — see the RepCustomerOrder doc comment. */
+   * ever carries a name — see the RepCustomerOrder doc comment. Each item is
+   * matched back to its exact row (findSaleRow) and clamped to current
+   * stock rather than the order's stale intended quantity — a product/
+   * option no longer in the car at all is silently dropped with a notice
+   * instead of crashing or submitting a phantom line. Group prices are left
+   * untouched: the order never carried one, so the rep still types it. */
   function handleSelectOrder(order: RepCustomerOrderOption) {
     const notices: string[] = [];
-    const nextLines: SaleLine[] = [];
+    const nextQuantities: Record<string, number> = {};
     for (const item of order.items) {
-      const { line, note } = buildLineFromOrderItem(item, products);
-      if (line) nextLines.push(line);
-      if (note) notices.push(note);
+      const row = findSaleRow(sections, { productId: item.productId, variantId: item.variantId, deviceColorVariantId: item.deviceColorVariantId });
+      if (!row) {
+        notices.push(`منتج غير متوفر حالياً في سيارتك (${item.quantity} قطعة مطلوبة)`);
+        continue;
+      }
+      if (row.stock <= 0) {
+        notices.push(`${row.label} — غير متوفر حالياً في سيارتك`);
+        continue;
+      }
+      const quantity = Math.min(item.quantity, row.stock);
+      nextQuantities[row.key] = quantity;
+      if (quantity < item.quantity) {
+        notices.push(`${row.label} — الكمية المتاحة الآن (${row.stock}) أقل من طلبية الزبون الأصلية (${item.quantity})`);
+      }
     }
-    setLines(nextLines);
+    setQuantities(nextQuantities);
     setCustomerName(order.customerName);
     setCustomerPhone("");
     setCity("");
@@ -259,7 +168,8 @@ export function NewSaleForm({ products, customers, customerOrders, action = crea
   }
 
   function handleStartBlankSale() {
-    setLines([]);
+    setQuantities({});
+    setSectionPrices({});
     setCustomerName("");
     setCustomerPhone("");
     setCity("");
@@ -270,27 +180,14 @@ export function NewSaleForm({ products, customers, customerOrders, action = crea
     setOrderNotices([]);
   }
 
-  const totalCents = lines.reduce(
-    (sum, line) => sum + Math.round(Number(line.unitPrice || 0) * 100) * line.quantity,
-    0,
-  );
+  const sectionSummaries = useMemo(() => summarizeSaleSections(sections, quantities, sectionPrices), [sections, quantities, sectionPrices]);
+  const totalPieces = sectionSummaries.reduce((sum, section) => sum + section.pieceCount, 0);
+  const totalCents = sectionSummaries.reduce((sum, section) => sum + section.subtotalCents, 0);
+  const hasMissingPrice = sectionSummaries.some((section) => section.priceMissing);
 
-  const itemsJson = useMemo(
-    () =>
-      JSON.stringify(
-        lines.map((line) => ({
-          productId: line.productId,
-          colorId: line.colorId,
-          variantId: line.variantId,
-          deviceColorVariantId: line.deviceColorVariantId,
-          quantity: line.quantity,
-          unitPriceCents: Math.round(Number(line.unitPrice || 0) * 100),
-        })),
-      ),
-    [lines],
-  );
+  const itemsJson = useMemo(() => JSON.stringify(buildSaleSubmitLines(sections, quantities, sectionPrices)), [sections, quantities, sectionPrices]);
 
-  if (products.length === 0) {
+  if (sections.length === 0) {
     return <p className="text-sm text-neutral-bg/60">لا يوجد لديك مخزون متاح للبيع حالياً.</p>;
   }
 
@@ -305,15 +202,6 @@ export function NewSaleForm({ products, customers, customerOrders, action = crea
             <CardTitle>إضافة منتجات للبيع</CardTitle>
           </CardHeader>
           <CardContent>
-            <ProductQuickPicker products={products} excludeIds={excludeIds} onPick={handleAddProduct} />
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>المنتجات المضافة</CardTitle>
-          </CardHeader>
-          <CardContent>
             {orderNotices.length > 0 && (
               <div className="mb-3 flex flex-col gap-1 rounded-card border border-amber-500/25 bg-amber-500/10 px-3 py-2">
                 {orderNotices.map((notice) => (
@@ -321,61 +209,39 @@ export function NewSaleForm({ products, customers, customerOrders, action = crea
                 ))}
               </div>
             )}
-            {lines.length === 0 ? (
-              <p className="py-6 text-center text-sm text-neutral-bg/50">لم تتم إضافة منتجات بعد</p>
-            ) : (
+            <SaleGroupPicker
+              sections={sections}
+              quantities={quantities}
+              onQuantityChange={handleQuantityChange}
+              sectionPrices={sectionPrices}
+              onSectionPriceChange={handleSectionPriceChange}
+            />
+          </CardContent>
+        </Card>
+
+        {sectionSummaries.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle>ملخص الفاتورة</CardTitle>
+            </CardHeader>
+            <CardContent>
               <div className="flex flex-col divide-y divide-navy-soft">
-                {lines.map((line) => (
-                  <div
-                    key={lineKey(line.productId, line.colorId, line.variantId, line.deviceColorVariantId)}
-                    className="flex flex-wrap items-center gap-3 py-3 first:pt-0 last:pb-0"
-                  >
-                    <ProductThumb product={{ ...line, name: line.label }} className="h-10 w-10" />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium text-neutral-bg">
-                        {line.label}
-                        {line.colorLabel && <span> — {line.colorLabel}</span>}
-                      </p>
-                      <p className="text-xs text-neutral-bg/50">{line.sku} — المتوفر لديك: {line.repStock}</p>
-                    </div>
-                    <div className="w-20">
-                      <Input
-                        type="number"
-                        min={1}
-                        max={line.repStock}
-                        value={line.quantity}
-                        onChange={(event) => handleQuantityChange(line.productId, line.colorId, line.variantId, line.deviceColorVariantId, event.target.value)}
-                        aria-label="الكمية"
-                      />
-                    </div>
-                    <div className="w-24">
-                      <Input
-                        type="number"
-                        min={0.01}
-                        step={0.01}
-                        value={line.unitPrice}
-                        onChange={(event) => handlePriceChange(line.productId, line.colorId, line.variantId, line.deviceColorVariantId, event.target.value)}
-                        aria-label="سعر البيع"
-                      />
-                    </div>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleRemoveLine(line.productId, line.colorId, line.variantId, line.deviceColorVariantId)}
-                    >
-                      حذف
-                    </Button>
+                {sectionSummaries.map((section) => (
+                  <div key={section.sectionKey} className="flex items-center justify-between gap-3 py-2 text-sm first:pt-0 last:pb-0">
+                    <span className="text-neutral-bg">{section.sectionLabel}</span>
+                    <span className="text-neutral-bg/70">
+                      {section.pieceCount} × {formatCurrencyFromCents(section.unitPriceCents)} = {formatCurrencyFromCents(section.subtotalCents)}
+                    </span>
                   </div>
                 ))}
                 <div className="flex items-center justify-between pt-3 text-sm font-semibold">
-                  <span className="text-neutral-bg">الإجمالي</span>
-                  <span className="text-gold-champagne">{formatCurrencyFromCents(totalCents)}</span>
+                  <span className="text-neutral-bg">إجمالي القطع: {totalPieces}</span>
+                  <span className="text-gold-champagne">إجمالي الفاتورة: {formatCurrencyFromCents(totalCents)}</span>
                 </div>
               </div>
-            )}
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        )}
 
         <Card>
           <CardHeader>
@@ -445,7 +311,7 @@ export function NewSaleForm({ products, customers, customerOrders, action = crea
           </p>
         )}
 
-        <Button type="submit" disabled={isPending || lines.length === 0} className="w-full sm:w-auto">
+        <Button type="submit" disabled={isPending || totalPieces === 0 || hasMissingPrice} className="w-full sm:w-auto">
           {isPending && <Spinner />}
           {isPending ? "جارٍ الحفظ..." : "إتمام البيع"}
         </Button>
