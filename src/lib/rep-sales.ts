@@ -1,0 +1,443 @@
+import "server-only";
+import { revalidatePath } from "next/cache";
+import { Prisma } from "@prisma/client";
+import { prisma } from "@/lib/prisma";
+import { ORDER_SOURCES, ORDER_STATUSES, PAYMENT_METHODS, PAYMENT_STATUSES, STOCK_MOVEMENT_TYPES, REP_CUSTOMER_ORDER_STATUSES } from "@/lib/constants";
+import type { RepSaleInput } from "@/lib/validation/repSale";
+import { decrementInventoryAtomic, recordStockMovement, InsufficientInventoryError } from "@/lib/inventory-transactions";
+import { getOrCreateMerchantAccount, recordInitialAccountPayment } from "@/lib/accounts";
+import { resolveOrCreateRepMerchant } from "@/lib/rep-merchants";
+import type { SaleProductOption } from "@/components/reps/NewSaleForm";
+
+function generateOrderNumber(): string {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  const random = Math.floor(1000 + Math.random() * 9000);
+  return `OVI-${y}${m}${d}-${random}`;
+}
+
+export function revalidateRepSalePaths(orderNumber: string): void {
+  revalidatePath("/rep");
+  revalidatePath("/rep/sales");
+  revalidatePath("/rep/sales/new");
+  revalidatePath(`/rep/sales/${orderNumber}`);
+  revalidatePath("/rep/stock");
+  revalidatePath("/rep/movements");
+  revalidatePath("/rep/merchants");
+  revalidatePath("/admin/orders");
+  revalidatePath(`/admin/orders/${orderNumber}`);
+  revalidatePath("/admin/merchants");
+  revalidatePath("/admin");
+}
+
+/** Rep-car sale catalog for a given car StockLocation — exactly the same
+ * query + grouping /rep/sales/new (a rep selling their own car stock) and
+ * /admin/reps/[id]/sales/new (an admin selling on that rep's behalf) both
+ * need, extracted here so there is one copy of this ~80-line shape instead
+ * of two. Groups rep-car InventoryItem rows into one option per product — a
+ * non-variant product's stock lands in `repStock`, a phone-variant
+ * product's per model in `variantOptions[].stock`, a device+color
+ * product's per combination in `deviceColorVariantOptions[].stock`. Only
+ * in-stock rows are ever included (quantity > 0) — a sale, unlike a stock
+ * request, can only draw from what's physically in that car right now.
+ * `colorOptions` is independent of stock — it's the product's descriptive
+ * color pick-list (ProductColorOption), never a stock dimension. Returns
+ * an empty catalog for a rep with no car location at all. */
+export async function getRepCarSaleProducts(locationId: string | null): Promise<SaleProductOption[]> {
+  if (!locationId) return [];
+
+  const items = await prisma.inventoryItem.findMany({
+    where: { locationId, quantity: { gt: 0 } },
+    orderBy: { updatedAt: "desc" },
+    select: {
+      quantity: true,
+      variantId: true,
+      variant: { select: { id: true, phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } } } },
+      deviceColorVariantId: true,
+      deviceColorVariant: {
+        select: {
+          id: true,
+          phoneModel: { select: { id: true, name: true, nameAr: true, phoneBrandId: true, phoneBrand: { select: { id: true, name: true, nameAr: true } } } },
+          color: { select: { id: true, name: true, nameAr: true, hexCode: true } },
+        },
+      },
+      product: {
+        select: {
+          id: true,
+          sku: true,
+          name: true,
+          nameAr: true,
+          retailPriceCents: true,
+          isActive: true,
+          inventoryTrackingMode: true,
+          images: {
+            select: { url: true, altText: true },
+            orderBy: [{ isMain: "desc" }, { sortOrder: "asc" }],
+            take: 1,
+          },
+          colorOptions: {
+            select: { color: { select: { id: true, name: true, nameAr: true, hexCode: true } } },
+            orderBy: { sortOrder: "asc" },
+          },
+        },
+      },
+    },
+  });
+
+  const byProductId = new Map<string, SaleProductOption>();
+  for (const item of items) {
+    if (!item.product.isActive) continue;
+    const existing: SaleProductOption = byProductId.get(item.product.id) ?? {
+      id: item.product.id,
+      sku: item.product.sku,
+      name: item.product.name,
+      nameAr: item.product.nameAr,
+      retailPriceCents: item.product.retailPriceCents,
+      thumbnailUrl: item.product.images[0]?.url ?? null,
+      thumbnailAlt: item.product.images[0]?.altText ?? null,
+      repStock: 0,
+      colorOptions:
+        item.product.inventoryTrackingMode === "DEVICE_MODEL_COLOR"
+          ? []
+          : item.product.colorOptions.map((option) => ({
+              id: option.color.id,
+              name: option.color.name,
+              nameAr: option.color.nameAr,
+              hexCode: option.color.hexCode,
+            })),
+      variantOptions: [],
+      deviceColorVariantOptions: [],
+    };
+    if (item.variantId && item.variant) {
+      existing.variantOptions!.push({
+        id: item.variant.id,
+        label: `${item.variant.phoneModel.phoneBrand.nameAr ?? item.variant.phoneModel.phoneBrand.name} / ${item.variant.phoneModel.nameAr ?? item.variant.phoneModel.name}`,
+        stock: item.quantity,
+      });
+    } else if (item.deviceColorVariantId && item.deviceColorVariant) {
+      existing.deviceColorVariantOptions!.push({
+        id: item.deviceColorVariant.id,
+        phoneBrandId: item.deviceColorVariant.phoneModel.phoneBrandId,
+        brandLabel: item.deviceColorVariant.phoneModel.phoneBrand.nameAr ?? item.deviceColorVariant.phoneModel.phoneBrand.name,
+        phoneModelId: item.deviceColorVariant.phoneModel.id,
+        modelLabel: item.deviceColorVariant.phoneModel.nameAr ?? item.deviceColorVariant.phoneModel.name,
+        colorId: item.deviceColorVariant.color.id,
+        colorLabel: item.deviceColorVariant.color.nameAr ?? item.deviceColorVariant.color.name,
+        colorHex: item.deviceColorVariant.color.hexCode,
+        stock: item.quantity,
+      });
+    } else {
+      existing.repStock = item.quantity;
+    }
+    byProductId.set(item.product.id, existing);
+  }
+  return [...byProductId.values()];
+}
+
+export interface CreateRepSaleContext {
+  /** The SalesRepresentative this sale belongs to — always resolved and
+   * verified by the caller (either "my own rep row" for a rep-initiated
+   * sale, or the target /admin/reps/[id] rep for an admin-on-behalf sale),
+   * never taken from arbitrary client input. */
+  salesRepId: string;
+  /** That rep's car StockLocation.id — inventory is decremented ONLY here,
+   * never from the warehouse, another rep's car, or any other location. */
+  carStockLocationId: string;
+  /** The real person performing this action — the rep themselves for a
+   * normal rep-initiated sale, or the admin acting on their behalf. Used
+   * ONLY for the existing "who actually did this" audit fields
+   * (StockMovement.createdById, and AccountPayment.createdById via
+   * recordInitialAccountPayment) — the exact same fields an admin's own
+   * assignStockToRep already populates with the acting admin's id, not the
+   * rep's. Never changes whose sale this is: ownership is always
+   * `salesRepId` above, resolved independently of this. */
+  actorUserId: string;
+}
+
+export type CreateRepSaleResult = { ok: true; orderNumber: string } | { ok: false; error: string };
+
+/** The one rep-sale transaction in this codebase. A rep selling their own
+ * car stock (createRepSale in src/app/rep/sales/actions.ts) and an admin
+ * recording a sale on a rep's behalf (createRepSaleForRep in
+ * src/app/admin/reps/actions.ts) both parse the same repSaleSchema and both
+ * call this exact function — there is no second, divergent sale path.
+ *
+ * This function deliberately does NOT: check authorization (the caller's
+ * requireRole already ran), resolve which rep/location `context` refers to
+ * (the caller already verified that), or redirect on success (the caller
+ * decides where — /rep/sales/[orderNumber] for a rep, /admin/orders/
+ * [orderNumber] for an admin) — it only runs the actual sale: validates
+ * stock/product/customer-order state, resolves the trader identity, creates
+ * the Order (+ atomically completes a RepCustomerOrder if one was given),
+ * decrements inventory, and records the resulting movement/payment — byte-
+ * for-byte the same steps createRepSale always ran inline before this was
+ * extracted. */
+export async function createRepSaleCore(input: RepSaleInput, context: CreateRepSaleContext): Promise<CreateRepSaleResult> {
+  const { items: saleItems, customerName, customerPhone, city, address, notes, repCustomerOrderId } = input;
+  const { salesRepId, carStockLocationId: locationId, actorUserId } = context;
+
+  // A customer order is only ever a starting template (see the
+  // RepCustomerOrder schema doc comment) — the rep (or the admin acting on
+  // their behalf) may have added, removed, or changed every line's quantity
+  // before submitting, and `saleItems` above already reflects exactly that.
+  // This check exists purely to authorize *which* template gets linked/
+  // completed: never another rep's order (scoping bug), and never one
+  // that's already been used/cancelled (stale tab, double submit, or a race
+  // with an admin cancellation) — the real single-use enforcement is the
+  // atomic conditional update inside the transaction below, this is just an
+  // early, cheap rejection.
+  if (repCustomerOrderId) {
+    const customerOrder = await prisma.repCustomerOrder.findUnique({
+      where: { id: repCustomerOrderId },
+      select: { salesRepId: true, status: true },
+    });
+    if (!customerOrder || customerOrder.salesRepId !== salesRepId) {
+      return { ok: false, error: "طلبية الزبون غير موجودة" };
+    }
+    if (customerOrder.status !== REP_CUSTOMER_ORDER_STATUSES.OPEN) {
+      return { ok: false, error: "لم تعد هذه الطلبية نشطة" };
+    }
+  }
+
+  const productIds = saleItems.map((item) => item.productId);
+  const products = await prisma.product.findMany({
+    where: { id: { in: productIds } },
+    select: {
+      id: true,
+      sku: true,
+      isActive: true,
+      name: true,
+      nameAr: true,
+      variantMode: true,
+      inventoryTrackingMode: true,
+      colorOptions: { select: { colorId: true, color: { select: { name: true, nameAr: true } } } },
+      variants: { where: { isActive: true }, select: { id: true, variantCode: true, phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } } } },
+      deviceColorVariants: { where: { isActive: true }, select: { id: true, phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } }, color: { select: { name: true, nameAr: true } } } },
+    },
+  });
+  const productById = new Map(products.map((product) => [product.id, product]));
+
+  const inventoryItems = await prisma.inventoryItem.findMany({
+    where: { locationId, productId: { in: productIds } },
+    select: { productId: true, variantId: true, deviceColorVariantId: true, quantity: true },
+  });
+  const stockByLineKey = new Map(
+    inventoryItems.map((item) => [`${item.productId}:${item.variantId ?? ""}:${item.deviceColorVariantId ?? ""}`, item.quantity]),
+  );
+
+  const lines = saleItems.map((item) => ({ ...item, colorId: item.colorId ?? null, variantId: item.variantId ?? null, deviceColorVariantId: item.deviceColorVariantId ?? null }));
+
+  // Color no longer distinguishes a stock bucket, so two lines for the same
+  // product+variant/combo but different colors draw from the same bucket —
+  // sum requested quantity per product+variant+combo (ignoring color) before
+  // comparing against available stock.
+  const requestedByLineKey = new Map<string, number>();
+  for (const item of lines) {
+    const key = `${item.productId}:${item.variantId ?? ""}:${item.deviceColorVariantId ?? ""}`;
+    requestedByLineKey.set(key, (requestedByLineKey.get(key) ?? 0) + item.quantity);
+  }
+
+  for (const item of lines) {
+    const product = productById.get(item.productId);
+    if (!product) {
+      return { ok: false, error: "أحد المنتجات المحددة غير موجود" };
+    }
+    if (!product.isActive) {
+      return { ok: false, error: `المنتج "${product.nameAr ?? product.name}" غير مفعّل ولا يمكن بيعه` };
+    }
+    const usesDeviceColor = product.inventoryTrackingMode === "DEVICE_MODEL_COLOR";
+    if (usesDeviceColor) {
+      if (!item.deviceColorVariantId || !product.deviceColorVariants.some((combo) => combo.id === item.deviceColorVariantId)) {
+        return { ok: false, error: `اختر الماركة والموديل واللون للمنتج "${product.nameAr ?? product.name}"` };
+      }
+    } else if (item.deviceColorVariantId) {
+      return { ok: false, error: "هذا المنتج لا يستخدم تركيبات الجهاز واللون" };
+    }
+    if (item.colorId && !product.colorOptions.some((option) => option.colorId === item.colorId)) {
+      return { ok: false, error: `اللون المحدد لا ينتمي للمنتج "${product.nameAr ?? product.name}"` };
+    }
+    if (product.variantMode === "PHONE_COMPATIBILITY" && (!item.variantId || !product.variants.some((variant) => variant.id === item.variantId))) return { ok: false, error: `اختر Variant صالحاً للمنتج "${product.nameAr ?? product.name}"` };
+    if (product.variantMode !== "PHONE_COMPATIBILITY" && item.variantId) return { ok: false, error: "Variant لا يتبع المنتج المحدد" };
+    const key = `${item.productId}:${item.variantId ?? ""}:${item.deviceColorVariantId ?? ""}`;
+    const available = stockByLineKey.get(key) ?? 0;
+    if (available <= 0) {
+      return { ok: false, error: `المنتج "${product.nameAr ?? product.name}" غير موجود في مخزونك` };
+    }
+    if (requestedByLineKey.get(key)! > available) {
+      return { ok: false, error: `الكمية المطلوبة لـ "${product.nameAr ?? product.name}" أكبر من مخزونك الحالي` };
+    }
+  }
+
+  const totalCents = lines.reduce((sum, item) => sum + item.unitPriceCents * item.quantity, 0);
+
+  let orderNumber = "";
+  let succeeded = false;
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    orderNumber = generateOrderNumber();
+    try {
+      await prisma.$transaction(async (tx) => {
+        const requestedVariantIds = lines.flatMap((item) => (item.variantId ? [item.variantId] : []));
+        if (requestedVariantIds.length > 0) {
+          const activeVariants = await tx.productVariant.count({ where: { id: { in: requestedVariantIds }, isActive: true } });
+          if (activeVariants !== new Set(requestedVariantIds).size) throw new Error("INACTIVE_VARIANT");
+        }
+        const requestedComboIds = lines.flatMap((item) => (item.deviceColorVariantId ? [item.deviceColorVariantId] : []));
+        if (requestedComboIds.length > 0) {
+          const activeCombos = await tx.deviceColorVariant.count({ where: { id: { in: requestedComboIds }, isActive: true } });
+          if (activeCombos !== new Set(requestedComboIds).size) throw new Error("INACTIVE_VARIANT");
+        }
+
+        // Atomic conditional transition (status: OPEN in the where clause) —
+        // never a stale read-then-write, so two concurrent submits racing to
+        // complete the same customer order (or a submit racing an admin's
+        // cancelRepCustomerOrder) can never both succeed. Whichever lands
+        // first wins; the other's whole sale transaction rolls back via the
+        // thrown error below, exactly like the INACTIVE_VARIANT checks above.
+        if (repCustomerOrderId) {
+          const transitioned = await tx.repCustomerOrder.updateMany({
+            where: { id: repCustomerOrderId, status: REP_CUSTOMER_ORDER_STATUSES.OPEN },
+            data: { status: REP_CUSTOMER_ORDER_STATUSES.COMPLETED, completedAt: new Date() },
+          });
+          if (transitioned.count !== 1) throw new Error("CUSTOMER_ORDER_NOT_OPEN");
+        }
+
+        // Resolve this rep's trader for the sale by phone — reuses whichever
+        // Merchant already matches (self-registered, added by an admin, or
+        // created by this rep on an earlier sale), regardless of whether it
+        // has a login. No match creates a new login-less trader, approved
+        // immediately and assigned to this rep, visible in /admin/merchants
+        // right away — see the Merchant model doc comment. Shared with
+        // assignStockToRep's CUSTOMER_ORDER path (src/app/admin/reps/actions.ts)
+        // via resolveOrCreateRepMerchant so both flows resolve the exact same
+        // trader identity by the exact same rule.
+        const merchant = await resolveOrCreateRepMerchant(tx, {
+          salesRepId,
+          businessName: customerName,
+          contactPhone: customerPhone,
+          city,
+          address,
+        });
+        const accountId = await getOrCreateMerchantAccount(tx, merchant.id);
+
+        await tx.order.create({
+          data: {
+            orderNumber,
+            source: ORDER_SOURCES.REP_SALE,
+            status: ORDER_STATUSES.DELIVERED,
+            stockLocationId: locationId,
+            customerId: merchant.userId,
+            merchantId: merchant.id,
+            accountId,
+            createdByRepId: salesRepId,
+            repCustomerOrderId,
+            subtotalCents: totalCents,
+            totalCents,
+            contactName: customerName,
+            contactPhone: customerPhone,
+            city,
+            shippingAddress: address,
+            notes,
+            paymentMethod: PAYMENT_METHODS.CASH,
+            paymentStatus: PAYMENT_STATUSES.PAID,
+            paidAmountCents: totalCents,
+            items: {
+              create: lines.map((item) => {
+                const variant = productById.get(item.productId)?.variants.find((row) => row.id === item.variantId);
+                const combo = productById.get(item.productId)?.deviceColorVariants.find((row) => row.id === item.deviceColorVariantId);
+                const colorOption = productById.get(item.productId)?.colorOptions.find((row) => row.colorId === item.colorId);
+                return {
+                  productId: item.productId,
+                  colorId: item.colorId,
+                  variantId: item.variantId,
+                  deviceColorVariantId: item.deviceColorVariantId,
+                  productNameSnapshot: productById.get(item.productId)?.nameAr ?? productById.get(item.productId)?.name,
+                  productSkuSnapshot: productById.get(item.productId)?.sku,
+                  variantCodeSnapshot: variant?.variantCode ?? null,
+                  // Same snapshot fields either way — a device+color
+                  // combination and a phone-model variant both resolve to a
+                  // brand/model(/color) triple (see checkout/actions.ts).
+                  phoneBrandSnapshot: variant
+                    ? (variant.phoneModel.phoneBrand.nameAr ?? variant.phoneModel.phoneBrand.name)
+                    : combo
+                      ? (combo.phoneModel.phoneBrand.nameAr ?? combo.phoneModel.phoneBrand.name)
+                      : null,
+                  phoneModelSnapshot: variant
+                    ? (variant.phoneModel.nameAr ?? variant.phoneModel.name)
+                    : combo
+                      ? (combo.phoneModel.nameAr ?? combo.phoneModel.name)
+                      : null,
+                  colorNameSnapshot: colorOption?.color
+                    ? (colorOption.color.nameAr ?? colorOption.color.name)
+                    : combo
+                      ? (combo.color.nameAr ?? combo.color.name)
+                      : null,
+                  quantity: item.quantity,
+                  unitPriceCents: item.unitPriceCents,
+                  totalCents: item.unitPriceCents * item.quantity,
+                };
+              }),
+            },
+          },
+        });
+
+        // A rep sale is always fully paid at the point of sale (paymentMethod
+        // CASH, paymentStatus PAID above) — mirror that into the trader's
+        // account ledger immediately so getAccountBalanceCents doesn't show
+        // a false debt for an order that was, in fact, paid in full.
+        // createdById here records the ACTUAL actor (the rep themselves, or
+        // the admin acting on their behalf) — never falsely attributed to
+        // the rep when an admin entered it.
+        await recordInitialAccountPayment(tx, accountId, totalCents, actorUserId);
+
+        // Per line: atomic conditional decrement — never a stale
+        // read-then-write. If the rep's car stock is no longer sufficient
+        // (e.g. a concurrent sale of the same item), the whole sale rolls
+        // back instead of driving stock negative.
+        for (const item of lines) {
+          const change = await decrementInventoryAtomic(
+            tx,
+            { productId: item.productId, variantId: item.variantId, deviceColorVariantId: item.deviceColorVariantId, locationId },
+            item.quantity,
+          );
+
+          await recordStockMovement(tx, {
+            type: STOCK_MOVEMENT_TYPES.SALE_OUT,
+            productId: item.productId,
+            variantId: item.variantId,
+            deviceColorVariantId: item.deviceColorVariantId,
+            fromLocationId: locationId,
+            toLocationId: null,
+            quantity: item.quantity,
+            previousQuantity: change.previousQuantity,
+            newQuantity: change.newQuantity,
+            note: `بيع مباشر — طلب ${orderNumber}`,
+            createdById: actorUserId,
+          });
+        }
+      });
+      succeeded = true;
+      break;
+    } catch (err) {
+      if (err instanceof Error && err.message === "INACTIVE_VARIANT") return { ok: false, error: "أحد خيارات المنتج لم يعد فعالاً؛ أعد اختيار الـVariant" };
+      if (err instanceof Error && err.message === "CUSTOMER_ORDER_NOT_OPEN") return { ok: false, error: "لم تعد طلبية الزبون هذه نشطة — حدّث الصفحة وحاول مجدداً" };
+      if (err instanceof InsufficientInventoryError) {
+        return { ok: false, error: "الكمية المطلوبة أكبر من مخزونك الحالي لأحد المنتجات، حاول مرة أخرى" };
+      }
+      const isDuplicateOrderNumber =
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === "P2002" &&
+        (err.meta?.target as string[] | undefined)?.includes("orderNumber");
+      if (!isDuplicateOrderNumber) throw err;
+    }
+  }
+
+  if (!succeeded) {
+    return { ok: false, error: "تعذّر إنشاء رقم الطلب، حاول مرة أخرى" };
+  }
+
+  revalidateRepSalePaths(orderNumber);
+  return { ok: true, orderNumber };
+}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useMemo, useState, type ChangeEvent } from "react";
-import { createRepSale, type RepSaleState } from "./actions";
+import { createRepSale, type RepSaleState } from "@/app/rep/sales/actions";
 import { Input } from "@/components/ui/Input";
 import { Textarea } from "@/components/ui/Textarea";
 import { Button } from "@/components/ui/Button";
@@ -49,6 +49,16 @@ interface NewSaleFormProps {
    * "طلبات الزبائن" panel below. Never another rep's orders (already scoped
    * server-side by getOpenCustomerOrdersForRep). */
   customerOrders: RepCustomerOrderOption[];
+  /** Server action this form submits to — defaults to createRepSale (the
+   * rep's own /rep/sales/new flow, requireRole SALES_REPRESENTATIVE,
+   * resolves the rep from the logged-in session). The admin "سجل بيعاً
+   * للمندوب" page (/admin/reps/[id]/sales/new) instead passes
+   * createRepSaleForRep bound to the target repId — both actions parse the
+   * same repSaleSchema and run the exact same core transaction
+   * (createRepSaleCore in src/lib/rep-sales.ts), so this one form and its
+   * product/customer/order data are the only thing either surface needs;
+   * nothing here is duplicated. */
+  action?: (state: RepSaleState, formData: FormData) => Promise<RepSaleState>;
 }
 
 const initialState: RepSaleState = {};
@@ -120,8 +130,8 @@ function buildLineFromOrderItem(
  * more), and the actual submitted `items` always wins as what was really
  * sold; see buildLineFromOrderItem above for how prefill quantities are
  * revalidated against current car stock rather than trusted blindly. */
-export function NewSaleForm({ products, customers, customerOrders }: NewSaleFormProps) {
-  const [state, formAction, isPending] = useActionState(createRepSale, initialState);
+export function NewSaleForm({ products, customers, customerOrders, action = createRepSale }: NewSaleFormProps) {
+  const [state, formAction, isPending] = useActionState(action, initialState);
   const [lines, setLines] = useState<SaleLine[]>([]);
 
   const [customerName, setCustomerName] = useState("");

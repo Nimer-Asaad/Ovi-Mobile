@@ -9,6 +9,9 @@ import { getMainWarehouse } from "@/lib/inventory";
 import { getOrCreateRepLocation } from "@/lib/reps";
 import { resolveOrCreateRepMerchant } from "@/lib/rep-merchants";
 import { repStockTransferBatchSchema, type RepStockTransferBatchInput } from "@/lib/validation/reps";
+import { repSaleSchema } from "@/lib/validation/repSale";
+import { createRepSaleCore } from "@/lib/rep-sales";
+import type { RepSaleState } from "@/app/rep/sales/actions";
 import {
   decrementInventoryAtomic,
   incrementInventoryUpsert,
@@ -23,6 +26,7 @@ export interface RepStockTransferState {
 const PARSE_ERROR_MESSAGE = "بيانات التحويل غير صالحة";
 const ITEMS_PARSE_ERROR_MESSAGE = "بيانات الأصناف غير صالحة، حاول إعادة إضافة الأصناف";
 const AGGREGATED_QUANTITY_ERROR_MESSAGE = "الكمية غير صالحة لأحد الأصناف بعد دمج التكرارات، حاول إعادة إدخال الكمية";
+const SALE_PARSE_ERROR_MESSAGE = "بيانات البيع غير صالحة";
 
 /** Postgres INTEGER's max value — the actual column type behind
  * StockMovement.quantity/InventoryItem.quantity (see schema.prisma).
@@ -591,4 +595,84 @@ export async function linkRepCustomerOrderMerchant(
 
   revalidateRepPaths(repId);
   return { success: "تم ربط الطلبية بالتاجر" };
+}
+
+/** ADMIN-only: records a sale ON BEHALF OF the rep at /admin/reps/[id] — the
+ * exact same sale a rep can register themselves at /rep/sales/new, just
+ * entered by an admin instead (e.g. over the phone, or the rep can't access
+ * their own account right now). Parses the SAME repSaleSchema and calls the
+ * SAME core transaction (createRepSaleCore in src/lib/rep-sales.ts) the
+ * rep's own createRepSale uses — there is exactly one sale transaction in
+ * this codebase, never a second "admin sale" system with different
+ * inventory/pricing/payment rules.
+ *
+ * `repId` is never taken from the client's form — it's the route's own
+ * [id] segment, bound into this action at the server-rendered page/form
+ * (see /admin/reps/[id]/sales/new/page.tsx), the same trusted-binding
+ * pattern already used by every other rep-scoped admin action in this file
+ * (assignStockToRep, cancelRepCustomerOrder, linkRepCustomerOrderMerchant).
+ * The sale still always belongs to that exact SalesRepresentative
+ * (createdByRepId) and still draws stock ONLY from that rep's own car
+ * StockLocation — an admin acting on a rep's behalf never touches the
+ * warehouse, another rep's car, or office-sale rules. The only thing that
+ * differs from a rep entering their own sale is WHO the actual actor is:
+ * `actor.id` (the admin), not the rep — recorded exactly where createRepSale
+ * already records "who did this" (StockMovement.createdById,
+ * AccountPayment.createdById), never fabricated as the rep's own action. */
+export async function createRepSaleForRep(repId: string, _prevState: RepSaleState, formData: FormData): Promise<RepSaleState> {
+  const actor = await requireRole([ROLES.ADMIN]);
+
+  let items: unknown;
+  try {
+    items = JSON.parse(formData.get("items")?.toString() ?? "[]");
+  } catch {
+    return { error: SALE_PARSE_ERROR_MESSAGE };
+  }
+
+  const parsed = repSaleSchema.safeParse({
+    items,
+    customerName: formData.get("customerName")?.toString().trim() ?? "",
+    customerPhone: formData.get("customerPhone")?.toString().trim() ?? "",
+    city: formData.get("city")?.toString().trim() || undefined,
+    address: formData.get("address")?.toString().trim() || undefined,
+    notes: formData.get("notes")?.toString().trim() || undefined,
+    repCustomerOrderId: formData.get("repCustomerOrderId")?.toString().trim() || null,
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? SALE_PARSE_ERROR_MESSAGE };
+  }
+
+  const rep = await prisma.salesRepresentative.findUnique({
+    where: { id: repId },
+    select: { id: true, isActive: true, user: { select: { isActive: true } }, carStockLocation: { select: { id: true } } },
+  });
+  if (!rep) {
+    return { error: "المندوب غير موجود" };
+  }
+  if (!rep.isActive || !rep.user.isActive) {
+    return { error: "لا يمكن تسجيل بيع لمندوب غير مفعل" };
+  }
+  const locationId = rep.carStockLocation?.id ?? null;
+  if (!locationId) {
+    return { error: "لم يتم العثور على موقع مخزون المندوب" };
+  }
+
+  const result = await createRepSaleCore(parsed.data, {
+    salesRepId: rep.id,
+    carStockLocationId: locationId,
+    actorUserId: actor.id,
+  });
+
+  if (!result.ok) {
+    return { error: result.error };
+  }
+
+  // createRepSaleCore already revalidated every /rep/* and /admin/orders*
+  // path a sale ever needs — this adds the admin rep-detail page itself
+  // (the "طلبات الزبائن" unified activity, and the completed customer order
+  // if one was used) since createRepSaleCore has no reason to know that
+  // route exists.
+  revalidatePath(`/admin/reps/${repId}`);
+  revalidatePath(`/admin/reps/${repId}/sales/new`);
+  redirect(`/admin/orders/${result.orderNumber}`);
 }
