@@ -9,16 +9,16 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card";
 import { Spinner } from "@/components/ui/Spinner";
 import { cn, formatCurrencyFromCents } from "@/lib/utils";
 import {
-  SaleGroupPicker,
-  buildSaleSections,
+  ProductSalePicker,
+  buildSaleProductGroups,
   buildSaleSubmitLines,
-  summarizeSaleSections,
+  summarizeSaleProducts,
   findSaleRow,
   type SaleProductOption,
-} from "@/components/reps/SaleGroupPicker";
+} from "@/components/reps/ProductSalePicker";
 import type { RepCustomerOrderOption } from "@/lib/rep-customer-orders";
 
-export type { SaleProductOption, SaleProductCategory } from "@/components/reps/SaleGroupPicker";
+export type { SaleProductOption } from "@/components/reps/ProductSalePicker";
 
 export interface SaleCustomerOption {
   name: string;
@@ -48,20 +48,19 @@ interface NewSaleFormProps {
 
 const initialState: RepSaleState = {};
 
-/** Multi-line direct-sale form — products are organized into collapsible
- * TOP-LEVEL category sections (see SaleGroupPicker.tsx: "الشفاف" / "اللزقات",
- * derived straight from the real Category hierarchy, never hard-coded
- * here), plus a customer name field that suggests this rep's past customers
- * (by phone) so repeat sales don't re-register the same person under
- * slightly different details.
+/** Multi-line direct-sale form — a flat, searchable PRODUCT list (see
+ * ProductSalePicker.tsx: "OVI 04", "OVI 63", ... — the actual Product rows,
+ * never a Category grouping), plus a customer name field that suggests this
+ * rep's past customers (by phone) so repeat sales don't re-register the
+ * same person under slightly different details.
  *
- * PRICE is entered ONCE per MAIN SECTION, not once per selected phone
- * model/color and not once per subtype (e.g. "اللزقات" has exactly one
- * price field even though it may contain "Privacy"/"Ceramic"/"Normal"
- * subtypes) — every selected model anywhere in that section shares that one
- * typed unit price, but each stays its own separate OrderItem/inventory
- * line underneath (see buildSaleSubmitLines) — stock accuracy never depends
- * on how prices happen to be grouped.
+ * PRICE is entered ONCE per PRODUCT, not once per selected phone model —
+ * clicking a product with multiple phone-model/color options opens a
+ * popup scoped to just that product (its own device-model search + a
+ * quantity stepper per row); every selected model in that popup shares the
+ * one typed unit price on the product's own card, but each stays its own
+ * separate OrderItem/inventory line underneath (see buildSaleSubmitLines) —
+ * stock accuracy never depends on how prices happen to be grouped.
  *
  * Also offers a shortcut: this rep's OPEN customer-order car-load templates
  * (right panel, "طلبات الزبائن" — see RepCustomerOrder) can be clicked to
@@ -69,23 +68,23 @@ const initialState: RepSaleState = {};
  * starting point — every quantity stays fully editable, and the actual
  * submitted `items` always wins as what was really sold; see
  * handleSelectOrder below for how prefill quantities are revalidated
- * against current car stock rather than trusted blindly. Section prices are
+ * against current car stock rather than trusted blindly. Product prices are
  * NEVER prefilled from a customer order (it never carried one) — the rep
- * still types each section's price once after preloading, even when the
- * preload spans multiple subtypes under that one section. */
+ * still types each product's price once after preloading, even when the
+ * preload spans several phone models under that one product. */
 export function NewSaleForm({ products, customers, customerOrders, action = createRepSale }: NewSaleFormProps) {
   const [state, formAction, isPending] = useActionState(action, initialState);
 
-  const sections = useMemo(() => buildSaleSections(products), [products]);
+  const groups = useMemo(() => buildSaleProductGroups(products), [products]);
 
-  // quantities/sectionPrices are the entire "what's selected, at what
-  // price" state — keyed by ModelRow.key / SaleSection.key respectively.
-  // Nothing else needs to track selection: every row already carries its
-  // own productId/colorId/variantId/deviceColorVariantId, so building the
-  // submit payload is a pure read of `sections` + these two maps (see
-  // buildSaleSubmitLines).
+  // quantities/productPrices are the entire "what's selected, at what
+  // price" state — keyed by ModelRow.key / SaleProductGroup.key (productId)
+  // respectively. Nothing else needs to track selection: every row already
+  // carries its own productId/colorId/variantId/deviceColorVariantId, so
+  // building the submit payload is a pure read of `groups` + these two maps
+  // (see buildSaleSubmitLines).
   const [quantities, setQuantities] = useState<Record<string, number>>({});
-  const [sectionPrices, setSectionPrices] = useState<Record<string, string>>({});
+  const [productPrices, setProductPrices] = useState<Record<string, string>>({});
 
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
@@ -101,8 +100,8 @@ export function NewSaleForm({ products, customers, customerOrders, action = crea
     setQuantities((prev) => ({ ...prev, [row.key]: quantity }));
   }
 
-  function handleSectionPriceChange(sectionKey: string, value: string) {
-    setSectionPrices((prev) => ({ ...prev, [sectionKey]: value }));
+  function handleProductPriceChange(productKey: string, value: string) {
+    setProductPrices((prev) => ({ ...prev, [productKey]: value }));
   }
 
   function handleCustomerNameChange(event: ChangeEvent<HTMLInputElement>) {
@@ -136,13 +135,14 @@ export function NewSaleForm({ products, customers, customerOrders, action = crea
    * matched back to its exact row (findSaleRow) and clamped to current
    * stock rather than the order's stale intended quantity — a product/
    * option no longer in the car at all is silently dropped with a notice
-   * instead of crashing or submitting a phantom line. Group prices are left
-   * untouched: the order never carried one, so the rep still types it. */
+   * instead of crashing or submitting a phantom line. Product prices are
+   * left untouched: the order never carried one, so the rep still types
+   * it. */
   function handleSelectOrder(order: RepCustomerOrderOption) {
     const notices: string[] = [];
     const nextQuantities: Record<string, number> = {};
     for (const item of order.items) {
-      const row = findSaleRow(sections, { productId: item.productId, variantId: item.variantId, deviceColorVariantId: item.deviceColorVariantId });
+      const row = findSaleRow(groups, { productId: item.productId, variantId: item.variantId, deviceColorVariantId: item.deviceColorVariantId });
       if (!row) {
         notices.push(`منتج غير متوفر حالياً في سيارتك (${item.quantity} قطعة مطلوبة)`);
         continue;
@@ -169,7 +169,7 @@ export function NewSaleForm({ products, customers, customerOrders, action = crea
 
   function handleStartBlankSale() {
     setQuantities({});
-    setSectionPrices({});
+    setProductPrices({});
     setCustomerName("");
     setCustomerPhone("");
     setCity("");
@@ -180,14 +180,14 @@ export function NewSaleForm({ products, customers, customerOrders, action = crea
     setOrderNotices([]);
   }
 
-  const sectionSummaries = useMemo(() => summarizeSaleSections(sections, quantities, sectionPrices), [sections, quantities, sectionPrices]);
-  const totalPieces = sectionSummaries.reduce((sum, section) => sum + section.pieceCount, 0);
-  const totalCents = sectionSummaries.reduce((sum, section) => sum + section.subtotalCents, 0);
-  const hasMissingPrice = sectionSummaries.some((section) => section.priceMissing);
+  const productSummaries = useMemo(() => summarizeSaleProducts(groups, quantities, productPrices), [groups, quantities, productPrices]);
+  const totalPieces = productSummaries.reduce((sum, product) => sum + product.pieceCount, 0);
+  const totalCents = productSummaries.reduce((sum, product) => sum + product.subtotalCents, 0);
+  const hasMissingPrice = productSummaries.some((product) => product.priceMissing);
 
-  const itemsJson = useMemo(() => JSON.stringify(buildSaleSubmitLines(sections, quantities, sectionPrices)), [sections, quantities, sectionPrices]);
+  const itemsJson = useMemo(() => JSON.stringify(buildSaleSubmitLines(groups, quantities, productPrices)), [groups, quantities, productPrices]);
 
-  if (sections.length === 0) {
+  if (groups.length === 0) {
     return <p className="text-sm text-neutral-bg/60">لا يوجد لديك مخزون متاح للبيع حالياً.</p>;
   }
 
@@ -209,28 +209,28 @@ export function NewSaleForm({ products, customers, customerOrders, action = crea
                 ))}
               </div>
             )}
-            <SaleGroupPicker
-              sections={sections}
+            <ProductSalePicker
+              groups={groups}
               quantities={quantities}
               onQuantityChange={handleQuantityChange}
-              sectionPrices={sectionPrices}
-              onSectionPriceChange={handleSectionPriceChange}
+              productPrices={productPrices}
+              onProductPriceChange={handleProductPriceChange}
             />
           </CardContent>
         </Card>
 
-        {sectionSummaries.length > 0 && (
+        {productSummaries.length > 0 && (
           <Card>
             <CardHeader>
               <CardTitle>ملخص الفاتورة</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="flex flex-col divide-y divide-navy-soft">
-                {sectionSummaries.map((section) => (
-                  <div key={section.sectionKey} className="flex items-center justify-between gap-3 py-2 text-sm first:pt-0 last:pb-0">
-                    <span className="text-neutral-bg">{section.sectionLabel}</span>
+                {productSummaries.map((product) => (
+                  <div key={product.productKey} className="flex items-center justify-between gap-3 py-2 text-sm first:pt-0 last:pb-0">
+                    <span className="text-neutral-bg">{product.productLabel}</span>
                     <span className="text-neutral-bg/70">
-                      {section.pieceCount} × {formatCurrencyFromCents(section.unitPriceCents)} = {formatCurrencyFromCents(section.subtotalCents)}
+                      {product.pieceCount} × {formatCurrencyFromCents(product.unitPriceCents)} = {formatCurrencyFromCents(product.subtotalCents)}
                     </span>
                   </div>
                 ))}
