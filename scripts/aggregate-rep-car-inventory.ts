@@ -33,9 +33,24 @@
  * available in production from this environment. Running this through
  * Prisma Client instead sidesteps both problems entirely: ids are
  * generated exactly the same way every other InventoryItem row in this app
- * already gets one (see incrementInventoryUpsert below — the SAME helper
- * assignStockToRep/returnStockFromRep call), with zero extension
- * dependency.
+ * already gets one — via `tx.inventoryItem.create()` with no `id` field
+ * supplied, letting the client apply the schema's `@default(cuid())` — with
+ * zero extension dependency.
+ *
+ * STANDALONE — NO src/ IMPORTS:
+ * This script deliberately imports only `@prisma/client`, nothing from
+ * `src/`. It used to reuse the app's own `incrementInventoryUpsert` helper
+ * (src/lib/inventory-transactions.ts), but that module imports the
+ * `server-only` package, which throws when resolved outside a Next.js
+ * Server Component/Route context — exactly what happens running this
+ * script with a plain `tsx` process on the VPS ("This module cannot be
+ * imported from a Client Component module..."), even with
+ * `--conditions=react-server`. `incrementRepCarAggregate` below is a local
+ * reimplementation with the exact same atomic-updateMany /
+ * create-on-P2002-retry semantics, scoped to the one key shape this script
+ * ever writes (REP_CAR's plain aggregate row: variantId and
+ * deviceColorVariantId both null) so it needs no shared InventoryKey type
+ * or generic helper file at all.
  *
  * PROBLEM THIS SOLVES:
  * Production already has dimensional InventoryItem rows at REP_CAR
@@ -68,7 +83,7 @@
  *     NULL OR deviceColorVariantId IS NOT NULL). A REP_CAR location that
  *     already has a plain row (e.g. a load performed after the code change
  *     already shipped) has that row's quantity correctly ADDED to via
- *     incrementInventoryUpsert, never overwritten or duplicated — proven
+ *     incrementRepCarAggregate, never overwritten or duplicated — proven
  *     per-pair by the PER-PAIR INVARIANT below, not just assumed.
  *   - Old dimensional rows are ZEROED (quantity = 0), never deleted — the
  *     pre-conversion state stays fully inspectable afterward. Every
@@ -128,8 +143,7 @@
  *   4. Optionally run scripts/post-conversion-audit.sql afterward for a
  *      final human-readable confirmation.
  */
-import { PrismaClient, type Prisma } from "@prisma/client";
-import { incrementInventoryUpsert } from "../src/lib/inventory-transactions";
+import { PrismaClient, Prisma } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
@@ -141,6 +155,60 @@ type Tx = Prisma.TransactionClient;
  * script sums or is about to write is checked against this before any
  * increment runs — see "EXPLICIT INTEGER/OVERFLOW SAFETY" above. */
 const PG_INT_MAX = 2_147_483_647;
+
+/** Local, standalone reimplementation of the app's incrementInventoryUpsert
+ * (src/lib/inventory-transactions.ts) — NOT imported from there (see the
+ * "STANDALONE — NO src/ IMPORTS" note in the file header for why). Scoped
+ * to exactly the one key shape this script ever writes: REP_CAR's plain
+ * aggregate row (variantId AND deviceColorVariantId both null).
+ *
+ * Same semantics as the app helper:
+ *   1. Try an atomic conditional UPDATE (`quantity: { increment: amount }`).
+ *   2. count === 1 → done, already had a row.
+ *   3. count === 0 → no row yet; try `create` with no `id` supplied, so
+ *      Prisma Client generates the same cuid()-formatted id every other
+ *      InventoryItem row in this app gets (see the file header).
+ *   4. create() conflicts with P2002 (a concurrent creator won the race,
+ *      e.g. a live REP_CAR write landing between steps 1 and 3) → retry the
+ *      atomic UPDATE once — the row now exists, so this must succeed.
+ *   5. If that retry doesn't update EXACTLY one row, throw — something is
+ *      structurally wrong (not a benign race), and this must never be
+ *      silently swallowed.
+ */
+async function incrementRepCarAggregate(tx: Tx, productId: string, locationId: string, amount: number): Promise<void> {
+  const where = { productId, locationId, variantId: null, deviceColorVariantId: null } as const;
+
+  const updated = await tx.inventoryItem.updateMany({ where, data: { quantity: { increment: amount } } });
+  if (updated.count === 1) return;
+  if (updated.count > 1) {
+    // Can never happen given the partial unique index on
+    // (productId, locationId) WHERE variantId IS NULL AND
+    // deviceColorVariantId IS NULL — guarded anyway, never silently ignored.
+    throw new Error(`UNEXPECTED: updateMany matched ${updated.count} row(s) for product ${productId} at location ${locationId} — expected 0 or 1.`);
+  }
+
+  // count === 0 — no existing aggregate row for this product at this
+  // location yet. Create it fresh.
+  try {
+    await tx.inventoryItem.create({
+      data: { productId, locationId, variantId: null, deviceColorVariantId: null, quantity: amount },
+    });
+    return;
+  } catch (err) {
+    if (!(err instanceof Prisma.PrismaClientKnownRequestError) || err.code !== "P2002") {
+      throw err;
+    }
+    // A concurrent writer created the row between our updateMany (count 0)
+    // and our create() call — retry the atomic increment now that the row
+    // exists.
+    const retried = await tx.inventoryItem.updateMany({ where, data: { quantity: { increment: amount } } });
+    if (retried.count !== 1) {
+      throw new Error(
+        `INCREMENT FAILED for product ${productId} at location ${locationId}: create() hit P2002 (concurrent row creation), but the retried updateMany matched ${retried.count} row(s), expected exactly 1.`,
+      );
+    }
+  }
+}
 
 interface ConversionPair {
   productId: string;
@@ -262,13 +330,14 @@ async function main(): Promise<void> {
       console.log(`Integer safety holds for all ${byPair.size} pair(s) — proceeding to write.`);
 
       for (const pair of byPair.values()) {
-        // Exact same atomic upsert-or-create helper every other REP_CAR
+        // Same atomic upsert-or-create semantics every other REP_CAR
         // increment in this app uses (assignStockToRep, completeStockRequest,
         // the return flow's warehouse side, etc.) — ADDS to any existing
         // aggregate quantity, never overwrites it, and generates a proper
-        // cuid() id if it has to create the row (see the file header for
-        // why that matters).
-        await incrementInventoryUpsert(tx, { productId: pair.productId, variantId: null, deviceColorVariantId: null, locationId: pair.locationId }, pair.dimensionalTotal);
+        // cuid() id if it has to create the row — reimplemented locally in
+        // this standalone script (see incrementRepCarAggregate above and
+        // the file header for why).
+        await incrementRepCarAggregate(tx, pair.productId, pair.locationId, pair.dimensionalTotal);
 
         // Zero (never delete) every dimensional row just folded in.
         await tx.inventoryItem.updateMany({
