@@ -271,19 +271,29 @@ export async function completeStockRequest(
         // Atomic conditional decrement on the source (warehouse) — never a
         // stale read-then-write. Insufficient stock for this line rolls
         // back the whole completion rather than silently going negative.
+        // Stays fully dimensional: the admin approved this exact variant,
+        // so the WAREHOUSE'S own dimensional stock decrements accurately.
         await decrementInventoryAtomic(
           tx,
           { productId: line.productId, variantId: line.variantId, locationId: warehouse.id },
           line.approvedQuantity,
         );
 
-        // Atomic increment on the destination (rep car).
+        // Atomic increment on the destination (rep car). Deliberately the
+        // PLAIN aggregate key (variantId null) regardless of which variant
+        // the warehouse side just decremented — REP_CAR tracks one simple
+        // per-product balance now, never a per-model breakdown (see the
+        // InventoryItem doc comment in schema.prisma), the same rule
+        // assignStockToRep's own car-load path already follows.
         const change = await incrementInventoryUpsert(
           tx,
-          { productId: line.productId, variantId: line.variantId, locationId: repLocation.id },
+          { productId: line.productId, variantId: null, locationId: repLocation.id },
           line.approvedQuantity,
         );
 
+        // The movement itself still records the EXACT variant that left the
+        // warehouse — this is the permanent audit trail, independent of how
+        // the live REP_CAR balance is stored.
         await recordStockMovement(tx, {
           type: STOCK_MOVEMENT_TYPES.REP_ASSIGNMENT,
           productId: line.productId,

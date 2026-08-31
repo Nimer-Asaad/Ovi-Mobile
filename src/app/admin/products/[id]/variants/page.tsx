@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { STOCK_LOCATION_TYPES } from "@/lib/constants";
 import { VariantManager } from "./VariantManager";
 import { markVariantInventoryReady } from "./actions";
 import { Button } from "@/components/ui/Button";
@@ -11,7 +12,15 @@ export default async function ProductVariantsPage({ params }: { params: Promise<
     prisma.product.findUnique({ where: { id }, include: {
       variantAllocationBatch: true,
       variants: { include: { phoneModel: { include: { phoneBrand: true } }, inventoryItems: { select: { quantity: true } } }, orderBy: { sortOrder: "asc" } },
-      inventoryItems: { where: { variantId: null, quantity: { gt: 0 } }, include: { location: { select: { name: true } } }, orderBy: { updatedAt: "asc" } },
+      // WAREHOUSE only — a REP_CAR's own plain (variantId: null) row is now
+      // that rep's legitimate ongoing aggregate car balance (see the
+      // InventoryItem doc comment in schema.prisma), never "old
+      // unallocated stock awaiting variant redistribution." Before that
+      // feature existed, a PHONE_COMPATIBILITY product could never have a
+      // plain REP_CAR row at all, so this filter was previously a no-op;
+      // it's required now to keep this legacy-allocation picker from
+      // treating a rep's real car stock as spare stock to reassign.
+      inventoryItems: { where: { variantId: null, quantity: { gt: 0 }, location: { type: STOCK_LOCATION_TYPES.WAREHOUSE } }, include: { location: { select: { name: true } } }, orderBy: { updatedAt: "asc" } },
     } }),
     prisma.phoneBrand.findMany({ where: { isActive: true }, include: { models: { where: { isActive: true }, orderBy: { name: "asc" } } }, orderBy: { name: "asc" } }),
   ]);

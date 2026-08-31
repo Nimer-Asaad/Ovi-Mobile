@@ -13,7 +13,6 @@ import {
   buildSaleProductGroups,
   buildSaleSubmitLines,
   summarizeSaleProducts,
-  findSaleRow,
   type SaleProductOption,
 } from "@/components/reps/ProductSalePicker";
 import type { RepCustomerOrderOption } from "@/lib/rep-customer-orders";
@@ -49,18 +48,16 @@ interface NewSaleFormProps {
 const initialState: RepSaleState = {};
 
 /** Multi-line direct-sale form — a flat, searchable PRODUCT list (see
- * ProductSalePicker.tsx: "OVI 04", "OVI 63", ... — the actual Product rows,
- * never a Category grouping), plus a customer name field that suggests this
- * rep's past customers (by phone) so repeat sales don't re-register the
- * same person under slightly different details.
+ * ProductSalePicker.tsx: "OVI 04", "OVI 63", ... — the actual Product rows),
+ * plus a customer name field that suggests this rep's past customers (by
+ * phone) so repeat sales don't re-register the same person under slightly
+ * different details.
  *
- * PRICE is entered ONCE per PRODUCT, not once per selected phone model —
- * clicking a product with multiple phone-model/color options opens a
- * popup scoped to just that product (its own device-model search + a
- * quantity stepper per row); every selected model in that popup shares the
- * one typed unit price on the product's own card, but each stays its own
- * separate OrderItem/inventory line underneath (see buildSaleSubmitLines) —
- * stock accuracy never depends on how prices happen to be grouped.
+ * A rep sale is always "Product + quantity + price" now — no phone-model
+ * selection at all (see the SaleProductOption doc comment: REP_CAR only
+ * ever tracks one plain aggregate balance per product; the warehouse side
+ * is the only place phone models still matter). PRICE is entered ONCE per
+ * PRODUCT, directly on its own card, applied to that whole quantity.
  *
  * Also offers a shortcut: this rep's OPEN customer-order car-load templates
  * (right panel, "طلبات الزبائن" — see RepCustomerOrder) can be clicked to
@@ -70,19 +67,16 @@ const initialState: RepSaleState = {};
  * handleSelectOrder below for how prefill quantities are revalidated
  * against current car stock rather than trusted blindly. Product prices are
  * NEVER prefilled from a customer order (it never carried one) — the rep
- * still types each product's price once after preloading, even when the
- * preload spans several phone models under that one product. */
+ * still types each product's price once after preloading. */
 export function NewSaleForm({ products, customers, customerOrders, action = createRepSale }: NewSaleFormProps) {
   const [state, formAction, isPending] = useActionState(action, initialState);
 
   const groups = useMemo(() => buildSaleProductGroups(products), [products]);
 
   // quantities/productPrices are the entire "what's selected, at what
-  // price" state — keyed by ModelRow.key / SaleProductGroup.key (productId)
-  // respectively. Nothing else needs to track selection: every row already
-  // carries its own productId/colorId/variantId/deviceColorVariantId, so
-  // building the submit payload is a pure read of `groups` + these two maps
-  // (see buildSaleSubmitLines).
+  // price" state — both keyed by SaleProductGroup.key (productId). Nothing
+  // else needs to track selection: building the submit payload is a pure
+  // read of `groups` + these two maps (see buildSaleSubmitLines).
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [productPrices, setProductPrices] = useState<Record<string, string>>({});
 
@@ -96,8 +90,8 @@ export function NewSaleForm({ products, customers, customerOrders, action = crea
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [orderNotices, setOrderNotices] = useState<string[]>([]);
 
-  function handleQuantityChange(row: { key: string }, quantity: number) {
-    setQuantities((prev) => ({ ...prev, [row.key]: quantity }));
+  function handleQuantityChange(productKey: string, quantity: number) {
+    setQuantities((prev) => ({ ...prev, [productKey]: quantity }));
   }
 
   function handleProductPriceChange(productKey: string, value: string) {
@@ -131,30 +125,39 @@ export function NewSaleForm({ products, customers, customerOrders, action = crea
    * with whatever the rep had already been building manually (matches how
    * clicking a second, different order should behave too). Phone/city/
    * address are cleared rather than left stale, since the order itself only
-   * ever carries a name — see the RepCustomerOrder doc comment. Each item is
-   * matched back to its exact row (findSaleRow) and clamped to current
-   * stock rather than the order's stale intended quantity — a product/
-   * option no longer in the car at all is silently dropped with a notice
-   * instead of crashing or submitting a phantom line. Product prices are
-   * left untouched: the order never carried one, so the rep still types
-   * it. */
+   * ever carries a name — see the RepCustomerOrder doc comment.
+   *
+   * The order's own lines are still stored per phone model (that's the
+   * WAREHOUSE-side breakdown the admin picked when loading the car — see
+   * RepCustomerOrderItem's doc comment), but a sale no longer sells by
+   * model, so every line for the SAME product is summed here into that
+   * product's one aggregate requested quantity before clamping against
+   * current rep-car stock — a product no longer in the car at all is
+   * silently dropped with a notice instead of crashing or submitting a
+   * phantom line. Product prices are left untouched: the order never
+   * carried one, so the rep still types it. */
   function handleSelectOrder(order: RepCustomerOrderOption) {
+    const requestedByProduct = new Map<string, number>();
+    for (const item of order.items) {
+      requestedByProduct.set(item.productId, (requestedByProduct.get(item.productId) ?? 0) + item.quantity);
+    }
+
     const notices: string[] = [];
     const nextQuantities: Record<string, number> = {};
-    for (const item of order.items) {
-      const row = findSaleRow(groups, { productId: item.productId, variantId: item.variantId, deviceColorVariantId: item.deviceColorVariantId });
-      if (!row) {
-        notices.push(`منتج غير متوفر حالياً في سيارتك (${item.quantity} قطعة مطلوبة)`);
+    for (const [productId, requestedQuantity] of requestedByProduct) {
+      const group = groups.find((candidate) => candidate.key === productId);
+      if (!group) {
+        notices.push(`منتج غير متوفر حالياً في سيارتك (${requestedQuantity} قطعة مطلوبة)`);
         continue;
       }
-      if (row.stock <= 0) {
-        notices.push(`${row.label} — غير متوفر حالياً في سيارتك`);
+      if (group.stock <= 0) {
+        notices.push(`${group.label} — غير متوفر حالياً في سيارتك`);
         continue;
       }
-      const quantity = Math.min(item.quantity, row.stock);
-      nextQuantities[row.key] = quantity;
-      if (quantity < item.quantity) {
-        notices.push(`${row.label} — الكمية المتاحة الآن (${row.stock}) أقل من طلبية الزبون الأصلية (${item.quantity})`);
+      const quantity = Math.min(requestedQuantity, group.stock);
+      nextQuantities[productId] = quantity;
+      if (quantity < requestedQuantity) {
+        notices.push(`${group.label} — الكمية المتاحة الآن (${group.stock}) أقل من طلبية الزبون الأصلية (${requestedQuantity})`);
       }
     }
     setQuantities(nextQuantities);

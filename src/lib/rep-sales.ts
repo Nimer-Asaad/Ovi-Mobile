@@ -33,18 +33,21 @@ export function revalidateRepSalePaths(orderNumber: string): void {
 }
 
 /** Rep-car sale catalog for a given car StockLocation — exactly the same
- * query + grouping /rep/sales/new (a rep selling their own car stock) and
+ * query /rep/sales/new (a rep selling their own car stock) and
  * /admin/reps/[id]/sales/new (an admin selling on that rep's behalf) both
- * need, extracted here so there is one copy of this ~80-line shape instead
- * of two. Groups rep-car InventoryItem rows into one option per product — a
- * non-variant product's stock lands in `repStock`, a phone-variant
- * product's per model in `variantOptions[].stock`, a device+color
- * product's per combination in `deviceColorVariantOptions[].stock`. Only
- * in-stock rows are ever included (quantity > 0) — a sale, unlike a stock
- * request, can only draw from what's physically in that car right now.
- * `colorOptions` is independent of stock — it's the product's descriptive
- * color pick-list (ProductColorOption), never a stock dimension. Returns
- * an empty catalog for a rep with no car location at all. */
+ * need, extracted here so there is one copy instead of two. REP_CAR
+ * InventoryItem rows are always the PLAIN aggregate bucket now (variantId
+ * and deviceColorVariantId both null — see the InventoryItem doc comment in
+ * schema.prisma: a rep never needs to think about phone models when
+ * selling, only the warehouse side stays dimensional), so this is a
+ * straight one-row-per-product query — no variant/device-color grouping
+ * needed here at all, unlike the admin car-loading/return catalogs, which
+ * still deal with the warehouse's own dimensional stock. `colorOptions` is
+ * independent of stock — it's the product's descriptive color pick-list
+ * (ProductColorOption), never a stock dimension, kept here purely so a
+ * plain product can still optionally record which color a customer chose.
+ * Only in-stock rows are ever included (quantity > 0). Returns an empty
+ * catalog for a rep with no car location at all. */
 export async function getRepCarSaleProducts(locationId: string | null): Promise<SaleProductOption[]> {
   if (!locationId) return [];
 
@@ -53,16 +56,6 @@ export async function getRepCarSaleProducts(locationId: string | null): Promise<
     orderBy: { updatedAt: "desc" },
     select: {
       quantity: true,
-      variantId: true,
-      variant: { select: { id: true, phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } } } },
-      deviceColorVariantId: true,
-      deviceColorVariant: {
-        select: {
-          id: true,
-          phoneModel: { select: { id: true, name: true, nameAr: true, phoneBrandId: true, phoneBrand: { select: { id: true, name: true, nameAr: true } } } },
-          color: { select: { id: true, name: true, nameAr: true, hexCode: true } },
-        },
-      },
       product: {
         select: {
           id: true,
@@ -71,7 +64,6 @@ export async function getRepCarSaleProducts(locationId: string | null): Promise<
           nameAr: true,
           retailPriceCents: true,
           isActive: true,
-          inventoryTrackingMode: true,
           images: {
             select: { url: true, altText: true },
             orderBy: [{ isMain: "desc" }, { sortOrder: "asc" }],
@@ -86,10 +78,9 @@ export async function getRepCarSaleProducts(locationId: string | null): Promise<
     },
   });
 
-  const byProductId = new Map<string, SaleProductOption>();
-  for (const item of items) {
-    if (!item.product.isActive) continue;
-    const existing: SaleProductOption = byProductId.get(item.product.id) ?? {
+  return items
+    .filter((item) => item.product.isActive)
+    .map((item) => ({
       id: item.product.id,
       sku: item.product.sku,
       name: item.product.name,
@@ -97,43 +88,14 @@ export async function getRepCarSaleProducts(locationId: string | null): Promise<
       retailPriceCents: item.product.retailPriceCents,
       thumbnailUrl: item.product.images[0]?.url ?? null,
       thumbnailAlt: item.product.images[0]?.altText ?? null,
-      repStock: 0,
-      colorOptions:
-        item.product.inventoryTrackingMode === "DEVICE_MODEL_COLOR"
-          ? []
-          : item.product.colorOptions.map((option) => ({
-              id: option.color.id,
-              name: option.color.name,
-              nameAr: option.color.nameAr,
-              hexCode: option.color.hexCode,
-            })),
-      variantOptions: [],
-      deviceColorVariantOptions: [],
-    };
-    if (item.variantId && item.variant) {
-      existing.variantOptions!.push({
-        id: item.variant.id,
-        label: `${item.variant.phoneModel.phoneBrand.nameAr ?? item.variant.phoneModel.phoneBrand.name} / ${item.variant.phoneModel.nameAr ?? item.variant.phoneModel.name}`,
-        stock: item.quantity,
-      });
-    } else if (item.deviceColorVariantId && item.deviceColorVariant) {
-      existing.deviceColorVariantOptions!.push({
-        id: item.deviceColorVariant.id,
-        phoneBrandId: item.deviceColorVariant.phoneModel.phoneBrandId,
-        brandLabel: item.deviceColorVariant.phoneModel.phoneBrand.nameAr ?? item.deviceColorVariant.phoneModel.phoneBrand.name,
-        phoneModelId: item.deviceColorVariant.phoneModel.id,
-        modelLabel: item.deviceColorVariant.phoneModel.nameAr ?? item.deviceColorVariant.phoneModel.name,
-        colorId: item.deviceColorVariant.color.id,
-        colorLabel: item.deviceColorVariant.color.nameAr ?? item.deviceColorVariant.color.name,
-        colorHex: item.deviceColorVariant.color.hexCode,
-        stock: item.quantity,
-      });
-    } else {
-      existing.repStock = item.quantity;
-    }
-    byProductId.set(item.product.id, existing);
-  }
-  return [...byProductId.values()];
+      repStock: item.quantity,
+      colorOptions: item.product.colorOptions.map((option) => ({
+        id: option.color.id,
+        name: option.color.name,
+        nameAr: option.color.nameAr,
+        hexCode: option.color.hexCode,
+      })),
+    }));
 }
 
 export interface CreateRepSaleContext {
@@ -247,19 +209,26 @@ export async function createRepSaleCore(input: RepSaleInput, context: CreateRepS
     if (!product.isActive) {
       return { ok: false, error: `المنتج "${product.nameAr ?? product.name}" غير مفعّل ولا يمكن بيعه` };
     }
-    const usesDeviceColor = product.inventoryTrackingMode === "DEVICE_MODEL_COLOR";
-    if (usesDeviceColor) {
-      if (!item.deviceColorVariantId || !product.deviceColorVariants.some((combo) => combo.id === item.deviceColorVariantId)) {
-        return { ok: false, error: `اختر الماركة والموديل واللون للمنتج "${product.nameAr ?? product.name}"` };
-      }
-    } else if (item.deviceColorVariantId) {
-      return { ok: false, error: "هذا المنتج لا يستخدم تركيبات الجهاز واللون" };
+    // Deliberately NO "must pick a variant/combo for this product's tracking
+    // mode" requirement here (unlike assignStockToRep's validateTransferLines,
+    // which still enforces exactly that for a WAREHOUSE-side transfer): a
+    // rep-car sale is always product-level now, regardless of whether the
+    // product happens to use PHONE_COMPATIBILITY or DEVICE_MODEL_COLOR for
+    // warehouse tracking — the rep only ever sees "Product + quantity +
+    // price" (see ProductSalePicker.tsx), never a phone-model choice. If a
+    // caller DOES supply a real variantId/deviceColorVariantId anyway (not
+    // possible from the current picker, but never trusted blindly), it's
+    // still checked for validity below so a stale/foreign id can't sneak
+    // through — just never REQUIRED.
+    if (item.deviceColorVariantId && !product.deviceColorVariants.some((combo) => combo.id === item.deviceColorVariantId)) {
+      return { ok: false, error: `الخيار المحدد لا ينتمي للمنتج "${product.nameAr ?? product.name}"` };
     }
     if (item.colorId && !product.colorOptions.some((option) => option.colorId === item.colorId)) {
       return { ok: false, error: `اللون المحدد لا ينتمي للمنتج "${product.nameAr ?? product.name}"` };
     }
-    if (product.variantMode === "PHONE_COMPATIBILITY" && (!item.variantId || !product.variants.some((variant) => variant.id === item.variantId))) return { ok: false, error: `اختر Variant صالحاً للمنتج "${product.nameAr ?? product.name}"` };
-    if (product.variantMode !== "PHONE_COMPATIBILITY" && item.variantId) return { ok: false, error: "Variant لا يتبع المنتج المحدد" };
+    if (item.variantId && !product.variants.some((variant) => variant.id === item.variantId)) {
+      return { ok: false, error: `الخيار المحدد لا ينتمي للمنتج "${product.nameAr ?? product.name}"` };
+    }
     const key = `${item.productId}:${item.variantId ?? ""}:${item.deviceColorVariantId ?? ""}`;
     const available = stockByLineKey.get(key) ?? 0;
     if (available <= 0) {

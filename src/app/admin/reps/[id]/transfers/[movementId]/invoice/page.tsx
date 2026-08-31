@@ -73,6 +73,7 @@ export default async function AdminRepTransferInvoicePage({ params }: AdminRepTr
           id: movement.id,
           createdAt: movement.createdAt,
           typeLabel: isAssignment ? "تخصيص مخزون لمندوب" : "إرجاع مخزون من مندوب",
+          balanceContext: isAssignment ? "car" : "warehouse",
           note: movement.note,
           items: [
             {

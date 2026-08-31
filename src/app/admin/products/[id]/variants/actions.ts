@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth/guards";
-import { PRODUCT_INVENTORY_TRACKING_MODES, PRODUCT_VARIANT_MODES, ROLES, STOCK_MOVEMENT_TYPES, VARIANT_ALLOCATION_STATUSES } from "@/lib/constants";
+import { PRODUCT_INVENTORY_TRACKING_MODES, PRODUCT_VARIANT_MODES, ROLES, STOCK_LOCATION_TYPES, STOCK_MOVEMENT_TYPES, VARIANT_ALLOCATION_STATUSES } from "@/lib/constants";
 import { allocationSchema, productVariantsSchema } from "@/lib/validation/productVariants";
 import { incrementInventoryUpsert, recordStockMovement, setInventoryAbsolute } from "@/lib/inventory-transactions";
 import { getMainWarehouse } from "@/lib/inventory";
@@ -69,9 +69,15 @@ export async function saveProductVariants(productId: string, _state: VariantActi
       const product = await tx.product.findUniqueOrThrow({ where: { id: productId }, select: { variantAllocationBatch: { select: { status: true } } } });
       let batchStatus = product.variantAllocationBatch?.status;
       if (!batchStatus) {
+        // WAREHOUSE only — see the same-reasoning comment on the legacyRows
+        // query in variants/page.tsx: a REP_CAR's own plain (variantId:
+        // null) row is that rep's legitimate ongoing aggregate car balance
+        // now, never "old unallocated stock" to fold into this batch's
+        // baseline.
+        const legacyWhere = { productId, variantId: null, location: { type: STOCK_LOCATION_TYPES.WAREHOUSE } };
         const [legacy, negativeLegacy] = await Promise.all([
-          tx.inventoryItem.aggregate({ where: { productId, variantId: null }, _sum: { quantity: true } }),
-          tx.inventoryItem.count({ where: { productId, variantId: null, quantity: { lt: 0 } } }),
+          tx.inventoryItem.aggregate({ where: legacyWhere, _sum: { quantity: true } }),
+          tx.inventoryItem.count({ where: { ...legacyWhere, quantity: { lt: 0 } } }),
         ]);
         if (negativeLegacy > 0) throw new Error("NEGATIVE_LEGACY");
         await tx.productVariantAllocationBatch.create({ data: {
@@ -115,7 +121,11 @@ export async function allocateLegacyInventory(productId: string, _state: Variant
       if (batch.status !== "PENDING") throw new Error("BATCH_COMPLETED");
       if (batch.allocatedQuantity + total > batch.originalLegacyQuantity) throw new Error("BASELINE_EXCEEDED");
 
-      const source = await tx.inventoryItem.findFirst({ where: { id: parsed.data.sourceInventoryItemId, productId, variantId: null }, select: { id: true, locationId: true, quantity: true } });
+      // WAREHOUSE only, as defense in depth — the picker itself only ever
+      // offers a warehouse row (see variants/page.tsx), but a manipulated
+      // sourceInventoryItemId must not be able to target a rep's real car
+      // balance regardless.
+      const source = await tx.inventoryItem.findFirst({ where: { id: parsed.data.sourceInventoryItemId, productId, variantId: null, location: { type: STOCK_LOCATION_TYPES.WAREHOUSE } }, select: { id: true, locationId: true, quantity: true } });
       if (!source || source.quantity < total || source.quantity < 0) throw new Error("INSUFFICIENT_UNALLOCATED");
       const variants = await tx.productVariant.findMany({ where: { id: { in: parsed.data.allocations.map((row) => row.variantId) }, productId, isActive: true }, select: { id: true } });
       if (variants.length !== new Set(parsed.data.allocations.map((row) => row.variantId)).size) throw new Error("INVALID_VARIANT");

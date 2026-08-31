@@ -8,7 +8,7 @@ import { ROLES, STOCK_MOVEMENT_TYPES, REP_LOAD_TYPES, REP_CUSTOMER_ORDER_STATUSE
 import { getMainWarehouse } from "@/lib/inventory";
 import { getOrCreateRepLocation } from "@/lib/reps";
 import { resolveOrCreateRepMerchant } from "@/lib/rep-merchants";
-import { repStockTransferBatchSchema, type RepStockTransferBatchInput } from "@/lib/validation/reps";
+import { repStockTransferBatchSchema, repCarReturnSchema, type RepStockTransferBatchInput } from "@/lib/validation/reps";
 import { repSaleSchema } from "@/lib/validation/repSale";
 import { createRepSaleCore } from "@/lib/rep-sales";
 import type { RepSaleState } from "@/app/rep/sales/actions";
@@ -284,7 +284,9 @@ export async function assignStockToRep(
       for (const line of lines) {
         // Atomic conditional decrement on the source (warehouse) — never a
         // stale read-then-write. Insufficient stock rolls back the whole
-        // batch.
+        // batch. Stays fully dimensional: the admin picked this exact
+        // variant/combo so the WAREHOUSE'S own dimensional stock decrements
+        // accurately (see repStockTransferBatchSchema's doc comment).
         await decrementInventoryAtomic(
           tx,
           { productId: line.productId, variantId: line.variantId, deviceColorVariantId: line.deviceColorVariantId, locationId: warehouse.id },
@@ -293,12 +295,23 @@ export async function assignStockToRep(
 
         // Atomic increment on the destination (rep car) — safe even if two
         // transfers to the same rep/product land at the same moment.
+        // Deliberately the PLAIN aggregate key (variantId/deviceColorVariantId
+        // both null) regardless of what the warehouse side just decremented
+        // — REP_CAR tracks one simple per-product balance now, never a
+        // per-model breakdown (see the InventoryItem doc comment in
+        // schema.prisma). A rep never needs to think about phone models
+        // when selling; only the warehouse side needs that precision.
         const change = await incrementInventoryUpsert(
           tx,
-          { productId: line.productId, variantId: line.variantId, deviceColorVariantId: line.deviceColorVariantId, locationId: repLocation.id },
+          { productId: line.productId, variantId: null, deviceColorVariantId: null, locationId: repLocation.id },
           line.quantity,
         );
 
+        // The movement itself still records the EXACT model/combo that left
+        // the warehouse — this is the permanent audit trail proving which
+        // phone models were physically loaded, independent of how the live
+        // REP_CAR balance is stored (see the transfer-batch invoice, which
+        // reads this ledger, never live InventoryItem rows).
         await recordStockMovement(tx, {
           type: STOCK_MOVEMENT_TYPES.REP_ASSIGNMENT,
           productId: line.productId,
@@ -376,6 +389,30 @@ export async function assignStockToRep(
   redirect(`/admin/reps/${repId}/transfer-batches/${batchId}/invoice`);
 }
 
+function parseReturnBatchForm(formData: FormData) {
+  let returns: unknown;
+  try {
+    returns = JSON.parse(formData.get("returns")?.toString() ?? "[]");
+  } catch {
+    return null;
+  }
+  return repCarReturnSchema.safeParse({
+    returns,
+    notes: formData.get("notes")?.toString().trim() || undefined,
+  });
+}
+
+/** Rep-car -> warehouse return. REP_CAR now holds one plain aggregate
+ * quantity per product (see the InventoryItem doc comment in
+ * schema.prisma) — the app has no memory of which exact phone models make
+ * up that quantity, so unlike assignStockToRep this can never be a simple
+ * 1:1 dimensional mirror. The admin must supply, per product, exactly which
+ * WAREHOUSE-side model(s)/combo(s) the returned units physically are (see
+ * repCarReturnSchema's own doc comment) — never inferred/guessed here.
+ * Every line's breakdown is re-verified server-side to sum to exactly that
+ * line's own quantity before anything is written; a mismatched sum is
+ * rejected outright, not silently corrected. ADMIN-only, matching this
+ * action's existing permission (unchanged). */
 export async function returnStockFromRep(
   repId: string,
   _prevState: RepStockTransferState,
@@ -383,18 +420,25 @@ export async function returnStockFromRep(
 ): Promise<RepStockTransferState> {
   const admin = await requireRole([ROLES.ADMIN]);
 
-  const parsed = parseTransferBatchForm(formData);
+  const parsed = parseReturnBatchForm(formData);
   if (!parsed) {
     return { error: ITEMS_PARSE_ERROR_MESSAGE };
   }
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? PARSE_ERROR_MESSAGE };
   }
-  const { notes } = parsed.data;
-  const lines = aggregateTransferLines(parsed.data.items);
-  const quantityError = findAggregatedQuantityError(lines);
-  if (quantityError) {
-    return { error: quantityError };
+  const { returns, notes } = parsed.data;
+
+  // Server-side arithmetic check on each submitted line, exactly as
+  // submitted — never trusts the client's own sum, even though the UI is
+  // built to always keep them equal. Runs BEFORE any cross-line
+  // deduplication below, so it still catches a single internally
+  // inconsistent line cheaply.
+  for (const line of returns) {
+    const breakdownSum = line.breakdown.reduce((sum, entry) => sum + entry.quantity, 0);
+    if (breakdownSum !== line.quantity) {
+      return { error: "مجموع توزيع أحد الأصناف على المستودع لا يساوي الكمية المرتجعة منه" };
+    }
   }
 
   const rep = await prisma.salesRepresentative.findUnique({
@@ -405,14 +449,53 @@ export async function returnStockFromRep(
     return { error: "المندوب غير موجود" };
   }
 
+  // Deduplicates any exact warehouse destination repeated across breakdown
+  // entries — including across a manipulated payload's duplicate `returns`
+  // lines for the same product — into one effective entry per exact
+  // target, summing quantities (the same convention aggregateTransferLines
+  // already applies on the assignStockToRep/load side, reused here as-is).
+  // This is what the rest of this action actually validates and writes
+  // from, so a duplicate/repeated pick can never produce two redundant
+  // warehouse increments or two redundant movement rows for the identical
+  // target. Sum-invariant: merging same-key entries only combines their
+  // quantities, so the per-line arithmetic check above stays valid
+  // regardless of what this collapses.
+  const rawFlatEntries: RepStockTransferBatchInput["items"] = returns.flatMap((line) =>
+    line.breakdown.map((entry) => ({
+      productId: line.productId,
+      variantId: entry.variantId ?? null,
+      deviceColorVariantId: entry.deviceColorVariantId ?? null,
+      quantity: entry.quantity,
+    })),
+  );
+  const flatBreakdownLines = aggregateTransferLines(rawFlatEntries);
+  const quantityError = findAggregatedQuantityError(flatBreakdownLines);
+  if (quantityError) {
+    return { error: quantityError };
+  }
+
   const products = await prisma.product.findMany({
-    where: { id: { in: lines.map((line) => line.productId) } },
+    where: { id: { in: [...new Set(flatBreakdownLines.map((line) => line.productId))] } },
     select: TRANSFER_PRODUCT_SELECT,
   });
   const productById = new Map(products.map((product) => [product.id, product]));
-  const validationError = validateTransferLines(lines, productById);
+  const validationError = validateTransferLines(flatBreakdownLines, productById);
   if (validationError) {
     return { error: validationError };
+  }
+
+  // Regrouped back under each product — its own aggregate car-return
+  // quantity is always the sum of its OWN deduplicated breakdown here,
+  // never independently re-trusted against the client's original per-line
+  // `quantity` a second time (a duplicate-productId payload could otherwise
+  // let two different claimed totals for the same product slip through the
+  // per-line check above, which only ever validated each line in
+  // isolation).
+  const breakdownByProduct = new Map<string, TransferLine[]>();
+  for (const entry of flatBreakdownLines) {
+    const bucket = breakdownByProduct.get(entry.productId) ?? [];
+    bucket.push(entry);
+    breakdownByProduct.set(entry.productId, bucket);
   }
 
   const warehouse = await getMainWarehouse();
@@ -425,12 +508,12 @@ export async function returnStockFromRep(
   let batchId = "";
   try {
     const batch = await prisma.$transaction(async (tx) => {
-      const requestedVariantIds = lines.flatMap((line) => (line.variantId ? [line.variantId] : []));
+      const requestedVariantIds = flatBreakdownLines.flatMap((line) => (line.variantId ? [line.variantId] : []));
       if (requestedVariantIds.length > 0) {
         const activeVariants = await tx.productVariant.count({ where: { id: { in: requestedVariantIds }, isActive: true } });
         if (activeVariants !== new Set(requestedVariantIds).size) throw new Error("INACTIVE_VARIANT");
       }
-      const requestedComboIds = lines.flatMap((line) => (line.deviceColorVariantId ? [line.deviceColorVariantId] : []));
+      const requestedComboIds = flatBreakdownLines.flatMap((line) => (line.deviceColorVariantId ? [line.deviceColorVariantId] : []));
       if (requestedComboIds.length > 0) {
         const activeCombos = await tx.deviceColorVariant.count({ where: { id: { in: requestedComboIds }, isActive: true } });
         if (activeCombos !== new Set(requestedComboIds).size) throw new Error("INACTIVE_VARIANT");
@@ -447,37 +530,45 @@ export async function returnStockFromRep(
         },
       });
 
-      for (const line of lines) {
-        // Atomic conditional decrement on the source (rep car) — never a
-        // stale read-then-write. Insufficient stock rolls back the whole
-        // batch.
-        const change = await decrementInventoryAtomic(
+      for (const [productId, breakdown] of breakdownByProduct) {
+        const quantity = breakdown.reduce((sum, entry) => sum + entry.quantity, 0);
+
+        // ONE atomic conditional decrement of the car's PLAIN aggregate
+        // balance for the whole product quantity — never a stale
+        // read-then-write; insufficient stock rolls back the whole batch.
+        await decrementInventoryAtomic(
           tx,
-          { productId: line.productId, variantId: line.variantId, deviceColorVariantId: line.deviceColorVariantId, locationId: repLocation.id },
-          line.quantity,
+          { productId, variantId: null, deviceColorVariantId: null, locationId: repLocation.id },
+          quantity,
         );
 
-        // Atomic increment on the destination (warehouse).
-        await incrementInventoryUpsert(
-          tx,
-          { productId: line.productId, variantId: line.variantId, deviceColorVariantId: line.deviceColorVariantId, locationId: warehouse.id },
-          line.quantity,
-        );
+        // Then, per admin-specified destination: atomic increment of the
+        // exact WAREHOUSE dimensional leaf, and a movement recording that
+        // exact model/combo — this is what keeps the warehouse precise and
+        // the audit trail ("iPhone 15 x3 returned") intact, even though the
+        // car side it left was only ever tracked as one aggregate number.
+        for (const entry of breakdown) {
+          const change = await incrementInventoryUpsert(
+            tx,
+            { productId, variantId: entry.variantId, deviceColorVariantId: entry.deviceColorVariantId, locationId: warehouse.id },
+            entry.quantity,
+          );
 
-        await recordStockMovement(tx, {
-          type: STOCK_MOVEMENT_TYPES.REP_RETURN,
-          productId: line.productId,
-          variantId: line.variantId,
-          deviceColorVariantId: line.deviceColorVariantId,
-          transferBatchId: createdBatch.id,
-          fromLocationId: repLocation.id,
-          toLocationId: warehouse.id,
-          quantity: line.quantity,
-          previousQuantity: change.previousQuantity,
-          newQuantity: change.newQuantity,
-          note: notes,
-          createdById: admin.id,
-        });
+          await recordStockMovement(tx, {
+            type: STOCK_MOVEMENT_TYPES.REP_RETURN,
+            productId,
+            variantId: entry.variantId,
+            deviceColorVariantId: entry.deviceColorVariantId,
+            transferBatchId: createdBatch.id,
+            fromLocationId: repLocation.id,
+            toLocationId: warehouse.id,
+            quantity: entry.quantity,
+            previousQuantity: change.previousQuantity,
+            newQuantity: change.newQuantity,
+            note: notes,
+            createdById: admin.id,
+          });
+        }
       }
 
       return createdBatch;

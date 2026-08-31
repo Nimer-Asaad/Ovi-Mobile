@@ -13,6 +13,22 @@ export interface TransferInvoiceData {
    * the transfer direction, resolved by the caller from the batch/movement
    * type so this component stays a pure renderer. */
   typeLabel: string;
+  /** Which side of the transfer each row's previousQuantity/newQuantity
+   * actually describes — "car" for a REP_ASSIGNMENT (destination is the
+   * rep's car), "warehouse" for a REP_RETURN (destination is the
+   * warehouse). Only changes the column LABELS below, never the stored
+   * numbers: since REP_CAR now holds one plain aggregate balance per
+   * product (see the InventoryItem doc comment in schema.prisma), a
+   * REP_ASSIGNMENT batch with several lines for the SAME product shows the
+   * running CAR TOTAL after each line landed, not that specific model's own
+   * balance — generic "قبل/بعد" wording alone could read as the latter, so
+   * "car" relabels the columns to make the actual meaning explicit. A
+   * REP_RETURN's destination (the warehouse) is still exactly that one
+   * model's own dimensional balance, so "warehouse" keeps the per-model
+   * framing. Applies identically to historical rows from before this
+   * distinction existed — it only ever makes the label MORE precise about
+   * what was always actually stored, never changes a number. */
+  balanceContext: "car" | "warehouse";
   items: TransferInvoiceLineItem[];
   note: string | null;
   fromLocationName: string | null;
@@ -34,6 +50,8 @@ export interface TransferInvoiceData {
  * viewing it. */
 export function RepTransferInvoiceView({ movement }: { movement: TransferInvoiceData }) {
   const totalQuantity = movement.items.reduce((sum, item) => sum + item.quantity, 0);
+  const previousLabel = movement.balanceContext === "car" ? "رصيد السيارة قبل" : "رصيد المستودع قبل";
+  const newLabel = movement.balanceContext === "car" ? "رصيد السيارة بعد" : "رصيد المستودع بعد";
 
   return (
     <div className="mx-auto max-w-3xl rounded-card border border-neutral-200 bg-white p-8 text-neutral-900 shadow-sm print:m-0 print:max-w-none print:border-0 print:shadow-none">
@@ -97,8 +115,8 @@ export function RepTransferInvoiceView({ movement }: { movement: TransferInvoice
               <th className="py-2 text-start">المنتج</th>
               <th className="py-2 text-start">SKU</th>
               <th className="py-2 text-start">الكمية المحوّلة</th>
-              <th className="py-2 text-start">السابق</th>
-              <th className="py-2 text-start">الجديد</th>
+              <th className="py-2 text-start">{previousLabel}</th>
+              <th className="py-2 text-start">{newLabel}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-neutral-100">

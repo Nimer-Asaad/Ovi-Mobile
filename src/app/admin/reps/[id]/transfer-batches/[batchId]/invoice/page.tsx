@@ -110,6 +110,7 @@ export default async function AdminRepTransferBatchInvoicePage({ params }: Admin
           id: batch.id,
           createdAt: batch.createdAt,
           typeLabel,
+          balanceContext: batch.type === STOCK_MOVEMENT_TYPES.REP_ASSIGNMENT ? "car" : "warehouse",
           note: batch.note,
           items: batch.stockMovements.map((movement) => ({
             product: movement.product,
