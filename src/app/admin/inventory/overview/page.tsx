@@ -1,5 +1,7 @@
+import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { Button } from "@/components/ui/Button";
 import { requireRole } from "@/lib/auth/guards";
 import { ROLES, STOCK_LOCATION_TYPES } from "@/lib/constants";
 import { buildInventoryOverviewData, type InventoryOverviewLocation } from "@/lib/inventory-overview";
@@ -117,7 +119,15 @@ export default async function AdminInventoryOverviewPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader title="مخزون الشركة" subtitle="عرض مرئي للمخزون الحالي — للقراءة فقط، لا تعديل من هذه الصفحة" />
+      <PageHeader
+        title="مخزون الشركة"
+        subtitle="عرض مرئي للمخزون الحالي — للقراءة فقط، لا تعديل من هذه الصفحة"
+        actions={
+          <Link href="/admin/inventory/company-report">
+            <Button variant="outline">طباعة كشف المخزون</Button>
+          </Link>
+        }
+      />
       <CompanyInventoryOverview locations={locations} categories={categoryOptions} products={overviewProducts} />
     </div>
   );

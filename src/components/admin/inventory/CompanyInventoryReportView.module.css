@@ -1,0 +1,31 @@
+/* Route-scoped print rules for the company inventory report only — imported
+ * solely by CompanyInventoryReportView.tsx. Deliberately NOT in globals.css:
+ * @page is not a DOM-scoped rule, so declaring it globally would affect
+ * every print route in the app (order invoices, rep transfer invoices, the
+ * rep inventory-count sheet) the moment any page's stylesheet loaded it —
+ * same reasoning as RepInventorySheetView.module.css. Next.js only bundles a
+ * route's own imported CSS into that route, so this file is never sent to,
+ * or applied on, any other page. */
+
+@media print {
+  @page {
+    size: A4 landscape;
+    margin: 10mm;
+  }
+
+  /* Applied to a single product row (or a category heading row) so a row
+   * never gets visually split across a page break — never a blanket `tr`
+   * selector, so nothing here can affect a different component even if this
+   * file were ever imported elsewhere. */
+  .avoidBreak {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* Repeats the column header on every printed page — plain element
+   * selector, scoped in practice the same way as .avoidBreak above (this
+   * stylesheet is only ever loaded on this one route). */
+  .repeatHeader {
+    display: table-header-group;
+  }
+}
