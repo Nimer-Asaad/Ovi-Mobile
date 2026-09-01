@@ -165,7 +165,7 @@ function ProductCard({
       <div className="flex items-center gap-3">
         <ProductThumb product={group.product} className="h-11 w-11" />
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium text-neutral-bg">{group.label}</p>
+          <p className="whitespace-normal break-words text-sm font-medium leading-snug text-neutral-bg">{group.label}</p>
           <p className="text-xs text-neutral-bg/50">{group.product.sku} — المتوفر: {group.stock}</p>
         </div>
         <QuantityStepper quantity={quantity} max={group.stock} onChange={onQuantityChange} />
