@@ -108,7 +108,7 @@ export function ProductCard({ product, cartEligibility = "ineligible" }: Product
               <span className="text-xl font-bold tracking-tight text-gold-dark sm:text-2xl">
                 {formatCurrencyFromCents(priceCents)}
               </span>
-              {isWholesale && <Badge variant="gold">سعر جملة</Badge>}
+              {isWholesale && <Badge variant="gold">سعر الجملة</Badge>}
             </div>
             <p className={`mt-2 flex items-center gap-1.5 text-xs font-medium ${isOutOfStock ? "text-rose-700" : isLowStock ? "text-amber-700" : "text-emerald-700"}`}>
               <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-current" />
