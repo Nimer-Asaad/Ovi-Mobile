@@ -79,6 +79,14 @@ export interface RepTraderContact {
   phone: string;
   city: string | null;
   address: string | null;
+  /** This trader's live account balance (opening balance + orders -
+   * payments — see getAccountBalanceCents), computed from the SAME nested
+   * `account` select as getMerchantsForRep, so listing a rep's contacts
+   * never costs an extra query per trader. Lets NewSaleForm show "الذمة
+   * الحالية على التاجر" the instant the rep picks a known contact, entirely
+   * from data already scoped to this rep — no separate lookup/action
+   * needed. 0 for a trader with no account yet (never sold to before). */
+  currentBalanceCents: number;
 }
 
 /** Contact-autofill list for a rep-facing customer/trader search (see
@@ -99,6 +107,13 @@ export async function getRepTraderContactsForSaleForm(repId: string): Promise<Re
       city: true,
       address: true,
       user: { select: { phone: true } },
+      account: {
+        select: {
+          openingBalanceCents: true,
+          orders: { select: { status: true, totalCents: true } },
+          payments: { select: { amountCents: true } },
+        },
+      },
     },
   });
 
@@ -109,6 +124,7 @@ export async function getRepTraderContactsForSaleForm(repId: string): Promise<Re
       phone: merchant.contactPhone ?? merchant.user?.phone ?? null,
       city: merchant.city,
       address: merchant.address,
+      currentBalanceCents: merchant.account ? getAccountBalanceCents(merchant.account) : 0,
     }))
     .filter((merchant): merchant is RepTraderContact => Boolean(merchant.phone));
 }

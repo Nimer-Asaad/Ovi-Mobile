@@ -2,6 +2,7 @@ import { requireRole } from "@/lib/auth/guards";
 import { ROLES } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { getAccountBalanceCents } from "@/lib/accounts";
 import { getRepTraderContactsForSaleForm } from "@/lib/rep-merchants";
 import { getOpenCustomerOrdersForRep } from "@/lib/rep-customer-orders";
 import { getRepCarSaleProducts } from "@/lib/rep-sales";
@@ -38,7 +39,20 @@ export default async function RepNewSalePage({ searchParams }: RepNewSalePagePro
     rep && merchantId
       ? prisma.merchant.findFirst({
           where: { id: merchantId, assignedRepId: rep.id },
-          select: { businessName: true, contactPhone: true, city: true, address: true, user: { select: { phone: true } } },
+          select: {
+            businessName: true,
+            contactPhone: true,
+            city: true,
+            address: true,
+            user: { select: { phone: true } },
+            account: {
+              select: {
+                openingBalanceCents: true,
+                orders: { select: { status: true, totalCents: true } },
+                payments: { select: { amountCents: true } },
+              },
+            },
+          },
         })
       : Promise.resolve(null),
   ]);
@@ -49,6 +63,12 @@ export default async function RepNewSalePage({ searchParams }: RepNewSalePagePro
         phone: preselectedMerchant.contactPhone ?? preselectedMerchant.user?.phone ?? "",
         city: preselectedMerchant.city,
         address: preselectedMerchant.address,
+        // Same getAccountBalanceCents formula as every other balance display
+        // in this app — the merchantId deep link (e.g. "بيع جديد" from a
+        // merchant's own /rep/merchants/[id] page) already re-verified
+        // assignedRepId === this rep above, so this never leaks another
+        // rep's trader's debt.
+        currentBalanceCents: preselectedMerchant.account ? getAccountBalanceCents(preselectedMerchant.account) : 0,
       }
     : undefined;
 

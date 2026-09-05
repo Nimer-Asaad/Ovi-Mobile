@@ -27,6 +27,17 @@ export interface SaleCustomerOption {
   phone: string;
   city: string | null;
   address: string | null;
+  /** This trader's live account balance at the moment this list/prefill was
+   * loaded (openingBalanceCents + orders - payments — see
+   * getAccountBalanceCents) — lets the sale form show "الذمة الحالية على
+   * التاجر" the instant a known contact is picked, with no extra request.
+   * Always present for a REAL known trader (getRepTraderContactsForSaleForm/
+   * the merchantId-prefilled page query both already compute it from data
+   * already scoped to this rep); a brand-new, never-before-seen customer
+   * name/phone typed here has no entry in `customers` at all, so it simply
+   * never reaches this shape — see the "no merchant resolved yet" state in
+   * NewSaleForm below. */
+  currentBalanceCents: number;
 }
 
 interface NewSaleFormProps {
@@ -58,6 +69,18 @@ interface NewSaleFormProps {
 }
 
 const initialState: RepSaleState = {};
+
+/** getAccountBalanceCents can legitimately go negative (a trader who has
+ * paid ahead of their invoices) — never silently clamped to zero here, since
+ * that would hide a real credit the trader is owed. Renders as a plain debt
+ * amount when >= 0, or an explicit "رصيد دائن" (credit) line when negative —
+ * the sign is never shown as a bare "-" that could read as a typo. */
+function formatDebtOrCredit(cents: number): { label: string; amount: string; isCredit: boolean } {
+  if (cents < 0) {
+    return { label: "رصيد دائن للتاجر", amount: formatCurrencyFromCents(Math.abs(cents)), isCredit: true };
+  }
+  return { label: "", amount: formatCurrencyFromCents(cents), isCredit: false };
+}
 
 /** Multi-line direct-sale form — a flat, searchable PRODUCT list (see
  * ProductSalePicker.tsx: "OVI 04", "OVI 63", ... — the actual Product rows),
@@ -99,6 +122,15 @@ export function NewSaleForm({ products, customers, customerOrders, action = crea
   const [notes, setNotes] = useState("");
   const [customerPicked, setCustomerPicked] = useState(Boolean(initialCustomer));
 
+  // The selected trader's account balance BEFORE this sale — null means "no
+  // known merchant resolved yet" (a brand-new name/phone the rep is still
+  // typing, or nothing picked), which the UI must show as an explicit
+  // placeholder rather than a misleading ₪0 (see the accounting summary
+  // below). Only ever set from a REAL SaleCustomerOption (a known contact or
+  // the merchantId-prefilled initialCustomer) — never guessed or computed
+  // client-side.
+  const [currentBalanceCents, setCurrentBalanceCents] = useState<number | null>(initialCustomer?.currentBalanceCents ?? null);
+
   // "المبلغ المدفوع الآن" — how much of this invoice the trader is paying
   // right now, 0 by default (the normal "fully on account" case). Kept as
   // the raw typed NIS string (same convention as productPrices above and
@@ -123,6 +155,7 @@ export function NewSaleForm({ products, customers, customerOrders, action = crea
   function handleCustomerNameChange(event: ChangeEvent<HTMLInputElement>) {
     setCustomerName(event.target.value);
     setCustomerPicked(false);
+    setCurrentBalanceCents(null);
   }
 
   const filteredCustomers = useMemo(() => {
@@ -140,6 +173,7 @@ export function NewSaleForm({ products, customers, customerOrders, action = crea
     setCity(customer.city ?? "");
     setAddress(customer.address ?? "");
     setCustomerPicked(true);
+    setCurrentBalanceCents(customer.currentBalanceCents);
   }
 
   /** Selecting a customer order REPLACES the current selection/customer name
@@ -188,6 +222,7 @@ export function NewSaleForm({ products, customers, customerOrders, action = crea
     setCity("");
     setAddress("");
     setCustomerPicked(false);
+    setCurrentBalanceCents(null);
     setSelectedOrderId(order.id);
     setOrderNotices(notices);
   }
@@ -201,6 +236,7 @@ export function NewSaleForm({ products, customers, customerOrders, action = crea
     setAddress("");
     setNotes("");
     setCustomerPicked(false);
+    setCurrentBalanceCents(null);
     setSelectedOrderId(null);
     setOrderNotices([]);
     setPaidNowInput("0");
@@ -214,11 +250,15 @@ export function NewSaleForm({ products, customers, customerOrders, action = crea
 
   const itemsJson = useMemo(() => JSON.stringify(buildSaleSubmitLines(groups, quantities, productPrices)), [groups, quantities, productPrices]);
 
-  // Display-only clamp for the "المتبقي" preview below — the real upper-
-  // bound check happens server-side (repSaleSchema + createRepSaleCore),
-  // never trusted from here.
+  // Display-only clamp for the preview below — the real upper-bound check
+  // happens server-side (repSaleSchema + createRepSaleCore), never trusted
+  // from here.
   const paidNowCentsPreview = Math.min(Math.max(Math.round((Number(paidNowInput) || 0) * 100), 0), totalCents);
-  const remainingCents = totalCents - paidNowCentsPreview;
+  // Pure preview, never stored anywhere and never sent to the server — the
+  // real post-sale balance is always openingBalanceCents + Orders - Payments
+  // (getAccountBalanceCents), computed fresh from the real Order + real
+  // AccountPayment this submit creates. All integer cents, no floating point.
+  const projectedDebtCents = currentBalanceCents !== null ? currentBalanceCents + totalCents - paidNowCentsPreview : null;
 
   if (groups.length === 0) {
     return <p className="text-sm text-neutral-bg/60">لا يوجد لديك مخزون متاح للبيع حالياً.</p>;
@@ -302,11 +342,46 @@ export function NewSaleForm({ products, customers, customerOrders, action = crea
                     </Select>
                   )}
                 </div>
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-neutral-bg/70">المتبقي على حساب التاجر</span>
-                  <span className={remainingCents > 0 ? "font-semibold text-rose-400" : "text-emerald-400"}>
-                    {formatCurrencyFromCents(remainingCents)}
-                  </span>
+                {/* Pre-submit accounting preview only — never stored, never
+                   sent to the server. The real balance after this sale is
+                   always openingBalanceCents + Orders - Payments, computed
+                   fresh from the real Order + AccountPayment this submit
+                   creates (see getAccountBalanceCents). Hidden entirely
+                   until a real, known trader is resolved (currentBalanceCents
+                   !== null) — never shows a guessed or misleading ₪0. */}
+                <div className="rounded-card border border-navy-soft bg-navy-deep/40 p-3">
+                  {currentBalanceCents === null ? (
+                    <p className="text-sm text-neutral-bg/60">اختر التاجر لعرض الذمة الحالية</p>
+                  ) : (
+                    (() => {
+                      const debtNow = formatDebtOrCredit(currentBalanceCents);
+                      const debtAfter = formatDebtOrCredit(projectedDebtCents!);
+                      return (
+                        <div className="flex flex-col gap-1.5 text-sm">
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="text-neutral-bg/70">{debtNow.label || "الذمة الحالية على التاجر"}</span>
+                            <span className={cn("font-medium", debtNow.isCredit ? "text-emerald-400" : "text-neutral-bg")}>
+                              {debtNow.amount}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="text-neutral-bg/70">قيمة الفاتورة</span>
+                            <span className="text-neutral-bg">{formatCurrencyFromCents(totalCents)}</span>
+                          </div>
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="text-neutral-bg/70">الدفعة الآن</span>
+                            <span className="text-neutral-bg">{formatCurrencyFromCents(paidNowCentsPreview)}</span>
+                          </div>
+                          <div className="mt-1 flex items-center justify-between gap-3 border-t border-navy-soft pt-2">
+                            <span className="font-semibold text-neutral-bg">{debtAfter.label || "الذمة بعد البيع"}</span>
+                            <span className={cn("text-base font-bold", debtAfter.isCredit ? "text-emerald-400" : "text-rose-400")}>
+                              {debtAfter.amount}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })()
+                  )}
                 </div>
               </div>
             </CardContent>
