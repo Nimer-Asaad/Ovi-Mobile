@@ -8,6 +8,7 @@ import { Select } from "@/components/ui/Select";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { formatCurrencyFromCents } from "@/lib/utils";
+import { MERCHANT_STATUSES } from "@/lib/constants";
 import { getMerchantStatusLabel, getMerchantStatusBadgeVariant } from "@/lib/merchant-labels";
 import { getMerchantsForRep, getRepMerchantRegions } from "@/lib/rep-merchants";
 
@@ -93,11 +94,17 @@ export default async function RepMerchantsPage({ searchParams }: RepMerchantsPag
               </div>
 
               <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
-                <Link href={`/rep/sales/new?merchantId=${merchant.id}`} className="w-full sm:w-auto">
-                  <Button size="sm" className="w-full">
+                {merchant.status === MERCHANT_STATUSES.APPROVED ? (
+                  <Link href={`/rep/sales/new?merchantId=${merchant.id}`} className="w-full sm:w-auto">
+                    <Button size="sm" className="w-full">
+                      بيع للتاجر
+                    </Button>
+                  </Link>
+                ) : (
+                  <Button size="sm" className="w-full" disabled title="التاجر موقوف حالياً ولا يمكن البيع له">
                     بيع للتاجر
                   </Button>
-                </Link>
+                )}
                 <Link href={`/rep/merchants/${merchant.id}#payment`} className="w-full sm:w-auto">
                   <Button size="sm" variant="outline" className="w-full">
                     تسجيل دفعة

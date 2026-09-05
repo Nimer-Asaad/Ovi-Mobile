@@ -8,8 +8,11 @@ import { Button } from "@/components/ui/Button";
 import { StatCard } from "@/components/ui/StatCard";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card";
 import { formatCurrencyFromCents } from "@/lib/utils";
+import { MERCHANT_STATUSES } from "@/lib/constants";
 import { buildAccountStatementRows } from "@/lib/account-statement";
 import { RecordMerchantPaymentForm } from "@/components/reps/RecordMerchantPaymentForm";
+import { getMerchantStatusLabel, getMerchantStatusBadgeVariant } from "@/lib/merchant-labels";
+import { Badge } from "@/components/ui/Badge";
 
 interface RepMerchantDetailPageProps {
   params: Promise<{ id: string }>;
@@ -42,6 +45,7 @@ export default async function RepMerchantDetailPage({ params }: RepMerchantDetai
           id: true,
           businessName: true,
           region: true,
+          status: true,
           contactPhone: true,
           user: { select: { phone: true } },
           account: {
@@ -87,6 +91,7 @@ export default async function RepMerchantDetailPage({ params }: RepMerchantDetai
       <PageHeader
         title={merchant.businessName}
         subtitle={[merchant.region, phone].filter(Boolean).join(" — ") || "كشف حساب التاجر"}
+        actions={<Badge variant={getMerchantStatusBadgeVariant(merchant.status)}>{getMerchantStatusLabel(merchant.status)}</Badge>}
       />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -100,9 +105,15 @@ export default async function RepMerchantDetailPage({ params }: RepMerchantDetai
       </div>
 
       <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap">
-        <Link href={`/rep/sales/new?merchantId=${merchant.id}`} className="w-full sm:w-auto">
-          <Button className="w-full">بيع جديد</Button>
-        </Link>
+        {merchant.status === MERCHANT_STATUSES.APPROVED ? (
+          <Link href={`/rep/sales/new?merchantId=${merchant.id}`} className="w-full sm:w-auto">
+            <Button className="w-full">بيع جديد</Button>
+          </Link>
+        ) : (
+          <Button className="w-full sm:w-auto" disabled title="التاجر موقوف حالياً ولا يمكن البيع له">
+            بيع جديد
+          </Button>
+        )}
         <Link href={`/rep/merchants/${merchant.id}/statement`} className="w-full sm:w-auto">
           <Button variant="outline" className="w-full">
             كشف الحساب الكامل

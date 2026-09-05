@@ -728,6 +728,8 @@ export async function createRepSaleForRep(repId: string, _prevState: RepSaleStat
     address: formData.get("address")?.toString().trim() || undefined,
     notes: formData.get("notes")?.toString().trim() || undefined,
     repCustomerOrderId: formData.get("repCustomerOrderId")?.toString().trim() || null,
+    paidNowCents: formData.get("paidNowCents")?.toString() ?? "0",
+    paidNowMethod: formData.get("paidNowMethod")?.toString() || undefined,
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? SALE_PARSE_ERROR_MESSAGE };

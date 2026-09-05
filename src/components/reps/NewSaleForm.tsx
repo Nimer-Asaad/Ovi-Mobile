@@ -4,10 +4,13 @@ import { useActionState, useMemo, useState, type ChangeEvent } from "react";
 import { createRepSale, type RepSaleState } from "@/app/rep/sales/actions";
 import { Input } from "@/components/ui/Input";
 import { Textarea } from "@/components/ui/Textarea";
+import { Select } from "@/components/ui/Select";
 import { Button } from "@/components/ui/Button";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card";
 import { Spinner } from "@/components/ui/Spinner";
 import { cn, formatCurrencyFromCents } from "@/lib/utils";
+import { ACCOUNT_PAYMENT_METHODS } from "@/lib/constants";
+import { getAccountPaymentMethodLabel } from "@/lib/account-labels";
 import {
   ProductSalePicker,
   buildSaleProductGroups,
@@ -95,6 +98,16 @@ export function NewSaleForm({ products, customers, customerOrders, action = crea
   const [address, setAddress] = useState(initialCustomer?.address ?? "");
   const [notes, setNotes] = useState("");
   const [customerPicked, setCustomerPicked] = useState(Boolean(initialCustomer));
+
+  // "المبلغ المدفوع الآن" — how much of this invoice the trader is paying
+  // right now, 0 by default (the normal "fully on account" case). Kept as
+  // the raw typed NIS string (same convention as productPrices above and
+  // ManualOrderSummary's paidInput) — the server schema (repSaleSchema)
+  // converts it to cents and re-validates it can't exceed the invoice total
+  // from the SAME items this form already submits; this component only
+  // clamps for the live preview below, it is never the source of truth.
+  const [paidNowInput, setPaidNowInput] = useState("0");
+  const [paidNowMethod, setPaidNowMethod] = useState<string>(ACCOUNT_PAYMENT_METHODS.CASH);
 
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [orderNotices, setOrderNotices] = useState<string[]>([]);
@@ -190,6 +203,8 @@ export function NewSaleForm({ products, customers, customerOrders, action = crea
     setCustomerPicked(false);
     setSelectedOrderId(null);
     setOrderNotices([]);
+    setPaidNowInput("0");
+    setPaidNowMethod(ACCOUNT_PAYMENT_METHODS.CASH);
   }
 
   const productSummaries = useMemo(() => summarizeSaleProducts(groups, quantities, productPrices), [groups, quantities, productPrices]);
@@ -198,6 +213,12 @@ export function NewSaleForm({ products, customers, customerOrders, action = crea
   const hasMissingPrice = productSummaries.some((product) => product.priceMissing);
 
   const itemsJson = useMemo(() => JSON.stringify(buildSaleSubmitLines(groups, quantities, productPrices)), [groups, quantities, productPrices]);
+
+  // Display-only clamp for the "المتبقي" preview below — the real upper-
+  // bound check happens server-side (repSaleSchema + createRepSaleCore),
+  // never trusted from here.
+  const paidNowCentsPreview = Math.min(Math.max(Math.round((Number(paidNowInput) || 0) * 100), 0), totalCents);
+  const remainingCents = totalCents - paidNowCentsPreview;
 
   if (groups.length === 0) {
     return <p className="text-sm text-neutral-bg/60">لا يوجد لديك مخزون متاح للبيع حالياً.</p>;
@@ -208,6 +229,8 @@ export function NewSaleForm({ products, customers, customerOrders, action = crea
       <form action={formAction} className="order-1 flex min-w-0 flex-1 flex-col gap-6 lg:order-2">
         <input type="hidden" name="items" value={itemsJson} />
         <input type="hidden" name="repCustomerOrderId" value={selectedOrderId ?? ""} />
+        <input type="hidden" name="paidNowCents" value={paidNowInput} />
+        <input type="hidden" name="paidNowMethod" value={paidNowMethod} />
 
         <Card>
           <CardHeader>
@@ -249,6 +272,41 @@ export function NewSaleForm({ products, customers, customerOrders, action = crea
                 <div className="flex items-center justify-between pt-3 text-sm font-semibold">
                   <span className="text-neutral-bg">إجمالي القطع: {totalPieces}</span>
                   <span className="text-gold-champagne">إجمالي الفاتورة: {formatCurrencyFromCents(totalCents)}</span>
+                </div>
+              </div>
+
+              <div className="mt-4 flex flex-col gap-3 border-t border-navy-soft pt-4">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <Input
+                    name="paidNowDisplay"
+                    type="number"
+                    min={0}
+                    max={totalCents / 100}
+                    step="0.01"
+                    label="المبلغ المدفوع الآن (₪)"
+                    value={paidNowInput}
+                    onChange={(event) => setPaidNowInput(event.target.value)}
+                  />
+                  {paidNowCentsPreview > 0 && (
+                    <Select
+                      name="paidNowMethodDisplay"
+                      label="طريقة الدفع"
+                      value={paidNowMethod}
+                      onChange={(event) => setPaidNowMethod(event.target.value)}
+                    >
+                      {Object.values(ACCOUNT_PAYMENT_METHODS).map((value) => (
+                        <option key={value} value={value}>
+                          {getAccountPaymentMethodLabel(value)}
+                        </option>
+                      ))}
+                    </Select>
+                  )}
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-neutral-bg/70">المتبقي على حساب التاجر</span>
+                  <span className={remainingCents > 0 ? "font-semibold text-rose-400" : "text-emerald-400"}>
+                    {formatCurrencyFromCents(remainingCents)}
+                  </span>
                 </div>
               </div>
             </CardContent>

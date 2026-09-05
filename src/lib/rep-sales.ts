@@ -2,7 +2,7 @@ import "server-only";
 import { revalidatePath } from "next/cache";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { ORDER_SOURCES, ORDER_STATUSES, PAYMENT_METHODS, PAYMENT_STATUSES, STOCK_MOVEMENT_TYPES, REP_CUSTOMER_ORDER_STATUSES } from "@/lib/constants";
+import { ORDER_SOURCES, ORDER_STATUSES, PAYMENT_METHODS, PAYMENT_STATUSES, STOCK_MOVEMENT_TYPES, REP_CUSTOMER_ORDER_STATUSES, MERCHANT_STATUSES } from "@/lib/constants";
 import type { RepSaleInput } from "@/lib/validation/repSale";
 import { decrementInventoryAtomic, recordStockMovement, InsufficientInventoryError } from "@/lib/inventory-transactions";
 import { getOrCreateMerchantAccount, recordInitialAccountPayment } from "@/lib/accounts";
@@ -137,7 +137,7 @@ export type CreateRepSaleResult = { ok: true; orderNumber: string } | { ok: fals
  * for-byte the same steps createRepSale always ran inline before this was
  * extracted. */
 export async function createRepSaleCore(input: RepSaleInput, context: CreateRepSaleContext): Promise<CreateRepSaleResult> {
-  const { items: saleItems, customerName, customerPhone, city, address, notes, repCustomerOrderId } = input;
+  const { items: saleItems, customerName, customerPhone, city, address, notes, repCustomerOrderId, paidNowCents, paidNowMethod } = input;
   const { salesRepId, carStockLocationId: locationId, actorUserId } = context;
 
   // A customer order is only ever a starting template (see the
@@ -241,6 +241,21 @@ export async function createRepSaleCore(input: RepSaleInput, context: CreateRepS
 
   const totalCents = lines.reduce((sum, item) => sum + item.unitPriceCents * item.quantity, 0);
 
+  // repSaleSchema already re-derives this same total from these same items
+  // and rejects paidNowCents > total at parse time — this is a second,
+  // independent check against the actual authoritative totalCents computed
+  // right here (never a client-sent total), matching the admin manual-order
+  // flow's own belt-and-suspenders check in src/app/admin/orders/new/actions.ts.
+  if (paidNowCents > totalCents) {
+    return { ok: false, error: "المبلغ المدفوع الآن أكبر من إجمالي الفاتورة" };
+  }
+  const paymentStatus =
+    totalCents > 0 && paidNowCents >= totalCents
+      ? PAYMENT_STATUSES.PAID
+      : paidNowCents > 0
+        ? PAYMENT_STATUSES.PARTIAL
+        : PAYMENT_STATUSES.PENDING;
+
   let orderNumber = "";
   let succeeded = false;
 
@@ -289,6 +304,16 @@ export async function createRepSaleCore(input: RepSaleInput, context: CreateRepS
           city,
           address,
         });
+        // A brand-new trader created just above is always APPROVED (see
+        // resolveOrCreateRepMerchant), so this only ever rejects a sale
+        // against an EXISTING merchant an admin has since archived/suspended
+        // (Merchant.status === SUSPENDED doubles as the archival state — see
+        // the schema doc comment) — a suspended merchant must never receive
+        // a new sale, even though their historical statement stays fully
+        // intact and viewable.
+        if (merchant.status !== MERCHANT_STATUSES.APPROVED) {
+          throw new Error("MERCHANT_NOT_APPROVED");
+        }
         const accountId = await getOrCreateMerchantAccount(tx, merchant.id);
 
         await tx.order.create({
@@ -310,8 +335,8 @@ export async function createRepSaleCore(input: RepSaleInput, context: CreateRepS
             shippingAddress: address,
             notes,
             paymentMethod: PAYMENT_METHODS.CASH,
-            paymentStatus: PAYMENT_STATUSES.PAID,
-            paidAmountCents: totalCents,
+            paymentStatus,
+            paidAmountCents: paidNowCents,
             items: {
               create: lines.map((item) => {
                 const variant = productById.get(item.productId)?.variants.find((row) => row.id === item.variantId);
@@ -352,14 +377,26 @@ export async function createRepSaleCore(input: RepSaleInput, context: CreateRepS
           },
         });
 
-        // A rep sale is always fully paid at the point of sale (paymentMethod
-        // CASH, paymentStatus PAID above) — mirror that into the trader's
-        // account ledger immediately so getAccountBalanceCents doesn't show
-        // a false debt for an order that was, in fact, paid in full.
-        // createdById here records the ACTUAL actor (the rep themselves, or
-        // the admin acting on their behalf) — never falsely attributed to
-        // the rep when an admin entered it.
-        await recordInitialAccountPayment(tx, accountId, totalCents, actorUserId);
+        // Order.totalCents above is always the FULL invoice amount — a
+        // wholesale trader's unpaid remainder is meant to sit on their
+        // account as debt, never silently shrunk. Only the amount actually
+        // received right now (paidNowCents, possibly 0, possibly the full
+        // total) is mirrored into the ledger as a real payment, exactly once
+        // — omitted entirely when nothing was paid, so getAccountBalanceCents
+        // never has to special-case a zero-amount row. createdById here
+        // records the ACTUAL actor (the rep themselves, or the admin acting
+        // on their behalf) — never falsely attributed to the rep when an
+        // admin entered it. The order number is already known at this point
+        // (generated above, before this transaction attempt), so the note
+        // can reference it for traceability without a second lookup — never
+        // relied on for accounting itself (see recordInitialAccountPayment's
+        // doc comment).
+        if (paidNowCents > 0) {
+          await recordInitialAccountPayment(tx, accountId, paidNowCents, actorUserId, {
+            method: paidNowMethod,
+            note: `دفعة عند إنشاء الطلب - فاتورة #${orderNumber}`,
+          });
+        }
 
         // Per line: atomic conditional decrement — never a stale
         // read-then-write. If the rep's car stock is no longer sufficient
@@ -392,6 +429,7 @@ export async function createRepSaleCore(input: RepSaleInput, context: CreateRepS
     } catch (err) {
       if (err instanceof Error && err.message === "INACTIVE_VARIANT") return { ok: false, error: "أحد خيارات المنتج لم يعد فعالاً؛ أعد اختيار الـVariant" };
       if (err instanceof Error && err.message === "CUSTOMER_ORDER_NOT_OPEN") return { ok: false, error: "لم تعد طلبية الزبون هذه نشطة — حدّث الصفحة وحاول مجدداً" };
+      if (err instanceof Error && err.message === "MERCHANT_NOT_APPROVED") return { ok: false, error: "هذا التاجر موقوف حالياً ولا يمكن تسجيل بيع جديد له" };
       if (err instanceof InsufficientInventoryError) {
         return { ok: false, error: "الكمية المطلوبة أكبر من مخزونك الحالي لأحد المنتجات، حاول مرة أخرى" };
       }

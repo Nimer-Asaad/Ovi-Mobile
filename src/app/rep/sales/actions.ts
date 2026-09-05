@@ -38,6 +38,8 @@ export async function createRepSale(_prevState: RepSaleState, formData: FormData
     address: formData.get("address")?.toString().trim() || undefined,
     notes: formData.get("notes")?.toString().trim() || undefined,
     repCustomerOrderId: formData.get("repCustomerOrderId")?.toString().trim() || null,
+    paidNowCents: formData.get("paidNowCents")?.toString() ?? "0",
+    paidNowMethod: formData.get("paidNowMethod")?.toString() || undefined,
   });
 
   if (!parsed.success) {

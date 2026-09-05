@@ -132,13 +132,13 @@ export interface ResolveRepMerchantInput {
  * SAME Merchant instead of a second, inconsistent one. Must run inside the
  * caller's own transaction, and never creates a duplicate: two calls with
  * the same rep+phone always return the same Merchant.id. */
-export async function resolveOrCreateRepMerchant(tx: Tx, input: ResolveRepMerchantInput): Promise<{ id: string; userId: string | null }> {
+export async function resolveOrCreateRepMerchant(tx: Tx, input: ResolveRepMerchantInput): Promise<{ id: string; userId: string | null; status: string }> {
   const existing = await tx.merchant.findFirst({
     where: {
       assignedRepId: input.salesRepId,
       OR: [{ contactPhone: input.contactPhone }, { user: { phone: input.contactPhone } }],
     },
-    select: { id: true, userId: true },
+    select: { id: true, userId: true, status: true },
   });
   if (existing) return existing;
 
@@ -152,7 +152,7 @@ export async function resolveOrCreateRepMerchant(tx: Tx, input: ResolveRepMercha
       status: MERCHANT_STATUSES.APPROVED,
       approvedAt: new Date(),
     },
-    select: { id: true, userId: true },
+    select: { id: true, userId: true, status: true },
   });
 }
 

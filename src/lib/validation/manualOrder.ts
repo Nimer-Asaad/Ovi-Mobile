@@ -11,7 +11,7 @@ export const MANUAL_ORDER_CUSTOMER_MODES = {
  * convention used everywhere else. Unlike repSale's positiveMoneyString,
  * zero is allowed here — an unpaid manual order (paidAmountCents = 0) is a
  * normal, expected case. */
-const nonNegativeMoneyString = z
+export const nonNegativeMoneyString = z
   .string()
   .min(1, "المبلغ مطلوب")
   .refine((v) => Number.isFinite(Number(v)) && Number(v) >= 0, {

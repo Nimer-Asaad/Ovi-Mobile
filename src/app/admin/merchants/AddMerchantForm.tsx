@@ -4,6 +4,7 @@ import { useActionState } from "react";
 import { createMerchant, type CreateMerchantState } from "./actions";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
+import { Textarea } from "@/components/ui/Textarea";
 import { Select } from "@/components/ui/Select";
 import { Button } from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Spinner";
@@ -24,11 +25,13 @@ export function AddMerchantForm({ reps }: AddMerchantFormProps) {
       </CardHeader>
       <CardContent>
         <form action={formAction} className="flex flex-col gap-4">
-          <Input name="businessName" label="اسم التاجر / المحل" required />
-          <Input name="contactPhone" label="رقم الهاتف" required />
-          <Input name="city" label="المدينة / المنطقة (اختياري)" />
+          <Input name="businessName" label="اسم المحل" required />
+          <Input name="contactName" label="اسم صاحب المحل (اختياري)" />
+          <Input name="contactPhone" label="رقم الجوال" required />
+          <Input name="whatsappPhone" label="رقم واتساب (اختياري)" />
+          <Input name="city" label="المدينة (اختياري)" />
+          <Input name="region" label="المنطقة (اختياري)" placeholder="مثال: نابلس" />
           <Input name="address" label="العنوان (اختياري)" />
-          <Input name="region" label="منطقة المندوب (اختياري)" placeholder="مثال: نابلس" />
           <Select name="assignedRepId" label="المندوب المسؤول (اختياري)" defaultValue="">
             <option value="">بدون مندوب</option>
             {reps.map((rep) => (
@@ -37,15 +40,18 @@ export function AddMerchantForm({ reps }: AddMerchantFormProps) {
               </option>
             ))}
           </Select>
-          <Input
-            name="openingBalanceCents"
-            type="number"
-            min={0}
-            step="0.01"
-            label="الرصيد الافتتاحي (اختياري)"
-            placeholder="0"
-          />
-          <p className="-mt-2 text-xs text-neutral-bg/50">المديونية السابقة على التاجر قبل بدء استخدام النظام</p>
+          <div>
+            <Input
+              name="openingBalanceCents"
+              type="number"
+              min={0}
+              step="0.01"
+              label="الرصيد الافتتاحي (اختياري)"
+              placeholder="0"
+            />
+            <p className="mt-1 text-xs text-neutral-bg/50">المديونية السابقة على التاجر قبل بدء استخدام النظام</p>
+          </div>
+          <Textarea name="notes" label="ملاحظات (اختياري)" placeholder="مثال: عميل قديم" />
 
           {state.error && (
             <p className="text-sm text-rose-600" role="alert">

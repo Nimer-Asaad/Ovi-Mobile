@@ -94,19 +94,27 @@ export async function getExistingCustomerAccountId(tx: Tx, customerId: string): 
  * account's first payment entry — without this, a tracked order that was
  * partially or fully paid at creation time would overstate the account's
  * balance by exactly that amount. Callers only invoke this when
- * paidAmountCents > 0, in the same transaction as the order creation. */
+ * paidAmountCents > 0, in the same transaction as the order creation.
+ * `options.method`/`options.note` default to the original CASH/generic-note
+ * values so every existing caller keeps behaving exactly as before; a caller
+ * that knows the trader's actual payment method and wants a traceable note
+ * (e.g. a rep sale's "paid now" amount — see createRepSaleCore) can pass
+ * both explicitly. Note is purely descriptive, never relied on for
+ * accounting — the balance is always openingBalanceCents + orders -
+ * payments (see getAccountBalanceCents), never derived from note text. */
 export async function recordInitialAccountPayment(
   tx: Tx,
   accountId: string,
   amountCents: number,
   createdById: string,
+  options?: { method?: string; note?: string },
 ): Promise<void> {
   await tx.accountPayment.create({
     data: {
       accountId,
       amountCents,
-      method: ACCOUNT_PAYMENT_METHODS.CASH,
-      note: "دفعة عند إنشاء الطلب",
+      method: options?.method ?? ACCOUNT_PAYMENT_METHODS.CASH,
+      note: options?.note ?? "دفعة عند إنشاء الطلب",
       createdById,
     },
   });

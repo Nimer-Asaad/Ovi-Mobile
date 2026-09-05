@@ -43,7 +43,17 @@ interface MerchantStatusActionsProps {
 export function MerchantStatusActions({ merchantId, currentStatus }: MerchantStatusActionsProps) {
   return (
     <div className="flex flex-wrap gap-3">
-      {currentStatus !== MERCHANT_STATUSES.APPROVED && (
+      {currentStatus === MERCHANT_STATUSES.SUSPENDED ? (
+        <StatusButton merchantId={merchantId} targetStatus={MERCHANT_STATUSES.APPROVED} label="تفعيل التاجر" />
+      ) : (
+        <StatusButton
+          merchantId={merchantId}
+          targetStatus={MERCHANT_STATUSES.SUSPENDED}
+          label="إيقاف التاجر"
+          variant="outline"
+        />
+      )}
+      {currentStatus !== MERCHANT_STATUSES.APPROVED && currentStatus !== MERCHANT_STATUSES.SUSPENDED && (
         <StatusButton merchantId={merchantId} targetStatus={MERCHANT_STATUSES.APPROVED} label="اعتماد التاجر" />
       )}
       {currentStatus !== MERCHANT_STATUSES.REJECTED && (

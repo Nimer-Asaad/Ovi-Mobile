@@ -93,17 +93,38 @@ model Merchant {
   userId        String?              @unique
   user          User?                @relation(fields: [userId], references: [id], onDelete: Cascade)
   businessName  String
+  /// Owner/contact person's own name — distinct from businessName (the
+  /// store/trade name). Purely descriptive, never used for identity
+  /// resolution (that's always contactPhone/user.phone). Optional since a
+  /// pre-existing merchant may not have this on file yet.
+  contactName   String?
   /// Contact phone/city/address for a login-less trader (userId null) — set
   /// by whoever quick-added them (admin form or a rep during a sale). Stay
   /// null for a real login-based merchant, whose contact info lives on User.
   contactPhone  String?
+  /// Separate WhatsApp number — deliberately independent from contactPhone
+  /// (a merchant may use a different number for WhatsApp than their main
+  /// line). Left null rather than defaulted to contactPhone when not
+  /// supplied — never silently assumed to be the same number.
+  whatsappPhone String?
   city          String?
   address       String?
+  /// Free-form admin notes (e.g. "عميل قديم") — display-only, never parsed
+  /// or used in any business logic.
+  notes         String?
   taxId         String?
   /// Free-form territory label (e.g. city/area name) used to filter which
   /// merchants a sales rep sees under /rep/merchants — not a separate model
   /// since no geography/hierarchy is needed, just a display + filter value.
   region        String?
+  /// MerchantStatus values: "PENDING" | "APPROVED" | "REJECTED" | "SUSPENDED"
+  /// SUSPENDED doubles as the archival state for a merchant that has real
+  /// financial/business history and therefore can never be hard-deleted
+  /// (see deleteMerchant in src/app/admin/merchants/actions.ts) — reused
+  /// rather than adding a second, competing isActive field, since SUSPENDED
+  /// already carries exactly the right existing semantics everywhere else in
+  /// the app (wholesale pricing hidden, checkout/manual-order/rep-sale
+  /// eligibility all already gate on status === APPROVED).
   status        String               @default("PENDING")
   approvedAt    DateTime?
   assignedRepId String?

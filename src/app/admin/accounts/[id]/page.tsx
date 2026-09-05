@@ -146,7 +146,7 @@ export default async function AdminAccountDetailPage({ params }: AdminAccountDet
         </CardContent>
       </Card>
 
-      <Card>
+      <Card id="payment">
         <CardHeader>
           <CardTitle>تسجيل دفعة جديدة</CardTitle>
         </CardHeader>

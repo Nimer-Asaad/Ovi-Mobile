@@ -3,6 +3,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
+import { Button } from "@/components/ui/Button";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { StatCard } from "@/components/ui/StatCard";
 import { AdminTable, AdminTableHead, AdminTableBody, AdminEmptyRow } from "@/components/admin/AdminTable";
@@ -10,9 +11,11 @@ import { AdminStatusBadge } from "@/components/admin/AdminStatusBadge";
 import { formatCurrencyFromCents } from "@/lib/utils";
 import { getMerchantStatusLabel, getMerchantStatusBadgeVariant } from "@/lib/merchant-labels";
 import { getOrderStatusLabel, getOrderStatusBadgeVariant, getPaymentStatusLabel, getPaymentStatusBadgeVariant } from "@/lib/order-labels";
-import { getAccountBalanceCents } from "@/lib/accounts";
+import { getAccountBalanceCents, getNewOrderHrefForAccount } from "@/lib/accounts";
 import { MerchantStatusActions } from "../MerchantStatusActions";
 import { MerchantAssignmentForm } from "../MerchantAssignmentForm";
+import { deleteMerchant } from "../actions";
+import { DeleteMerchantControl } from "@/components/admin/merchants/DeleteMerchantControl";
 
 interface AdminMerchantDetailPageProps {
   params: Promise<{ id: string }>;
@@ -23,39 +26,46 @@ export default async function AdminMerchantDetailPage({ params }: AdminMerchantD
 
   const [merchant, reps] = await Promise.all([
     prisma.merchant.findUnique({
-    where: { id },
-    select: {
-      id: true,
-      businessName: true,
-      taxId: true,
-      region: true,
-      assignedRepId: true,
-      status: true,
-      approvedAt: true,
-      createdAt: true,
-      contactPhone: true,
-      city: true,
-      address: true,
-      user: { select: { name: true, email: true, phone: true, isActive: true } },
-      orders: {
-        orderBy: { createdAt: "desc" },
-        select: {
-          orderNumber: true,
-          status: true,
-          paymentStatus: true,
-          totalCents: true,
-          createdAt: true,
+      where: { id },
+      select: {
+        id: true,
+        businessName: true,
+        contactName: true,
+        whatsappPhone: true,
+        notes: true,
+        taxId: true,
+        region: true,
+        assignedRepId: true,
+        status: true,
+        approvedAt: true,
+        createdAt: true,
+        contactPhone: true,
+        city: true,
+        address: true,
+        user: { select: { name: true, email: true, phone: true, isActive: true } },
+        orders: {
+          orderBy: { createdAt: "desc" },
+          select: {
+            orderNumber: true,
+            status: true,
+            paymentStatus: true,
+            totalCents: true,
+            createdAt: true,
+          },
         },
-      },
-      account: {
-        select: {
-          id: true,
-          openingBalanceCents: true,
-          orders: { select: { status: true, totalCents: true } },
-          payments: { select: { amountCents: true } },
+        account: {
+          select: {
+            id: true,
+            openingBalanceCents: true,
+            openingBalanceSetAt: true,
+            openingBalanceSetById: true,
+            orders: { select: { status: true, totalCents: true } },
+            payments: { select: { amountCents: true } },
+            _count: { select: { orders: true, payments: true } },
+          },
         },
+        _count: { select: { orders: true, repCustomerOrders: true } },
       },
-    },
     }),
     prisma.salesRepresentative.findMany({
       where: { isActive: true },
@@ -70,10 +80,32 @@ export default async function AdminMerchantDetailPage({ params }: AdminMerchantD
 
   const repOptions = reps.map((rep) => ({ id: rep.id, label: `${rep.user.name} (${rep.employeeCode})` }));
 
-  const totalOrders = merchant.orders.length;
   const totalValueCents = merchant.orders.reduce((sum, order) => sum + order.totalCents, 0);
-  const lastOrderDate = merchant.orders[0]?.createdAt ?? null;
+  const totalPaidCents = merchant.account?.payments.reduce((sum, payment) => sum + payment.amountCents, 0) ?? 0;
   const balanceCents = merchant.account ? getAccountBalanceCents(merchant.account) : null;
+  const phone = merchant.contactPhone ?? merchant.user?.phone ?? null;
+
+  // Same dependency check deleteMerchant itself re-verifies before acting —
+  // computed here purely so the confirm dialog can tell the admin the real
+  // outcome (archive vs. permanent delete) before they click, not just
+  // after. See deleteMerchant's own doc comment for why every one of these
+  // must be counted explicitly rather than assumed. merchant.user is only
+  // ever non-null when Merchant.userId is set (see the select above), so
+  // this is equivalent to checking userId directly.
+  const isLoginLinked = merchant.user != null;
+  const hasOpeningBalanceHistory =
+    (merchant.account?.openingBalanceCents ?? 0) !== 0 ||
+    merchant.account?.openingBalanceSetAt != null ||
+    merchant.account?.openingBalanceSetById != null;
+  const willArchiveInstead =
+    isLoginLinked ||
+    merchant._count.orders > 0 ||
+    merchant._count.repCustomerOrders > 0 ||
+    (merchant.account?._count.orders ?? 0) > 0 ||
+    (merchant.account?._count.payments ?? 0) > 0 ||
+    hasOpeningBalanceHistory;
+
+  const newSaleHref = merchant.account ? getNewOrderHrefForAccount(merchant.account.id, { merchantId: merchant.id, customerId: null }) : null;
 
   return (
     <div className="flex flex-col gap-6">
@@ -81,22 +113,57 @@ export default async function AdminMerchantDetailPage({ params }: AdminMerchantD
         title={merchant.businessName}
         subtitle={`سجّل في ${new Date(merchant.createdAt).toLocaleDateString("ar")}`}
         actions={
-          <Badge variant={getMerchantStatusBadgeVariant(merchant.status)}>
-            {getMerchantStatusLabel(merchant.status)}
-          </Badge>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant={getMerchantStatusBadgeVariant(merchant.status)}>{getMerchantStatusLabel(merchant.status)}</Badge>
+            <Link href={`/admin/merchants/${merchant.id}/edit`}>
+              <Button variant="outline" size="sm">
+                تعديل بيانات التاجر
+              </Button>
+            </Link>
+            <DeleteMerchantControl
+              merchantName={merchant.businessName}
+              willArchiveInstead={willArchiveInstead}
+              isLoginLinked={isLoginLinked}
+              action={deleteMerchant.bind(null, merchant.id)}
+            />
+          </div>
         }
       />
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle>معلومات النشاط التجاري</CardTitle>
+            <CardTitle>بيانات التاجر</CardTitle>
           </CardHeader>
           <CardContent>
-            <dl className="grid grid-cols-1 gap-2 text-sm">
+            <dl className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
               <div>
-                <dt className="text-neutral-bg/50">الاسم التجاري</dt>
+                <dt className="text-neutral-bg/50">اسم المحل</dt>
                 <dd className="text-neutral-bg">{merchant.businessName}</dd>
+              </div>
+              <div>
+                <dt className="text-neutral-bg/50">اسم صاحب المحل</dt>
+                <dd className="text-neutral-bg">{merchant.contactName ?? merchant.user?.name ?? "—"}</dd>
+              </div>
+              <div>
+                <dt className="text-neutral-bg/50">الجوال</dt>
+                <dd className="text-neutral-bg">{phone ?? "—"}</dd>
+              </div>
+              <div>
+                <dt className="text-neutral-bg/50">واتساب</dt>
+                <dd className="text-neutral-bg">{merchant.whatsappPhone ?? "—"}</dd>
+              </div>
+              <div>
+                <dt className="text-neutral-bg/50">المدينة</dt>
+                <dd className="text-neutral-bg">{merchant.city ?? "—"}</dd>
+              </div>
+              <div>
+                <dt className="text-neutral-bg/50">المنطقة</dt>
+                <dd className="text-neutral-bg">{merchant.region ?? "—"}</dd>
+              </div>
+              <div className="sm:col-span-2">
+                <dt className="text-neutral-bg/50">العنوان</dt>
+                <dd className="text-neutral-bg">{merchant.address ?? "—"}</dd>
               </div>
               {merchant.taxId && (
                 <div>
@@ -104,38 +171,32 @@ export default async function AdminMerchantDetailPage({ params }: AdminMerchantD
                   <dd className="text-neutral-bg">{merchant.taxId}</dd>
                 </div>
               )}
-              <div>
-                <dt className="text-neutral-bg/50">المنطقة</dt>
-                <dd className="text-neutral-bg">{merchant.region ?? "—"}</dd>
-              </div>
               {merchant.approvedAt && (
                 <div>
                   <dt className="text-neutral-bg/50">تاريخ الاعتماد</dt>
                   <dd className="text-neutral-bg">{new Date(merchant.approvedAt).toLocaleDateString("ar")}</dd>
                 </div>
               )}
+              {merchant.notes && (
+                <div className="sm:col-span-2">
+                  <dt className="text-neutral-bg/50">ملاحظات</dt>
+                  <dd className="whitespace-normal break-words text-neutral-bg">{merchant.notes}</dd>
+                </div>
+              )}
             </dl>
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>{merchant.user ? "معلومات المالك" : "بيانات التواصل"}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {merchant.user ? (
+        {merchant.user && (
+          <Card>
+            <CardHeader>
+              <CardTitle>حساب الدخول</CardTitle>
+            </CardHeader>
+            <CardContent>
               <dl className="grid grid-cols-1 gap-2 text-sm">
-                <div>
-                  <dt className="text-neutral-bg/50">الاسم</dt>
-                  <dd className="text-neutral-bg">{merchant.user.name}</dd>
-                </div>
                 <div>
                   <dt className="text-neutral-bg/50">البريد الإلكتروني</dt>
                   <dd className="text-neutral-bg">{merchant.user.email}</dd>
-                </div>
-                <div>
-                  <dt className="text-neutral-bg/50">الهاتف</dt>
-                  <dd className="text-neutral-bg">{merchant.user.phone ?? "—"}</dd>
                 </div>
                 <div>
                   <dt className="text-neutral-bg/50">حالة الحساب</dt>
@@ -144,35 +205,26 @@ export default async function AdminMerchantDetailPage({ params }: AdminMerchantD
                   </dd>
                 </div>
               </dl>
-            ) : (
-              <dl className="grid grid-cols-1 gap-2 text-sm">
-                <div>
-                  <dt className="text-neutral-bg/50">الهاتف</dt>
-                  <dd className="text-neutral-bg">{merchant.contactPhone ?? "—"}</dd>
-                </div>
-                <div>
-                  <dt className="text-neutral-bg/50">المدينة</dt>
-                  <dd className="text-neutral-bg">{merchant.city ?? "—"}</dd>
-                </div>
-                <div>
-                  <dt className="text-neutral-bg/50">العنوان</dt>
-                  <dd className="text-neutral-bg">{merchant.address ?? "—"}</dd>
-                </div>
-                <p className="text-xs text-neutral-bg/50">
-                  تاجر بدون حساب دخول — تمت إضافته مباشرة (لا يملك بريداً إلكترونياً أو كلمة مرور).
-                </p>
-              </dl>
-            )}
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        )}
+        {!merchant.user && (
+          <Card>
+            <CardContent>
+              <p className="text-xs text-neutral-bg/50">
+                تاجر بدون حساب دخول — تمت إضافته مباشرة (لا يملك بريداً إلكترونياً أو كلمة مرور).
+              </p>
+            </CardContent>
+          </Card>
+        )}
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="إجمالي الطلبات" value={String(totalOrders)} />
-        <StatCard label="إجمالي قيمة الطلبات" value={formatCurrencyFromCents(totalValueCents)} />
-        <StatCard label="آخر طلب" value={lastOrderDate ? new Date(lastOrderDate).toLocaleDateString("ar") : "لا يوجد"} />
+        <StatCard label="الرصيد الافتتاحي" value={merchant.account ? formatCurrencyFromCents(merchant.account.openingBalanceCents) : "—"} />
+        <StatCard label="إجمالي المشتريات" value={formatCurrencyFromCents(totalValueCents)} />
+        <StatCard label="إجمالي الدفعات" value={formatCurrencyFromCents(totalPaidCents)} />
         <StatCard
-          label="الرصيد المستحق"
+          label="الرصيد الحالي"
           value={balanceCents !== null ? formatCurrencyFromCents(Math.max(balanceCents, 0)) : "لا يوجد حساب دين"}
           badge={
             balanceCents !== null
@@ -185,12 +237,26 @@ export default async function AdminMerchantDetailPage({ params }: AdminMerchantD
       </div>
 
       {merchant.account && (
-        <Link
-          href={`/admin/accounts/${merchant.account.id}`}
-          className="self-start text-sm text-gold-champagne hover:underline"
-        >
-          عرض كشف حساب التاجر بالكامل (الطلبات والدفعات)
-        </Link>
+        <div className="flex flex-wrap gap-3">
+          {newSaleHref && (
+            <Link href={newSaleHref}>
+              <Button size="sm">بيع للتاجر</Button>
+            </Link>
+          )}
+          <Link href={`/admin/accounts/${merchant.account.id}#payment`}>
+            <Button size="sm" variant="outline">
+              تسجيل دفعة
+            </Button>
+          </Link>
+          <Link href={`/admin/accounts/${merchant.account.id}/statement`}>
+            <Button size="sm" variant="outline">
+              كشف الحساب
+            </Button>
+          </Link>
+          <Link href={`/admin/accounts/${merchant.account.id}`} className="text-sm text-gold-champagne hover:underline self-center">
+            عرض تفاصيل الحساب الكاملة
+          </Link>
+        </div>
       )}
 
       <Card>
@@ -249,10 +315,7 @@ export default async function AdminMerchantDetailPage({ params }: AdminMerchantD
                     {new Date(order.createdAt).toLocaleDateString("ar")}
                   </td>
                   <td className="px-4 py-3">
-                    <Link
-                      href={`/admin/orders/${order.orderNumber}`}
-                      className="text-sm text-gold-champagne hover:underline"
-                    >
+                    <Link href={`/admin/orders/${order.orderNumber}`} className="text-sm text-gold-champagne hover:underline">
                       التفاصيل
                     </Link>
                   </td>
