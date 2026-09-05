@@ -130,6 +130,14 @@ export function getNewOrderHrefForAccount(
 }
 
 export interface AccountBalanceInput {
+  /** CustomerAccount.openingBalanceCents — debt that existed before this
+   * account's first Order under Ovi Mobile (see the schema doc comment).
+   * Deliberately a REQUIRED field here (not optional/defaulted inside this
+   * function) so every call site is forced, at compile time, to actually
+   * select and pass it — the exact guarantee that no screen can silently
+   * keep computing debt with the old two-term formula. Pass 0 explicitly
+   * for a genuinely brand-new account that has none. */
+  openingBalanceCents: number;
   orders: { status: string; totalCents: number }[];
   payments: { amountCents: number }[];
 }
@@ -138,12 +146,16 @@ export interface AccountBalanceInput {
  * duplicate this formula inline. Cancelled/returned orders are excluded
  * (isTerminalOrderStatus covers exactly the two statuses that also restore
  * inventory in order-lifecycle.ts, i.e. the sale was undone), and the
- * result is always computed live from orders + payments, never stored,
- * matching Order.paidAmountCents's existing "never stored" convention. */
+ * result is always computed live from openingBalanceCents + orders -
+ * payments, never stored, matching Order.paidAmountCents's existing "never
+ * stored" convention. openingBalanceCents represents pre-system debt
+ * entered once by an ADMIN (see setAccountOpeningBalance in
+ * src/app/admin/accounts/actions.ts) — never a fabricated Order or
+ * AccountPayment. */
 export function getAccountBalanceCents(account: AccountBalanceInput): number {
   const totalOwedCents = account.orders
     .filter((order) => !isTerminalOrderStatus(order.status))
     .reduce((sum, order) => sum + order.totalCents, 0);
   const totalPaidCents = account.payments.reduce((sum, payment) => sum + payment.amountCents, 0);
-  return totalOwedCents - totalPaidCents;
+  return account.openingBalanceCents + totalOwedCents - totalPaidCents;
 }

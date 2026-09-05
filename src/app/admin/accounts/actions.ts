@@ -7,7 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth/guards";
 import { ROLES } from "@/lib/constants";
 import { hashPassword } from "@/lib/auth/password";
-import { createWalkInAccountSchema, recordAccountPaymentSchema } from "@/lib/validation/accounts";
+import { createWalkInAccountSchema, recordAccountPaymentSchema, setOpeningBalanceSchema } from "@/lib/validation/accounts";
 
 export interface CreateWalkInAccountState {
   error?: string;
@@ -142,4 +142,68 @@ export async function recordAccountPayment(
 
   revalidateAccountPaths(parsed.data.accountId);
   return { success: "تم تسجيل الدفعة بنجاح" };
+}
+
+export interface SetOpeningBalanceState {
+  error?: string;
+  success?: string;
+}
+
+/** Sets or corrects an account's opening balance — ADMIN-only, independently
+ * enforced here (never trusts the page's own guard alone). If one was
+ * already set (openingBalanceSetAt !== null), requires the explicit
+ * "confirmChange" checkbox before overwriting it — a plain, un-confirmed
+ * resubmission is rejected with a clear message, never silently applied.
+ * Every set/correction records who did it and when (openingBalanceSetById/
+ * openingBalanceSetAt), matching this app's existing "who did this" audit
+ * convention elsewhere (StockMovement.createdById, AccountPayment.createdById,
+ * etc.) — never settable by anyone but an ADMIN, and never derived from
+ * anything the client sends beyond the raw amount itself. */
+export async function setAccountOpeningBalance(
+  accountId: string,
+  _prevState: SetOpeningBalanceState,
+  formData: FormData,
+): Promise<SetOpeningBalanceState> {
+  const admin = await requireRole([ROLES.ADMIN]);
+
+  const account = await prisma.customerAccount.findUnique({
+    where: { id: accountId },
+    select: { id: true, openingBalanceSetAt: true, merchantId: true },
+  });
+  if (!account) {
+    return { error: "الحساب غير موجود" };
+  }
+
+  const parsed = setOpeningBalanceSchema.safeParse({
+    openingBalanceCents: formData.get("openingBalanceCents")?.toString(),
+    confirmChange: formData.get("confirmChange")?.toString(),
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "قيمة غير صالحة" };
+  }
+
+  const alreadySet = account.openingBalanceSetAt !== null;
+  if (alreadySet && parsed.data.confirmChange !== "on") {
+    return { error: "يجب تأكيد أنك تريد تعديل الرصيد الافتتاحي — تعديله سيغيّر مديونية التاجر الحالية" };
+  }
+
+  await prisma.customerAccount.update({
+    where: { id: accountId },
+    data: {
+      openingBalanceCents: parsed.data.openingBalanceCents,
+      openingBalanceSetAt: new Date(),
+      openingBalanceSetById: admin.id,
+    },
+  });
+
+  revalidateAccountPaths(accountId);
+  if (account.merchantId) {
+    revalidatePath("/admin/merchants");
+    revalidatePath(`/admin/merchants/${account.merchantId}`);
+    revalidatePath("/rep/merchants");
+    revalidatePath(`/rep/merchants/${account.merchantId}`);
+    revalidatePath(`/rep/merchants/${account.merchantId}/statement`);
+    revalidatePath("/rep");
+  }
+  return { success: "تم حفظ الرصيد الافتتاحي بنجاح" };
 }

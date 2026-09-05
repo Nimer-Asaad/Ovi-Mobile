@@ -43,6 +43,15 @@ interface NewSaleFormProps {
    * product/customer/order data are the only thing either surface needs;
    * nothing here is duplicated. */
   action?: (state: RepSaleState, formData: FormData) => Promise<RepSaleState>;
+  /** Preloads the customer fields as already "picked" — used by the "بيع
+   * جديد" deep link from a merchant's own page (/rep/merchants/[id]?...),
+   * which passes this rep's own already-assigned merchant so the rep never
+   * re-types a trader they're already looking at. Purely a starting point,
+   * same as selecting a customer order or a suggested contact — every field
+   * stays fully editable, and createRepSale still always resolves the real
+   * trader identity itself by phone (see resolveOrCreateRepMerchant), never
+   * by trusting this prefill. */
+  initialCustomer?: SaleCustomerOption;
 }
 
 const initialState: RepSaleState = {};
@@ -68,7 +77,7 @@ const initialState: RepSaleState = {};
  * against current car stock rather than trusted blindly. Product prices are
  * NEVER prefilled from a customer order (it never carried one) — the rep
  * still types each product's price once after preloading. */
-export function NewSaleForm({ products, customers, customerOrders, action = createRepSale }: NewSaleFormProps) {
+export function NewSaleForm({ products, customers, customerOrders, action = createRepSale, initialCustomer }: NewSaleFormProps) {
   const [state, formAction, isPending] = useActionState(action, initialState);
 
   const groups = useMemo(() => buildSaleProductGroups(products), [products]);
@@ -80,12 +89,12 @@ export function NewSaleForm({ products, customers, customerOrders, action = crea
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [productPrices, setProductPrices] = useState<Record<string, string>>({});
 
-  const [customerName, setCustomerName] = useState("");
-  const [customerPhone, setCustomerPhone] = useState("");
-  const [city, setCity] = useState("");
-  const [address, setAddress] = useState("");
+  const [customerName, setCustomerName] = useState(initialCustomer?.name ?? "");
+  const [customerPhone, setCustomerPhone] = useState(initialCustomer?.phone ?? "");
+  const [city, setCity] = useState(initialCustomer?.city ?? "");
+  const [address, setAddress] = useState(initialCustomer?.address ?? "");
   const [notes, setNotes] = useState("");
-  const [customerPicked, setCustomerPicked] = useState(false);
+  const [customerPicked, setCustomerPicked] = useState(Boolean(initialCustomer));
 
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [orderNotices, setOrderNotices] = useState<string[]>([]);

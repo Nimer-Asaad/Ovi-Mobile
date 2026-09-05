@@ -37,6 +37,15 @@ export function AddMerchantForm({ reps }: AddMerchantFormProps) {
               </option>
             ))}
           </Select>
+          <Input
+            name="openingBalanceCents"
+            type="number"
+            min={0}
+            step="0.01"
+            label="الرصيد الافتتاحي (اختياري)"
+            placeholder="0"
+          />
+          <p className="-mt-2 text-xs text-neutral-bg/50">المديونية السابقة على التاجر قبل بدء استخدام النظام</p>
 
           {state.error && (
             <p className="text-sm text-rose-600" role="alert">

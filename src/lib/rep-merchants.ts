@@ -35,6 +35,7 @@ export async function getMerchantsForRep(repId: string, region?: string): Promis
       user: { select: { phone: true } },
       account: {
         select: {
+          openingBalanceCents: true,
           orders: { select: { status: true, totalCents: true } },
           payments: { select: { amountCents: true } },
         },

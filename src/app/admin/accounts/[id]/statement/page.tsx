@@ -18,15 +18,23 @@ export default async function AdminAccountStatementPage({ params }: AdminAccount
     select: {
       displayName: true,
       phone: true,
+      openingBalanceCents: true,
+      openingBalanceSetAt: true,
       merchant: { select: { businessName: true } },
       customer: { select: { name: true } },
       orders: {
         orderBy: { createdAt: "desc" },
-        select: { orderNumber: true, createdAt: true, status: true, totalCents: true },
+        select: {
+          orderNumber: true,
+          createdAt: true,
+          status: true,
+          totalCents: true,
+          createdByRep: { select: { user: { select: { name: true } } } },
+        },
       },
       payments: {
         orderBy: { createdAt: "desc" },
-        select: { id: true, amountCents: true, method: true, createdAt: true, note: true },
+        select: { id: true, amountCents: true, method: true, createdAt: true, note: true, createdBy: { select: { name: true } } },
       },
     },
   });
@@ -36,6 +44,8 @@ export default async function AdminAccountStatementPage({ params }: AdminAccount
   }
 
   const kindLabel = account.merchant ? "تاجر جملة" : account.customer ? "عميل مسجّل" : "عميل مباشر";
+  const orders = account.orders.map((order) => ({ ...order, repName: order.createdByRep?.user.name ?? null }));
+  const payments = account.payments.map((payment) => ({ ...payment, collectedByName: payment.createdBy.name }));
 
   return (
     <div className="flex flex-col gap-6">
@@ -46,7 +56,17 @@ export default async function AdminAccountStatementPage({ params }: AdminAccount
         <PrintStatementButton />
       </div>
 
-      <AccountStatementView account={{ ...account, kindLabel }} />
+      <AccountStatementView
+        account={{
+          displayName: account.displayName,
+          phone: account.phone,
+          kindLabel,
+          openingBalanceCents: account.openingBalanceCents,
+          openingBalanceSetAt: account.openingBalanceSetAt,
+          orders,
+          payments,
+        }}
+      />
     </div>
   );
 }

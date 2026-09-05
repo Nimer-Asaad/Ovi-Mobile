@@ -151,12 +151,21 @@ export interface CreateMerchantState {
  * password) approved immediately, since an admin is vouching for them
  * directly rather than this going through /register/merchant self-signup +
  * review. Mirrors updateMerchantStatus's "every approved merchant gets a
- * debt-ledger account up front" behavior. */
+ * debt-ledger account up front" behavior.
+ *
+ * openingBalanceCents (parsed by createMerchantSchema, defaulting to 0 when
+ * left blank) is applied here — and ONLY here — never inside
+ * getOrCreateMerchantAccount itself, which is also called by the online
+ * self-signup approval flow (updateMerchantStatus below) and by
+ * resolveOrCreateRepMerchant; neither of those must ever set a nonzero
+ * opening balance. A nonzero value is recorded with openingBalanceSetAt/
+ * openingBalanceSetById set to this admin/now, in the SAME transaction as
+ * the Merchant+CustomerAccount creation — never a separate, later write. */
 export async function createMerchant(
   _prevState: CreateMerchantState,
   formData: FormData,
 ): Promise<CreateMerchantState> {
-  await requireRole([ROLES.ADMIN]);
+  const admin = await requireRole([ROLES.ADMIN]);
 
   const parsed = createMerchantSchema.safeParse({
     businessName: formData.get("businessName")?.toString().trim() ?? "",
@@ -165,12 +174,13 @@ export async function createMerchant(
     address: formData.get("address")?.toString().trim() || undefined,
     region: formData.get("region")?.toString().trim() || undefined,
     assignedRepId: formData.get("assignedRepId")?.toString().trim() || undefined,
+    openingBalanceCents: formData.get("openingBalanceCents")?.toString(),
   });
 
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "بيانات التاجر غير صالحة" };
   }
-  const { businessName, contactPhone, city, address, region, assignedRepId } = parsed.data;
+  const { businessName, contactPhone, city, address, region, assignedRepId, openingBalanceCents } = parsed.data;
 
   if (assignedRepId) {
     const rep = await prisma.salesRepresentative.findUnique({ where: { id: assignedRepId }, select: { id: true } });
@@ -193,7 +203,13 @@ export async function createMerchant(
       },
       select: { id: true },
     });
-    await getOrCreateMerchantAccount(tx, created.id);
+    const accountId = await getOrCreateMerchantAccount(tx, created.id);
+    if (openingBalanceCents > 0) {
+      await tx.customerAccount.update({
+        where: { id: accountId },
+        data: { openingBalanceCents, openingBalanceSetAt: new Date(), openingBalanceSetById: admin.id },
+      });
+    }
     return created;
   });
 

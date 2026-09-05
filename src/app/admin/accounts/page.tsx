@@ -36,6 +36,7 @@ export default async function AdminAccountsPage({ searchParams }: AdminAccountsP
       id: true,
       displayName: true,
       phone: true,
+      openingBalanceCents: true,
       merchant: { select: { id: true, businessName: true } },
       customer: { select: { id: true, name: true } },
       orders: { select: { status: true, totalCents: true } },

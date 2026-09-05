@@ -12,6 +12,7 @@ import { getOrderStatusLabel, getOrderStatusBadgeVariant, getOrderSourceLabel } 
 import { getAccountPaymentMethodLabel } from "@/lib/account-labels";
 import { getAccountBalanceCents, getNewOrderHrefForAccount } from "@/lib/accounts";
 import { RecordAccountPaymentForm } from "@/components/admin/accounts/RecordAccountPaymentForm";
+import { SetOpeningBalanceForm } from "@/components/admin/accounts/SetOpeningBalanceForm";
 
 interface AdminAccountDetailPageProps {
   params: Promise<{ id: string }>;
@@ -28,6 +29,9 @@ export default async function AdminAccountDetailPage({ params }: AdminAccountDet
       phone: true,
       notes: true,
       createdAt: true,
+      openingBalanceCents: true,
+      openingBalanceSetAt: true,
+      openingBalanceSetBy: { select: { name: true } },
       merchant: { select: { id: true, businessName: true, status: true } },
       customer: { select: { id: true, name: true, email: true } },
       orders: {
@@ -125,6 +129,20 @@ export default async function AdminAccountDetailPage({ params }: AdminAccountDet
               </div>
             )}
           </dl>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>الرصيد الافتتاحي</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <SetOpeningBalanceForm
+            accountId={account.id}
+            currentOpeningBalanceCents={account.openingBalanceCents}
+            setByName={account.openingBalanceSetBy?.name ?? null}
+            setAt={account.openingBalanceSetAt}
+          />
         </CardContent>
       </Card>
 

@@ -70,6 +70,7 @@ model User {
   auditLogsAsTarget              AdminAuditLog[]                 @relation("AuditLogTarget")
   accountAsCustomer              CustomerAccount?                @relation("AccountCustomer")
   accountPaymentsRecorded        AccountPayment[]                @relation("AccountPaymentCreatedBy")
+  accountOpeningBalancesSet      CustomerAccount[]               @relation("AccountOpeningBalanceSetBy")
   completedVariantAllocations    ProductVariantAllocationBatch[] @relation("VariantAllocationCompletedBy")
   repStockTransferBatchesCreated RepStockTransferBatch[]         @relation("RepStockTransferBatchCreatedBy")
   repCustomerOrdersCreated       RepCustomerOrder[]              @relation("RepCustomerOrderCreatedBy")
@@ -1005,17 +1006,38 @@ model OrderInventoryCompensation {
 /// stored, matching the existing Order.paidAmountCents "never stored"
 /// convention.
 model CustomerAccount {
-  id          String    @id @default(cuid())
-  displayName String
-  phone       String?
-  merchantId  String?   @unique
-  merchant    Merchant? @relation(fields: [merchantId], references: [id])
-  customerId  String?   @unique
-  customer    User?     @relation("AccountCustomer", fields: [customerId], references: [id])
-  notes       String?
-  isActive    Boolean   @default(true)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id                    String    @id @default(cuid())
+  displayName           String
+  phone                 String?
+  merchantId            String?   @unique
+  merchant              Merchant? @relation(fields: [merchantId], references: [id])
+  customerId            String?   @unique
+  customer              User?     @relation("AccountCustomer", fields: [customerId], references: [id])
+  notes                 String?
+  isActive              Boolean   @default(true)
+  /// Debt that existed BEFORE this account's first Order under Ovi Mobile —
+  /// e.g. a merchant's real pre-existing balance at the time they're
+  /// imported/added into the system. Deliberately its OWN explicit term in
+  /// the balance formula (see getAccountBalanceCents in src/lib/accounts.ts)
+  /// rather than a fabricated Order or AccountPayment — this represents
+  /// pre-system history, not a transaction that happened on any particular
+  /// day. Always >= 0 (enforced in application code — this system has no
+  /// concept of merchant credit/negative debt). Defaults to 0, so every
+  /// existing account's computed balance is completely unaffected until an
+  /// ADMIN explicitly sets one (see setAccountOpeningBalance in
+  /// src/app/admin/accounts/actions.ts — the only place this is ever
+  /// written; never settable by a rep, a merchant, or an online merchant's
+  /// own self-approval flow).
+  openingBalanceCents   Int       @default(0)
+  /// Both null until an ADMIN explicitly sets openingBalanceCents away from
+  /// its default. Once set, kept for every subsequent correction too (never
+  /// cleared back to null) — always reflects "who last touched this value,
+  /// and when."
+  openingBalanceSetAt   DateTime?
+  openingBalanceSetById String?
+  openingBalanceSetBy   User?     @relation("AccountOpeningBalanceSetBy", fields: [openingBalanceSetById], references: [id], onDelete: Restrict)
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
 
   orders   Order[]
   payments AccountPayment[]

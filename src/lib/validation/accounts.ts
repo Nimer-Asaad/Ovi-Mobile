@@ -51,3 +51,30 @@ export const recordAccountPaymentSchema = z
     note: z.string().trim().max(500, "الملاحظات طويلة جداً").optional(),
   })
   .strict();
+
+/** Admin types a plain NIS amount (e.g. "4350" or "0"); converts to integer
+ * agorot cents. Unlike positiveMoneyString above, zero (and an empty/omitted
+ * field, treated the same as "0") is valid here — most accounts have no
+ * pre-system debt at all, and this system has no concept of merchant
+ * credit, so negative values are rejected the same way zero is accepted. */
+export const openingBalanceMoneyString = z
+  .string()
+  .trim()
+  .optional()
+  .transform((value) => (value && value.length > 0 ? value : "0"))
+  .refine((value) => Number.isFinite(Number(value)) && Number(value) >= 0, {
+    message: "الرصيد الافتتاحي يجب أن يكون رقماً صفراً أو أكبر",
+  })
+  .transform((value) => Math.round(Number(value) * 100));
+
+/** Setting/correcting an account's opening balance — ADMIN-only (enforced in
+ * setAccountOpeningBalance, src/app/admin/accounts/actions.ts). confirmChange
+ * is only ever required by the action when the account already has one set
+ * (openingBalanceSetAt !== null) — this schema itself just carries whatever
+ * the checkbox sent (present as "on", or entirely absent when unchecked). */
+export const setOpeningBalanceSchema = z
+  .object({
+    openingBalanceCents: openingBalanceMoneyString,
+    confirmChange: z.string().optional(),
+  })
+  .strict();
