@@ -2,6 +2,11 @@ import "server-only";
 import { Prisma } from "@prisma/client";
 import { isTerminalOrderStatus } from "@/lib/order-lifecycle-rules";
 import { ACCOUNT_PAYMENT_METHODS } from "@/lib/constants";
+import {
+  buildAccountStatementRows,
+  type AccountStatementOrderInput,
+  type AccountStatementPaymentInput,
+} from "@/lib/account-statement";
 
 type Tx = Prisma.TransactionClient;
 
@@ -166,4 +171,108 @@ export function getAccountBalanceCents(account: AccountBalanceInput): number {
     .reduce((sum, order) => sum + order.totalCents, 0);
   const totalPaidCents = account.payments.reduce((sum, payment) => sum + payment.amountCents, 0);
   return account.openingBalanceCents + totalOwedCents - totalPaidCents;
+}
+
+export interface OrderAccountPosition {
+  /** The account's balance immediately BEFORE this specific order existed —
+   * a genuinely HISTORICAL figure: later orders/payments (relative to this
+   * one) never affect it, no matter when the invoice is actually viewed. */
+  previousDebtCents: number;
+  /** previousDebtCents + this order's own totalCents - this order's own
+   * paidAmountCents — the account's position immediately after this sale
+   * (and its immediate payment, if any), NOT the account's live balance
+   * today. Also historical: unaffected by anything that happened to the
+   * account after this sale. */
+  debtAfterSaleCents: number;
+}
+
+export interface AccountHistoryInput {
+  openingBalanceCents: number;
+  /** Passed straight through to buildAccountStatementRows — never actually
+   * used for ordering here (the opening balance is always included
+   * unconditionally, see above), but required so this can't accidentally
+   * diverge from the exact same AccountStatementInput shape the trusted
+   * statement builder expects. */
+  openingBalanceSetAt: Date | null;
+  /** The account's FULL order list — must include this order itself (the
+   * function locates it by orderNumber to find its place in the
+   * chronology); every other order, before or after, is used only to
+   * reconstruct what the balance stood at up to (not including) this one. */
+  orders: AccountStatementOrderInput[];
+  /** The account's FULL payment list, including this order's own immediate
+   * payment if it has one — it's excluded from "previous" automatically by
+   * chronology (see below), never by guessing which row it is. */
+  payments: AccountStatementPaymentInput[];
+}
+
+/** Derives an invoice's "الذمة السابقة"/"الذمة بعد البيع" position for one
+ * specific Order — a HISTORICAL snapshot, correct no matter how much later
+ * the invoice is reopened. Reuses buildAccountStatementRows
+ * (src/lib/account-statement.ts) — the same trusted chronological
+ * ordering/tie-break/terminal-order logic the merchant statement page
+ * already shows — rather than inventing a second accounting
+ * interpretation: it returns one row per order/payment sorted by
+ * (createdAt, then "orders before payments at an identical instant"), each
+ * carrying the running balance immediately after that row.
+ *
+ * previousDebtCents is the running balance of the row immediately BEFORE
+ * this order's own SALE row — i.e., every earlier order (excluding
+ * cancelled/returned ones, exactly like getAccountBalanceCents) and every
+ * earlier payment, plus the account's opening balance (always included,
+ * unconditionally, the same way getAccountBalanceCents and
+ * buildAccountStatementRows both treat it — never date-gated by
+ * openingBalanceSetAt, since it represents debt that predates every
+ * recorded order/payment).
+ *
+ * WHY THIS CORRECTLY EXCLUDES THE ORDER'S OWN IMMEDIATE PAYMENT: Postgres
+ * evaluates each row's `createdAt DEFAULT CURRENT_TIMESTAMP` column at
+ * TRANSACTION START, so an order and the AccountPayment posted for its
+ * paidNow amount (created in the very same $transaction — see
+ * createRepSaleCore / admin/orders/new/actions.ts) always share the exact
+ * same createdAt value. buildAccountStatementRows's tie-break sorts every
+ * order before every payment at an identical timestamp, so that immediate
+ * payment always sorts strictly AFTER this order's own row — it can never
+ * leak into "previous," with no timestamp-adjacency guessing or note
+ * matching required.
+ *
+ * debtAfterSaleCents is then computed directly from this order's own
+ * persisted totalCents/paidAmountCents (never by summing statement rows,
+ * and never by trying to identify "the" AccountPayment row that belongs to
+ * this sale) — the exact authoritative fields already used to create both
+ * the Order and its AccountPayment in the first place.
+ *
+ * DELIBERATE CHOICE ON TERMINAL STATUS: earlier orders use their CURRENT
+ * status (via isTerminalOrderStatus, inside buildAccountStatementRows) when
+ * computing previousDebtCents — this app has no point-in-time status
+ * history to reconstruct "was order X terminal as of this date", so a
+ * cancellation always retroactively removes that order's contribution
+ * everywhere, exactly matching getAccountBalanceCents's own existing
+ * semantics; this is not a new interpretation, only reuse of the existing
+ * one. THIS order's own current status is deliberately NOT checked for the
+ * debtAfterSaleCents figure, even if it has since become terminal — an
+ * invoice is the historical record of what was actually sold and charged
+ * at the time, not a value that should retroactively zero itself out
+ * because of a later cancellation (the account's CURRENT balance, via
+ * getAccountBalanceCents, already correctly reflects that cancellation
+ * going forward — this invoice figure intentionally does not).
+ *
+ * Never stores anything — pure display derivation, recomputed on every
+ * view. Throws only if `order` is somehow missing from `account.orders`
+ * (a caller bug: every call site fetches the account's orders including
+ * this very order, since Order.accountId already points at it). */
+export function getOrderAccountPosition(
+  account: AccountHistoryInput,
+  order: { orderNumber: string; totalCents: number; paidAmountCents: number },
+): OrderAccountPosition {
+  const rows = buildAccountStatementRows(account);
+  const saleRowIndex = rows.findIndex((row) => row.type === "SALE" && row.reference === order.orderNumber);
+  if (saleRowIndex === -1) {
+    throw new Error(`getOrderAccountPosition: order ${order.orderNumber} not found in its own account's order list`);
+  }
+
+  const previousRow = saleRowIndex === 0 ? null : rows[saleRowIndex - 1];
+  const previousDebtCents = previousRow ? previousRow.balanceCents : 0;
+  const debtAfterSaleCents = previousDebtCents + order.totalCents - order.paidAmountCents;
+
+  return { previousDebtCents, debtAfterSaleCents };
 }

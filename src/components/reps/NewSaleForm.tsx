@@ -10,7 +10,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card";
 import { Spinner } from "@/components/ui/Spinner";
 import { cn, formatCurrencyFromCents } from "@/lib/utils";
 import { ACCOUNT_PAYMENT_METHODS } from "@/lib/constants";
-import { getAccountPaymentMethodLabel } from "@/lib/account-labels";
+import { getAccountPaymentMethodLabel, formatDebtOrCredit } from "@/lib/account-labels";
 import {
   ProductSalePicker,
   buildSaleProductGroups,
@@ -69,18 +69,6 @@ interface NewSaleFormProps {
 }
 
 const initialState: RepSaleState = {};
-
-/** getAccountBalanceCents can legitimately go negative (a trader who has
- * paid ahead of their invoices) — never silently clamped to zero here, since
- * that would hide a real credit the trader is owed. Renders as a plain debt
- * amount when >= 0, or an explicit "رصيد دائن" (credit) line when negative —
- * the sign is never shown as a bare "-" that could read as a typo. */
-function formatDebtOrCredit(cents: number): { label: string; amount: string; isCredit: boolean } {
-  if (cents < 0) {
-    return { label: "رصيد دائن للتاجر", amount: formatCurrencyFromCents(Math.abs(cents)), isCredit: true };
-  }
-  return { label: "", amount: formatCurrencyFromCents(cents), isCredit: false };
-}
 
 /** Multi-line direct-sale form — a flat, searchable PRODUCT list (see
  * ProductSalePicker.tsx: "OVI 04", "OVI 63", ... — the actual Product rows),

@@ -29,6 +29,7 @@
     "cloudinary": "^2.10.0",
     "clsx": "^2.1.1",
     "heic-convert": "^2.1.0",
+    "html-to-image": "^1.11.13",
     "next": "^15.1.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

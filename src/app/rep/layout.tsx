@@ -15,11 +15,11 @@ export default async function RepLayout({ children }: { children: React.ReactNod
   await requireRole([ROLES.SALES_REPRESENTATIVE]);
 
   return (
-    <div className="flex min-h-screen bg-navy-deep">
+    <div className="flex min-h-screen bg-navy-deep print:bg-white">
       <RepSidebar />
       <div className="flex min-w-0 flex-1 flex-col">
         <RepTopbar title="لوحة تحكم المندوب" />
-        <main className="flex-1 p-6">{children}</main>
+        <main className="flex-1 p-6 print:p-0">{children}</main>
       </div>
     </div>
   );

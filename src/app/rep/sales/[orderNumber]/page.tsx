@@ -1,25 +1,28 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireRole } from "@/lib/auth/guards";
 import { ROLES } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
-import { Badge } from "@/components/ui/Badge";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { ProductImagePlaceholder } from "@/components/catalog/ProductImagePlaceholder";
-import { formatCurrencyFromCents } from "@/lib/utils";
-import {
-  getOrderStatusLabel,
-  getOrderStatusBadgeVariant,
-  getPaymentMethodLabel,
-  getPaymentStatusLabel,
-  getPaymentStatusBadgeVariant,
-} from "@/lib/order-labels";
-import { getMovementTypeLabel, getMovementTypeBadgeVariant } from "@/lib/inventory-labels";
+import { InvoiceActions } from "@/components/admin/orders/InvoiceActions";
+import type { InvoiceData } from "@/components/admin/orders/InvoiceView";
+import { getOrderAccountPosition } from "@/lib/accounts";
 
 interface RepSaleDetailPageProps {
   params: Promise<{ orderNumber: string }>;
 }
 
+/** A rep's own sale invoice — "فاتورة البيع" (see InvoiceView/InvoiceActions:
+ * one shared component for viewing, printing, downloading as PNG, and
+ * sharing to WhatsApp). This is the page createRepSale/createRepSaleForRep
+ * already redirect to right after a successful sale, and the same page a
+ * rep reaches later from /rep/sales — never a separate, one-time-only
+ * invoice route.
+ *
+ * Authorization: scoped to `order.createdByRepId === this rep's own id`,
+ * exactly as before this page became the invoice — a rep can never view
+ * another rep's sale by guessing/changing the orderNumber in the URL, since
+ * the query below is filtered server-side, not just hidden in the UI. */
 export default async function RepSaleDetailPage({ params }: RepSaleDetailPageProps) {
   const user = await requireRole([ROLES.SALES_REPRESENTATIVE]);
   const { orderNumber } = await params;
@@ -33,10 +36,13 @@ export default async function RepSaleDetailPage({ params }: RepSaleDetailPagePro
     where: { orderNumber },
     select: {
       orderNumber: true,
-      status: true,
+      source: true,
       createdByRepId: true,
+      createdByRep: { select: { user: { select: { name: true } } } },
       subtotalCents: true,
+      discountCents: true,
       totalCents: true,
+      paidAmountCents: true,
       contactName: true,
       contactPhone: true,
       city: true,
@@ -45,6 +51,28 @@ export default async function RepSaleDetailPage({ params }: RepSaleDetailPagePro
       paymentMethod: true,
       paymentStatus: true,
       createdAt: true,
+      merchant: {
+        select: {
+          businessName: true,
+          contactName: true,
+          contactPhone: true,
+          whatsappPhone: true,
+          city: true,
+          region: true,
+        },
+      },
+      account: {
+        select: {
+          openingBalanceCents: true,
+          openingBalanceSetAt: true,
+          // orderNumber/createdAt (orders) and id/createdAt/method/note
+          // (payments) are all needed by getOrderAccountPosition to rebuild
+          // the exact chronological ordering buildAccountStatementRows uses
+          // — never just the bare totals getAccountBalanceCents alone needs.
+          orders: { select: { orderNumber: true, createdAt: true, status: true, totalCents: true } },
+          payments: { select: { id: true, createdAt: true, amountCents: true, method: true, note: true } },
+        },
+      },
       items: {
         select: {
           id: true,
@@ -57,16 +85,7 @@ export default async function RepSaleDetailPage({ params }: RepSaleDetailPagePro
           colorNameSnapshot: true,
           variantCodeSnapshot: true,
           product: {
-            select: {
-              sku: true,
-              name: true,
-              nameAr: true,
-              images: {
-                select: { url: true, altText: true },
-                orderBy: [{ isMain: "desc" }, { sortOrder: "asc" }],
-                take: 1,
-              },
-            },
+            select: { sku: true, name: true, nameAr: true },
           },
         },
       },
@@ -77,145 +96,48 @@ export default async function RepSaleDetailPage({ params }: RepSaleDetailPagePro
     notFound();
   }
 
-  const movement = await prisma.stockMovement.findFirst({
-    where: { note: { contains: orderNumber, mode: "insensitive" as const } },
-    select: { type: true, quantity: true, previousQuantity: true, newQuantity: true, createdAt: true },
-  });
+  const invoiceData: InvoiceData = {
+    orderNumber: order.orderNumber,
+    createdAt: order.createdAt,
+    source: order.source,
+    paymentMethod: order.paymentMethod,
+    paymentStatus: order.paymentStatus,
+    subtotalCents: order.subtotalCents,
+    discountCents: order.discountCents,
+    totalCents: order.totalCents,
+    paidAmountCents: order.paidAmountCents,
+    contactName: order.contactName,
+    contactPhone: order.contactPhone,
+    city: order.city,
+    shippingAddress: order.shippingAddress,
+    notes: order.notes,
+    // A rep sale always resolves a real Merchant (see resolveOrCreateRepMerchant
+    // in createRepSaleCore) — customer is never used for a rep-sale invoice's
+    // identity, so it's never queried above.
+    customer: null,
+    merchant: order.merchant,
+    repName: order.createdByRep?.user.name ?? null,
+    account: order.account ? getOrderAccountPosition(order.account, order) : null,
+    items: order.items,
+  };
+
+  const whatsappNumber = order.merchant?.whatsappPhone ?? order.merchant?.contactPhone ?? null;
 
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-6">
-      <PageHeader
-        title={`طلب ${order.orderNumber}`}
-        subtitle={`أُنشئ في ${new Date(order.createdAt).toLocaleDateString("ar")}`}
-        actions={<Badge variant={getOrderStatusBadgeVariant(order.status)}>{getOrderStatusLabel(order.status)}</Badge>}
-      />
-
-      <Card>
-        <CardHeader>
-          <CardTitle>المنتجات</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex flex-col divide-y divide-navy-soft">
-            {order.items.map((item) => {
-              const thumbnail = item.product.images[0];
-              return (
-                <div key={item.id} className="flex items-center gap-4 py-3 first:pt-0 last:pb-0">
-                  <div className="h-14 w-14 shrink-0 overflow-hidden rounded-card bg-navy-soft">
-                    {thumbnail ? (
-                      // eslint-disable-next-line @next/next/no-img-element -- arbitrary admin-entered external URLs
-                      <img
-                        src={thumbnail.url}
-                        alt={thumbnail.altText ?? item.product.name}
-                        className="h-full w-full object-cover"
-                    loading="lazy"
-                      />
-                    ) : (
-                      <ProductImagePlaceholder className="h-full w-full" />
-                    )}
-                  </div>
-                  <div className="flex-1">
-                    <p className="text-sm font-medium text-neutral-bg">
-                      {item.product.nameAr ?? item.product.name}
-                    </p>
-                    <p className="text-xs text-neutral-bg/50">
-                      {item.product.sku}
-                      {(item.color || item.colorNameSnapshot) && <span> — {item.color ? (item.color.nameAr ?? item.color.name) : item.colorNameSnapshot}</span>}
-                      {item.phoneModelSnapshot && <span> — {item.phoneBrandSnapshot} / {item.phoneModelSnapshot}{item.variantCodeSnapshot ? ` (${item.variantCodeSnapshot})` : ""}</span>}
-                    </p>
-                    <p className="text-xs text-neutral-bg/60">
-                      {formatCurrencyFromCents(item.unitPriceCents)} × {item.quantity}
-                    </p>
-                  </div>
-                  <span className="font-semibold text-neutral-bg">
-                    {formatCurrencyFromCents(item.totalCents)}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-
-          <div className="mt-4 flex items-center justify-between border-t border-navy-soft pt-4 text-base font-semibold">
-            <span className="text-neutral-bg">الإجمالي</span>
-            <span className="text-gold-champagne">{formatCurrencyFromCents(order.totalCents)}</span>
-          </div>
-        </CardContent>
-      </Card>
-
-      <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>معلومات العميل</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <dl className="grid grid-cols-1 gap-2 text-sm">
-              <div>
-                <dt className="text-neutral-bg/50">الاسم</dt>
-                <dd className="text-neutral-bg">{order.contactName ?? "—"}</dd>
-              </div>
-              <div>
-                <dt className="text-neutral-bg/50">الهاتف</dt>
-                <dd className="text-neutral-bg">{order.contactPhone ?? "—"}</dd>
-              </div>
-              <div>
-                <dt className="text-neutral-bg/50">المدينة / المنطقة</dt>
-                <dd className="text-neutral-bg">{order.city ?? "—"}</dd>
-              </div>
-              <div>
-                <dt className="text-neutral-bg/50">العنوان</dt>
-                <dd className="text-neutral-bg">{order.shippingAddress ?? "—"}</dd>
-              </div>
-              {order.notes && (
-                <div>
-                  <dt className="text-neutral-bg/50">ملاحظات</dt>
-                  <dd className="text-neutral-bg">{order.notes}</dd>
-                </div>
-              )}
-            </dl>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>الدفع</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <dl className="grid grid-cols-1 gap-2 text-sm">
-              <div>
-                <dt className="text-neutral-bg/50">طريقة الدفع</dt>
-                <dd className="text-neutral-bg">{getPaymentMethodLabel(order.paymentMethod)}</dd>
-              </div>
-              <div>
-                <dt className="text-neutral-bg/50">حالة الدفع</dt>
-                <dd>
-                  <Badge variant={getPaymentStatusBadgeVariant(order.paymentStatus)}>
-                    {getPaymentStatusLabel(order.paymentStatus)}
-                  </Badge>
-                </dd>
-              </div>
-            </dl>
-          </CardContent>
-        </Card>
+      <div className="print:hidden">
+        <PageHeader
+          title="فاتورة البيع"
+          subtitle={`طلب ${order.orderNumber}`}
+          actions={
+            <Link href="/rep/sales" className="text-sm text-gold-champagne hover:underline">
+              العودة إلى مبيعاتي
+            </Link>
+          }
+        />
       </div>
 
-      {movement && (
-        <Card>
-          <CardHeader>
-            <CardTitle>حركة المخزون المرتبطة</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex flex-wrap items-center gap-4 text-sm">
-              <Badge variant={getMovementTypeBadgeVariant(movement.type)}>
-                {getMovementTypeLabel(movement.type)}
-              </Badge>
-              <span className="text-neutral-bg/70">الكمية: {movement.quantity}</span>
-              <span className="text-neutral-bg/70">
-                السابق: {movement.previousQuantity ?? "—"} ← الجديد: {movement.newQuantity ?? "—"}
-              </span>
-              <span className="text-neutral-bg/70">{new Date(movement.createdAt).toLocaleString("ar")}</span>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+      <InvoiceActions order={invoiceData} whatsappNumber={whatsappNumber} />
     </div>
   );
 }
