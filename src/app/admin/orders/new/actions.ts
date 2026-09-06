@@ -7,6 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth/guards";
 import { getMainWarehouse } from "@/lib/inventory";
 import { getOrCreateMerchantAccount, getOrCreateCustomerAccount, recordInitialAccountPayment } from "@/lib/accounts";
+import { generateDailyOrderNumber } from "@/lib/order-number";
 import {
   ROLES,
   MERCHANT_STATUSES,
@@ -24,15 +25,6 @@ export interface ManualOrderState {
 }
 
 const PARSE_ERROR_MESSAGE = "بيانات الطلب غير صالحة";
-
-function generateOrderNumber(): string {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, "0");
-  const d = String(now.getDate()).padStart(2, "0");
-  const random = Math.floor(1000 + Math.random() * 9000);
-  return `OVI-${y}${m}${d}-${random}`;
-}
 
 function revalidateManualOrderPaths(orderNumber: string): void {
   revalidatePath("/admin/orders");
@@ -352,7 +344,6 @@ export async function createManualOrder(
   let succeeded = false;
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    orderNumber = generateOrderNumber();
     try {
       await prisma.$transaction(async (tx) => {
         const requestedVariantIds = lines.flatMap((item) => item.variantId ? [item.variantId] : []);
@@ -387,6 +378,13 @@ export async function createManualOrder(
             accountId = createdAccount.id;
           }
         }
+
+        // Concurrency-safe daily sequence (OVI-YYYYMMDD-NNNN, resetting
+        // every business day — see generateDailyOrderNumber), generated
+        // inside this same transaction right before the row that consumes
+        // it, so its advisory lock covers exactly the "read current max,
+        // then insert" critical section.
+        orderNumber = await generateDailyOrderNumber(tx);
 
         await tx.order.create({
           data: {

@@ -7,16 +7,8 @@ import type { RepSaleInput } from "@/lib/validation/repSale";
 import { decrementInventoryAtomic, recordStockMovement, InsufficientInventoryError } from "@/lib/inventory-transactions";
 import { getOrCreateMerchantAccount, recordInitialAccountPayment } from "@/lib/accounts";
 import { resolveOrCreateRepMerchant } from "@/lib/rep-merchants";
+import { generateDailyOrderNumber } from "@/lib/order-number";
 import type { SaleProductOption } from "@/components/reps/ProductSalePicker";
-
-function generateOrderNumber(): string {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, "0");
-  const d = String(now.getDate()).padStart(2, "0");
-  const random = Math.floor(1000 + Math.random() * 9000);
-  return `OVI-${y}${m}${d}-${random}`;
-}
 
 export function revalidateRepSalePaths(orderNumber: string): void {
   revalidatePath("/rep");
@@ -260,7 +252,6 @@ export async function createRepSaleCore(input: RepSaleInput, context: CreateRepS
   let succeeded = false;
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    orderNumber = generateOrderNumber();
     try {
       await prisma.$transaction(async (tx) => {
         const requestedVariantIds = lines.flatMap((item) => (item.variantId ? [item.variantId] : []));
@@ -315,6 +306,13 @@ export async function createRepSaleCore(input: RepSaleInput, context: CreateRepS
           throw new Error("MERCHANT_NOT_APPROVED");
         }
         const accountId = await getOrCreateMerchantAccount(tx, merchant.id);
+
+        // Concurrency-safe daily sequence (OVI-YYYYMMDD-NNNN, resetting
+        // every business day — see generateDailyOrderNumber) — generated
+        // inside this same transaction, right before the row that actually
+        // consumes it, so the advisory lock it takes covers exactly the
+        // "read current max, then insert" critical section.
+        orderNumber = await generateDailyOrderNumber(tx);
 
         await tx.order.create({
           data: {
@@ -387,7 +385,7 @@ export async function createRepSaleCore(input: RepSaleInput, context: CreateRepS
         // records the ACTUAL actor (the rep themselves, or the admin acting
         // on their behalf) — never falsely attributed to the rep when an
         // admin entered it. The order number is already known at this point
-        // (generated above, before this transaction attempt), so the note
+        // (generated just above, inside this same transaction), so the note
         // can reference it for traceability without a second lookup — never
         // relied on for accounting itself (see recordInitialAccountPayment's
         // doc comment).

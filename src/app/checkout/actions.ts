@@ -8,6 +8,7 @@ import { getCurrentUserCart, getAvailableStock } from "@/lib/cart";
 import { getPriceModeForUser, readCatalogPriceCents } from "@/lib/catalog-queries";
 import { getMainWarehouse } from "@/lib/inventory";
 import { getOrCreateMerchantAccount, getExistingCustomerAccountId } from "@/lib/accounts";
+import { generateDailyOrderNumber } from "@/lib/order-number";
 import { checkoutSchema } from "@/lib/validation/checkout";
 import { ORDER_SOURCES, ORDER_STATUSES, PAYMENT_METHODS, PAYMENT_STATUSES, STOCK_MOVEMENT_TYPES } from "@/lib/constants";
 import { decrementInventoryAtomic, recordStockMovement, InsufficientInventoryError } from "@/lib/inventory-transactions";
@@ -25,15 +26,6 @@ function fieldErrorsFrom(error: z.ZodError) {
     if (typeof key === "string" && !fieldErrors[key]) fieldErrors[key] = issue.message;
   }
   return fieldErrors;
-}
-
-function generateOrderNumber(): string {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, "0");
-  const d = String(now.getDate()).padStart(2, "0");
-  const random = Math.floor(1000 + Math.random() * 9000);
-  return `OVI-${y}${m}${d}-${random}`;
 }
 
 export async function placeOrder(_prevState: CheckoutState, formData: FormData): Promise<CheckoutState> {
@@ -164,7 +156,6 @@ export async function placeOrder(_prevState: CheckoutState, formData: FormData):
   let createdOrderId = "";
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    orderNumber = generateOrderNumber();
     try {
       const order = await prisma.$transaction(async (tx) => {
         const requestedVariantIds = cart.items.flatMap((item) => item.variantId ? [item.variantId] : []);
@@ -192,6 +183,13 @@ export async function placeOrder(_prevState: CheckoutState, formData: FormData):
         const accountId = merchantId
           ? await getOrCreateMerchantAccount(tx, merchantId)
           : await getExistingCustomerAccountId(tx, user.id);
+
+        // Concurrency-safe daily sequence (OVI-YYYYMMDD-NNNN, resetting
+        // every business day — see generateDailyOrderNumber), generated
+        // inside this same transaction right before the row that consumes
+        // it, so its advisory lock covers exactly the "read current max,
+        // then insert" critical section.
+        orderNumber = await generateDailyOrderNumber(tx);
         const created = await tx.order.create({ data: { ...orderData, accountId, orderNumber } });
 
         // Decrement Main Warehouse stock atomically, one line at a time —
