@@ -34,7 +34,6 @@ class StockActionError extends Error {}
 const PARSE_ERROR_MESSAGE = "بيانات التعديل غير صالحة";
 const POSITIVE_QUANTITY_MESSAGE = "الكمية يجب أن تكون رقماً صحيحاً أكبر من صفر";
 const NO_OP_MESSAGE = "الكمية الجديدة مساوية للكمية الحالية، لم يتم تنفيذ أي تعديل";
-const NOT_PERMITTED_MESSAGE = "لا تملك صلاحية تنفيذ هذا الإجراء";
 
 /** Postgres INTEGER's max value — the actual column type behind
  * StockMovement.quantity/InventoryItem.quantity (see schema.prisma). Bounds
@@ -46,6 +45,8 @@ function revalidateInventoryPaths(productId: string): void {
   revalidatePath("/admin/inventory");
   revalidatePath("/admin/inventory/movements");
   revalidatePath("/admin/inventory/adjust");
+  revalidatePath("/admin/inventory/receive");
+  revalidatePath("/admin/inventory/issue");
   revalidatePath("/admin");
   revalidatePath("/admin/products");
   revalidatePath(`/admin/products/${productId}/variants`);
@@ -296,12 +297,15 @@ export async function createBulkStockMovement(
   formData: FormData,
 ): Promise<BulkStockMovementState> {
   // ADMIN_ASSISTANT (مساعد الأدمن, warehouse picker/preparer staff) is
-  // least-privilege: allowed into this action at all only for STOCK_OUT,
-  // checked explicitly below — never inferred from which UI rendered, since
-  // AdjustStockPanel hiding the IN button for that role is a convenience,
-  // not the security boundary. A manipulated request replaying this action
-  // with direction=STOCK_IN while signed in as ADMIN_ASSISTANT must fail
-  // here, before any inventory read/write.
+  // allowed both directions here — receiving stock (إدخال منتجات) and
+  // removing it (إخراج منتجات) are the same warehouse stock-movement
+  // operation, just opposite signs, and both are now the intended scope for
+  // this role (see /admin/inventory/receive and /admin/inventory/issue,
+  // ADMIN_ASSISTANT's two dedicated pages for this action). This is the
+  // actual security boundary, independent of which UI rendered — a
+  // manipulated request replaying this action with either direction while
+  // signed in as ADMIN_ASSISTANT must still succeed only through this same
+  // check, never through anything the client claims.
   const actor = await requireRole([ROLES.ADMIN, ROLES.ADMIN_ASSISTANT]);
 
   // `direction` arrives as a bound Server Action argument (see
@@ -316,10 +320,6 @@ export async function createBulkStockMovement(
     return { error: PARSE_ERROR_MESSAGE };
   }
   const isOut = direction === MANUAL_STOCK_MOVEMENT_TYPES.STOCK_OUT;
-
-  if (!isOut && actor.role !== ROLES.ADMIN) {
-    return { error: NOT_PERMITTED_MESSAGE };
-  }
 
   let items: unknown;
   try {

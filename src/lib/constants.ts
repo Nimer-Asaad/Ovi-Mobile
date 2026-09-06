@@ -225,6 +225,8 @@ export const ADMIN_NAV_ITEMS = [
   { label: "Phone Compatibility", labelAr: "ماركات وموديلات الهواتف", href: "/admin/phone-devices" },
   { label: "Suppliers", labelAr: "الموردون", href: "/admin/suppliers" },
   { label: "Inventory", labelAr: "المخزون", href: "/admin/inventory" },
+  { label: "Receive Stock", labelAr: "إدخال منتجات", href: "/admin/inventory/receive" },
+  { label: "Issue Stock", labelAr: "إخراج منتجات", href: "/admin/inventory/issue" },
   { label: "Company Inventory", labelAr: "مخزون الشركة", href: "/admin/inventory/overview" },
   { label: "Orders", labelAr: "الطلبات", href: "/admin/orders" },
   { label: "Users", labelAr: "المستخدمون", href: "/admin/users" },
@@ -240,13 +242,16 @@ export const ADMIN_NAV_ITEMS = [
  * reachable server-side for that role (see the per-section ADMIN-only
  * nested layout.tsx files under src/app/admin — every admin subsection NOT
  * listed here sits behind one) — this list existing is a UX convenience,
- * not the actual access boundary. "إخراج من المخزون" points straight at
- * the adjust screen, which renders only the bulk OUT workflow for this
- * role (see AdjustStockPanel). */
+ * not the actual access boundary. "إدخال منتجات"/"إخراج منتجات" point at
+ * the two dedicated single-direction WAREHOUSE stock-movement pages (see
+ * /admin/inventory/receive, /admin/inventory/issue) — deliberately never the
+ * combined /admin/inventory/adjust screen, which is ADMIN-only (Correction,
+ * an absolute-quantity operation, was never part of this role's scope). */
 export const ADMIN_ASSISTANT_NAV_ITEMS = [
   { label: "Orders", labelAr: "الطلبات", href: "/admin/orders" },
   { label: "Inventory", labelAr: "المخزون", href: "/admin/inventory" },
-  { label: "Stock Out", labelAr: "إخراج من المخزون", href: "/admin/inventory/adjust" },
+  { label: "Receive Stock", labelAr: "إدخال منتجات", href: "/admin/inventory/receive" },
+  { label: "Issue Stock", labelAr: "إخراج منتجات", href: "/admin/inventory/issue" },
   { label: "Movement Log", labelAr: "حركات المخزون", href: "/admin/inventory/movements" },
   { label: "Company Inventory", labelAr: "مخزون الشركة", href: "/admin/inventory/overview" },
   { label: "Load Rep Car", labelAr: "تعبئة سيارة / طلبية زبون", href: "/admin/reps" },

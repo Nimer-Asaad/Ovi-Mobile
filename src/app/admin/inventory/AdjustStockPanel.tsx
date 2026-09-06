@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { AdjustStockForm } from "./AdjustStockForm";
 import { BulkStockMovementForm } from "./BulkStockMovementForm";
-import { MANUAL_STOCK_MOVEMENT_TYPES, ROLES } from "@/lib/constants";
+import { MANUAL_STOCK_MOVEMENT_TYPES } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import type { AdjustStockProductOption } from "./adjustCascades";
 
@@ -16,13 +16,6 @@ const MODES = {
 interface AdjustStockPanelProps {
   products: AdjustStockProductOption[];
   selectedProductId?: string;
-  /** ADMIN sees all three modes; ADMIN_ASSISTANT (مساعد الأدمن, warehouse
-   * picker/preparer staff) sees only bulk OUT — no mode toggle is rendered
-   * at all for that role, since it's the only option. This is a UI
-   * convenience only: createBulkStockMovement/createStockMovement
-   * independently re-enforce the same restriction server-side regardless
-   * of what this component renders (see actions.ts). */
-  role: string;
 }
 
 /** Top-level switch between the warehouse's three stock-movement flows: IN
@@ -33,23 +26,21 @@ interface AdjustStockPanelProps {
  * multi-item "add to list" flow the same way a plain increment/decrement
  * does.
  *
+ * ADMIN-only (see the page-level requireRole in
+ * /admin/inventory/adjust/page.tsx, the sole caller of this panel) — a plain
+ * IN or OUT no longer needs this combined screen at all now that
+ * /admin/inventory/receive and /admin/inventory/issue exist as their own
+ * dedicated pages/sidebar links for both ADMIN and ADMIN_ASSISTANT; this
+ * panel now exists mainly for Correction, with IN/OUT kept alongside it as a
+ * convenience for an ADMIN already here rather than a required path.
+ *
  * Defaults to Correction when arriving with a specific product preselected
  * (the "تعديل" link from the inventory list, /admin/inventory/adjust?
  * productId=...) — that link's intent is "fix this one product's count",
  * which only the Correction form can act on directly; otherwise defaults to
- * IN, the most common way an admin opens this page cold. Not applicable to
- * ADMIN_ASSISTANT, which only ever sees OUT. */
-export function AdjustStockPanel({ products, selectedProductId, role }: AdjustStockPanelProps) {
-  const isAssistant = role === ROLES.ADMIN_ASSISTANT;
-  const [mode, setMode] = useState<string>(isAssistant ? MODES.OUT : selectedProductId ? MODES.CORRECTION : MODES.IN);
-
-  if (isAssistant) {
-    return (
-      <div className="flex flex-col gap-6">
-        <BulkStockMovementForm products={products} direction={MANUAL_STOCK_MOVEMENT_TYPES.STOCK_OUT} />
-      </div>
-    );
-  }
+ * IN, the most common way an admin opens this page cold. */
+export function AdjustStockPanel({ products, selectedProductId }: AdjustStockPanelProps) {
+  const [mode, setMode] = useState<string>(selectedProductId ? MODES.CORRECTION : MODES.IN);
 
   return (
     <div className="flex flex-col gap-6">

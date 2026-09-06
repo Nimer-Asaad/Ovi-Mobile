@@ -115,9 +115,17 @@ export default async function AdminInventoryPage({ searchParams }: AdminInventor
             <Link href="/admin/inventory/movements">
               <Button variant="outline">سجل الحركات</Button>
             </Link>
-            <Link href="/admin/inventory/adjust">
-              <Button>تعديل مخزون</Button>
+            <Link href="/admin/inventory/receive">
+              <Button variant="outline">إدخال منتجات</Button>
             </Link>
+            <Link href="/admin/inventory/issue">
+              <Button variant="outline">إخراج منتجات</Button>
+            </Link>
+            {user.role === ROLES.ADMIN && (
+              <Link href="/admin/inventory/adjust">
+                <Button>تصحيح المخزون</Button>
+              </Link>
+            )}
           </>
         }
       />
@@ -178,7 +186,7 @@ export default async function AdminInventoryPage({ searchParams }: AdminInventor
         </div>
       </form>
 
-      <InventoryLiveSearch rows={inventoryRows} />
+      <InventoryLiveSearch rows={inventoryRows} role={user.role} />
     </div>
   );
 }

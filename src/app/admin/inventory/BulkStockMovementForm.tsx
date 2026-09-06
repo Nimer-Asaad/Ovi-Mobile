@@ -50,8 +50,12 @@ function lineKey(productId: string, variantId: string | null, deviceColorVariant
  * Correction form uses), enter a quantity, add it to a running list, repeat
  * for as many items as needed, then submit the whole list as one atomic
  * operation (see createBulkStockMovement). Replaces the old one-item-at-a-
- * time IN/OUT flow — see AdjustStockPanel for the three-way IN/OUT/
- * Correction mode switch this form serves two of. */
+ * time IN/OUT flow. Rendered three ways in this app, always with the same
+ * component and the same server action — never a duplicated business rule:
+ * AdjustStockPanel's IN/OUT modes (ADMIN's combined Correction screen), and
+ * directly by the two dedicated single-direction pages ADMIN_ASSISTANT also
+ * uses (/admin/inventory/receive → STOCK_IN, /admin/inventory/issue →
+ * STOCK_OUT). */
 export function BulkStockMovementForm({ products, direction }: BulkStockMovementFormProps) {
   const isOut = direction === MANUAL_STOCK_MOVEMENT_TYPES.STOCK_OUT;
   const action = createBulkStockMovement.bind(null, direction);

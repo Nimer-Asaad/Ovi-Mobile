@@ -8,6 +8,7 @@ import { AdminTable, AdminTableHead, AdminTableBody, AdminEmptyRow } from "@/com
 import { AdminStatusBadge } from "@/components/admin/AdminStatusBadge";
 import { HighlightedText } from "@/components/admin/HighlightedText";
 import { ProductImagePlaceholder } from "@/components/catalog/ProductImagePlaceholder";
+import { ROLES } from "@/lib/constants";
 
 export interface AdminInventoryRow {
   id: string;
@@ -23,13 +24,20 @@ export interface AdminInventoryRow {
 
 interface InventoryLiveSearchProps {
   rows: AdminInventoryRow[];
+  /** Gates the per-row "تعديل" link — it points at the ADMIN-only Correction
+   * screen (/admin/inventory/adjust), so an ADMIN_ASSISTANT would only ever
+   * hit a clean redirect to /dashboard clicking it (see that page's
+   * requireRole). Hidden entirely for that role instead of shown as a link
+   * that goes nowhere useful — "السجل" (read-only movement history) stays
+   * visible to both roles. */
+  role: string;
 }
 
 /** Client-side live search over the server-filtered (category/brand/active/
  * lowStock/sort already applied) inventory rows. Text search no longer
  * round-trips to the server — it updates instantly as the admin types,
  * ahead of the "تصفية" button which still applies the other filters. */
-export function InventoryLiveSearch({ rows }: InventoryLiveSearchProps) {
+export function InventoryLiveSearch({ rows, role }: InventoryLiveSearchProps) {
   const [query, setQuery] = useState("");
 
   const filtered = useMemo(() => {
@@ -109,9 +117,11 @@ export function InventoryLiveSearch({ rows }: InventoryLiveSearchProps) {
               </td>
               <td className="px-4 py-3">
                 <div className="flex items-center justify-end gap-3">
-                  <Link href={`/admin/inventory/adjust?productId=${row.id}`} className="text-sm text-gold-champagne hover:underline">
-                    تعديل
-                  </Link>
+                  {role === ROLES.ADMIN && (
+                    <Link href={`/admin/inventory/adjust?productId=${row.id}`} className="text-sm text-gold-champagne hover:underline">
+                      تعديل
+                    </Link>
+                  )}
                   <Link href={`/admin/inventory/movements?productId=${row.id}`} className="text-sm text-gold-champagne hover:underline">
                     السجل
                   </Link>

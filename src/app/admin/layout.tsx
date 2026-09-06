@@ -21,8 +21,10 @@ export const dynamic = "force-dynamic";
  * guard back down to requireRole([ROLES.ADMIN]) alone — see e.g.
  * src/app/admin/products/layout.tsx. Sections ADMIN_ASSISTANT legitimately
  * needs (orders, inventory) have no such nested layout, but still gate
- * ADMIN-only actions within themselves (e.g. /admin/orders/new,
- * ADJUSTMENT/STOCK_IN in the inventory server actions). */
+ * ADMIN-only actions within themselves (e.g. /admin/orders/new, the
+ * absolute-quantity Correction/ADJUSTMENT action in the inventory server
+ * actions — STOCK_IN and STOCK_OUT are both intended for ADMIN_ASSISTANT
+ * too, via /admin/inventory/receive and /admin/inventory/issue). */
 export default async function AdminLayout({
   children,
 }: Readonly<{
