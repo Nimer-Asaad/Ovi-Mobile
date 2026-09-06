@@ -2,6 +2,7 @@ import "server-only";
 import { Prisma } from "@prisma/client";
 import { isTerminalOrderStatus } from "@/lib/order-lifecycle-rules";
 import { ACCOUNT_PAYMENT_METHODS } from "@/lib/constants";
+import { generateDailyPaymentReceiptNumber } from "@/lib/payment-number";
 import {
   buildAccountStatementRows,
   type AccountStatementOrderInput,
@@ -106,7 +107,20 @@ export async function getExistingCustomerAccountId(tx: Tx, customerId: string): 
  * (e.g. a rep sale's "paid now" amount — see createRepSaleCore) can pass
  * both explicitly. Note is purely descriptive, never relied on for
  * accounting — the balance is always openingBalanceCents + orders -
- * payments (see getAccountBalanceCents), never derived from note text. */
+ * payments (see getAccountBalanceCents), never derived from note text.
+ *
+ * Always assigns a persisted receiptNumber (see generateDailyPaymentReceiptNumber
+ * in src/lib/payment-number.ts) — this sale-linked payment is still a real
+ * row in the one canonical AccountPayment table, so it gets a سند قبض number
+ * exactly like a standalone manual payment does, even though the caller's
+ * own post-sale redirect deliberately keeps going to the sale invoice, never
+ * this payment's own receipt page (see createRepSaleCore /
+ * admin/orders/new/actions.ts — unchanged by this). Generated with THIS
+ * SAME `tx` — never a nested transaction — and always called after that
+ * sale's own generateDailyOrderNumber, so lock acquisition order across the
+ * two modules stays consistently Order-lock-then-Payment-lock everywhere,
+ * never reversed in one path — see payment-number.ts's own doc comment for
+ * why that ordering consistency matters. */
 export async function recordInitialAccountPayment(
   tx: Tx,
   accountId: string,
@@ -114,6 +128,7 @@ export async function recordInitialAccountPayment(
   createdById: string,
   options?: { method?: string; note?: string },
 ): Promise<void> {
+  const receiptNumber = await generateDailyPaymentReceiptNumber(tx);
   await tx.accountPayment.create({
     data: {
       accountId,
@@ -121,6 +136,7 @@ export async function recordInitialAccountPayment(
       method: options?.method ?? ACCOUNT_PAYMENT_METHODS.CASH,
       note: options?.note ?? "دفعة عند إنشاء الطلب",
       createdById,
+      receiptNumber,
     },
   });
 }
@@ -275,4 +291,64 @@ export function getOrderAccountPosition(
   const debtAfterSaleCents = previousDebtCents + order.totalCents - order.paidAmountCents;
 
   return { previousDebtCents, debtAfterSaleCents };
+}
+
+export interface PaymentAccountPosition {
+  /** The account's balance immediately BEFORE this specific payment existed
+   * — a genuinely HISTORICAL figure, exactly like OrderAccountPosition's
+   * previousDebtCents: later orders/payments (relative to this one) never
+   * affect it, no matter when the receipt is reopened. Can be negative (a
+   * credit) — never clamped, see formatDebtOrCredit in account-labels.ts. */
+  previousBalanceCents: number;
+  /** previousBalanceCents - this payment's own amountCents — the account's
+   * position immediately after this payment, NOT the account's live balance
+   * today. Also historical: unaffected by anything that happened to the
+   * account after this payment. */
+  afterBalanceCents: number;
+}
+
+/** Derives a payment receipt's "الذمة السابقة"/"الذمة بعد الدفعة" position
+ * for one specific AccountPayment — the exact same trusted-chronology
+ * pattern getOrderAccountPosition uses for a sale invoice, applied to a
+ * PAYMENT row instead of a SALE row. Reuses buildAccountStatementRows
+ * unchanged (its PAYMENT rows already carry `reference: payment.id` — a
+ * real, persisted, safe identifier — so no change to account-statement.ts
+ * was needed to support this).
+ *
+ * previousBalanceCents is the running balance of the row immediately BEFORE
+ * this payment's own PAYMENT row. Because Postgres evaluates every row's
+ * `createdAt DEFAULT CURRENT_TIMESTAMP` at TRANSACTION START, a rep sale's
+ * Order and its own immediate "paid now" AccountPayment (created in the
+ * same $transaction) always share the exact same createdAt — and
+ * buildAccountStatementRows's tie-break always sorts an order before a
+ * payment at an identical instant, so a sale's own immediate payment always
+ * sees that same sale's debit already applied in "previous," matching this
+ * app's one established statement ordering rule (never a second, competing
+ * one invented here).
+ *
+ * afterBalanceCents is computed directly from this payment's own persisted
+ * amountCents (never by re-reading a row's creditCents, and never by trying
+ * to guess which row is "this" payment from AccountPayment.note or any
+ * other unstructured signal) — the exact authoritative field already used
+ * to create the AccountPayment in the first place.
+ *
+ * Never stores anything — pure display derivation, recomputed on every
+ * view. Throws only if `payment` is somehow missing from `account.payments`
+ * (a caller bug: every call site fetches the account's payments including
+ * this very payment, since AccountPayment.accountId already points at it). */
+export function getPaymentAccountPosition(
+  account: AccountHistoryInput,
+  payment: { id: string; amountCents: number },
+): PaymentAccountPosition {
+  const rows = buildAccountStatementRows(account);
+  const paymentRowIndex = rows.findIndex((row) => row.type === "PAYMENT" && row.reference === payment.id);
+  if (paymentRowIndex === -1) {
+    throw new Error(`getPaymentAccountPosition: payment ${payment.id} not found in its own account's payment list`);
+  }
+
+  const previousRow = paymentRowIndex === 0 ? null : rows[paymentRowIndex - 1];
+  const previousBalanceCents = previousRow ? previousRow.balanceCents : 0;
+  const afterBalanceCents = previousBalanceCents - payment.amountCents;
+
+  return { previousBalanceCents, afterBalanceCents };
 }

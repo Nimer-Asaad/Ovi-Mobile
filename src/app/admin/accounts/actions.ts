@@ -7,6 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth/guards";
 import { ROLES } from "@/lib/constants";
 import { hashPassword } from "@/lib/auth/password";
+import { generateDailyPaymentReceiptNumber } from "@/lib/payment-number";
 import { createWalkInAccountSchema, recordAccountPaymentSchema, setOpeningBalanceSchema } from "@/lib/validation/accounts";
 
 export interface CreateWalkInAccountState {
@@ -105,7 +106,32 @@ export async function createWalkInAccount(
 /** Append-only — inserts one AccountPayment row and never edits/deletes an
  * existing one. Balance is always recomputed live from the full ledger
  * (src/lib/accounts.ts getAccountBalanceCents), so there's nothing to keep
- * in sync here beyond the insert itself. */
+ * in sync here beyond the insert itself.
+ *
+ * Redirects straight to that payment's printable receipt ("سند قبض" — see
+ * /admin/accounts/[id]/payments/[paymentId]) on success, exactly like
+ * createRepSale/createMerchant already redirect to their own result pages —
+ * this is a MANUALLY recorded payment, distinct from the "paid now" portion
+ * of a sale (recordInitialAccountPayment, called from inside the sale's own
+ * transaction), which deliberately keeps redirecting to the sale's invoice
+ * instead — never here.
+ *
+ * The receipt-number generation + the actual insert are wrapped in one
+ * interactive $transaction (this create was previously a bare, untransacted
+ * call — there was nothing else to keep atomic with it before receiptNumber
+ * existed) so the advisory-lock-protected "count today, then insert" critical
+ * section in generateDailyPaymentReceiptNumber can never race a concurrent
+ * payment. redirect() is deliberately called AFTER that transaction
+ * resolves, never inside its callback and never inside a try/catch — Next's
+ * redirect() throws a special NEXT_REDIRECT signal that must reach Next's
+ * own routing layer unmolested; throwing it inside a Prisma transaction
+ * callback would have Prisma treat it as a failed transaction (rolling back
+ * and rethrowing a Prisma-wrapped error) instead, silently turning a
+ * successful payment into what looks like a crash. This function has no
+ * try/catch of its own at all (matching this action's own pre-existing
+ * convention — genuine errors were never caught here even before
+ * receiptNumber existed), so there is nothing that could swallow it either
+ * way. */
 export async function recordAccountPayment(
   _prevState: RecordAccountPaymentState,
   formData: FormData,
@@ -130,18 +156,23 @@ export async function recordAccountPayment(
     return { error: "الحساب غير موجود" };
   }
 
-  await prisma.accountPayment.create({
-    data: {
-      accountId: parsed.data.accountId,
-      amountCents: parsed.data.amountCents,
-      method: parsed.data.method,
-      note: parsed.data.note,
-      createdById: admin.id,
-    },
+  const payment = await prisma.$transaction(async (tx) => {
+    const receiptNumber = await generateDailyPaymentReceiptNumber(tx);
+    return tx.accountPayment.create({
+      data: {
+        accountId: parsed.data.accountId,
+        amountCents: parsed.data.amountCents,
+        method: parsed.data.method,
+        note: parsed.data.note,
+        createdById: admin.id,
+        receiptNumber,
+      },
+      select: { id: true },
+    });
   });
 
   revalidateAccountPaths(parsed.data.accountId);
-  return { success: "تم تسجيل الدفعة بنجاح" };
+  redirect(`/admin/accounts/${parsed.data.accountId}/payments/${payment.id}`);
 }
 
 export interface SetOpeningBalanceState {

@@ -1075,15 +1075,25 @@ model CustomerAccount {
 /// to one specific order, since a merchant's payment often settles a running
 /// balance rather than one exact invoice).
 model AccountPayment {
-  id          String          @id @default(cuid())
-  accountId   String
-  account     CustomerAccount @relation(fields: [accountId], references: [id])
-  amountCents Int
-  method      String
-  note        String?
-  createdById String
-  createdBy   User            @relation("AccountPaymentCreatedBy", fields: [createdById], references: [id])
-  createdAt   DateTime        @default(now())
+  id            String          @id @default(cuid())
+  accountId     String
+  account       CustomerAccount @relation(fields: [accountId], references: [id])
+  amountCents   Int
+  method        String
+  note          String?
+  /// Persisted, human-friendly سند قبض number — "PAY-YYYYMMDD-NNNN", a daily
+  /// sequence per Asia/Hebron business day (see generateDailyPaymentReceiptNumber
+  /// in src/lib/payment-number.ts), independent of the OVI order-number
+  /// sequence. Nullable and NOT backfilled on purpose: every row that existed
+  /// before this field shipped keeps receiptNumber = null forever — its
+  /// receipt falls back to a deterministic-but-non-sequential display
+  /// reference instead (see buildPaymentReceiptReference in
+  /// account-labels.ts) — while every NEW row is always assigned one inside
+  /// the same transaction that creates it.
+  receiptNumber String?         @unique
+  createdById   String
+  createdBy     User            @relation("AccountPaymentCreatedBy", fields: [createdById], references: [id])
+  createdAt     DateTime        @default(now())
 
   @@index([accountId, createdAt])
   @@map("account_payments")

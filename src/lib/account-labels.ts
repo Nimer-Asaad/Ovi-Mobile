@@ -40,3 +40,42 @@ export function formatDebtOrCredit(cents: number): DebtOrCreditDisplay {
   }
   return { label: "", amount: formatCurrencyFromCents(cents), isCredit: false };
 }
+
+/** A stable, deterministic FALLBACK display reference for a payment receipt
+ * — "PAY-<createdAt's calendar date, YYYYMMDD>-<last 6 chars of the
+ * payment's own id, uppercased>" — used ONLY for a legacy AccountPayment row
+ * that predates the receiptNumber column (see resolvePaymentReceiptReference
+ * below, which every caller should use instead of this directly). This is
+ * deliberately NOT a counted/ordinal sequence — it never claims to be "the
+ * Nth receipt that day" — only a readable label derived purely from data
+ * already persisted on the payment itself (id + createdAt), so the exact
+ * same legacy receipt always displays the exact same reference no matter
+ * when it's viewed. Purely cosmetic/display — never used for accounting,
+ * ordering, or lookup (the receipt page and its historical-balance
+ * calculation both key off the real AccountPayment.id, never this string),
+ * so it deliberately reuses the same plain calendar-date convention already
+ * used to display any other payment/order date in this app (see
+ * InvoiceView's own date display) rather than attempting the
+ * DB-session-timezone correction that IS required for the order/payment
+ * daily-sequence counting logic (an accounting/uniqueness concern this is
+ * not). */
+export function buildPaymentReceiptReference(payment: { id: string; createdAt: Date }): string {
+  const y = payment.createdAt.getUTCFullYear();
+  const m = String(payment.createdAt.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(payment.createdAt.getUTCDate()).padStart(2, "0");
+  const suffix = payment.id.slice(-6).toUpperCase();
+  return `PAY-${y}${m}${d}-${suffix}`;
+}
+
+/** The receipt number every payment-receipt display/filename should
+ * actually use: the real, persisted, daily-sequential
+ * AccountPayment.receiptNumber (see generateDailyPaymentReceiptNumber in
+ * src/lib/payment-number.ts) when present, falling back to the
+ * non-sequential buildPaymentReceiptReference only for a historical row
+ * that predates that column (receiptNumber === null, and never backfilled —
+ * see the schema doc comment on AccountPayment.receiptNumber). Centralized
+ * here so PaymentReceiptView and PaymentReceiptActions can never disagree
+ * on which reference a given payment shows. */
+export function resolvePaymentReceiptReference(payment: { id: string; createdAt: Date; receiptNumber: string | null }): string {
+  return payment.receiptNumber ?? buildPaymentReceiptReference(payment);
+}

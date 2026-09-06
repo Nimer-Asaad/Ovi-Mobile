@@ -1,9 +1,11 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth/guards";
 import { ROLES } from "@/lib/constants";
+import { generateDailyPaymentReceiptNumber } from "@/lib/payment-number";
 import { recordAccountPaymentSchema } from "@/lib/validation/accounts";
 
 export interface RecordMerchantPaymentState {
@@ -28,7 +30,28 @@ export interface RecordMerchantPaymentState {
  * manipulated request sends. createdById is always the authenticated rep's
  * own User.id — never taken from the client, matching the exact same
  * "who actually did this" convention already used by
- * createRepSale/assignStockToRep/returnStockFromRep. */
+ * createRepSale/assignStockToRep/returnStockFromRep.
+ *
+ * Redirects straight to that payment's printable receipt ("سند قبض" — see
+ * /rep/merchants/[id]/payments/[paymentId]) on success, exactly like
+ * createRepSale already redirects to its own result page — this is a
+ * MANUALLY recorded payment, distinct from the "paid now" portion of a
+ * sale (recordInitialAccountPayment, called from inside createRepSaleCore's
+ * own transaction), which deliberately keeps redirecting to the sale's
+ * invoice instead — never here.
+ *
+ * The receipt-number generation + the actual insert are wrapped in one
+ * interactive $transaction (this create was previously a bare, untransacted
+ * call) so the advisory-lock-protected "count today, then insert" critical
+ * section in generateDailyPaymentReceiptNumber can never race a concurrent
+ * payment. redirect() is deliberately called AFTER that transaction
+ * resolves and after every revalidatePath call, never inside the
+ * transaction's callback and never inside a try/catch — see
+ * recordAccountPayment's identical doc comment in
+ * src/app/admin/accounts/actions.ts for exactly why: Next's redirect()
+ * throws a special NEXT_REDIRECT signal that must reach Next's own routing
+ * layer unmolested, and this function has no try/catch of its own to
+ * accidentally swallow it either way. */
 export async function recordMerchantPaymentAsRep(
   merchantId: string,
   _prevState: RecordMerchantPaymentState,
@@ -66,14 +89,19 @@ export async function recordMerchantPaymentAsRep(
     return { error: parsed.error.issues[0]?.message ?? "بيانات الدفعة غير صالحة" };
   }
 
-  await prisma.accountPayment.create({
-    data: {
-      accountId,
-      amountCents: parsed.data.amountCents,
-      method: parsed.data.method,
-      note: parsed.data.note,
-      createdById: user.id,
-    },
+  const payment = await prisma.$transaction(async (tx) => {
+    const receiptNumber = await generateDailyPaymentReceiptNumber(tx);
+    return tx.accountPayment.create({
+      data: {
+        accountId,
+        amountCents: parsed.data.amountCents,
+        method: parsed.data.method,
+        note: parsed.data.note,
+        createdById: user.id,
+        receiptNumber,
+      },
+      select: { id: true },
+    });
   });
 
   revalidatePath("/rep/merchants");
@@ -86,5 +114,5 @@ export async function recordMerchantPaymentAsRep(
   revalidatePath("/admin/merchants");
   revalidatePath(`/admin/merchants/${merchantId}`);
 
-  return { success: "تم تسجيل الدفعة بنجاح" };
+  redirect(`/rep/merchants/${merchantId}/payments/${payment.id}`);
 }
