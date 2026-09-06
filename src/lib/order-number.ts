@@ -141,7 +141,16 @@ export async function generateDailyOrderNumber(tx: Tx): Promise<string> {
   const prefix = `OVI-${stamp}-`;
 
   const lockKey = BigInt(stamp);
-  await tx.$queryRaw`SELECT pg_advisory_xact_lock(${lockKey})`;
+  // $executeRaw, not $queryRaw: pg_advisory_xact_lock(bigint) returns void —
+  // Prisma's $queryRaw tries to deserialize every returned column into a
+  // supported JS value and throws P2010 ("Failed to deserialize column of
+  // type 'void'") on a void result. $executeRaw only reports the affected
+  // row count, never attempting to deserialize a result set, which is
+  // exactly right for a call made purely for its side effect (taking the
+  // lock) with nothing to read back. Still the same blocking,
+  // transaction-scoped pg_advisory_xact_lock — only the Prisma API used to
+  // invoke it changed, not which Postgres function runs or how.
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockKey})`;
 
   const rows = await tx.$queryRaw<{ count: bigint }[]>`
     SELECT COUNT(*) AS "count"
