@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { requireRole } from "@/lib/auth/guards";
-import { ROLES } from "@/lib/constants";
+import { requireEffectiveRepresentative } from "@/lib/auth/impersonation";
 import { prisma } from "@/lib/prisma";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { InvoiceActions } from "@/components/admin/orders/InvoiceActions";
@@ -26,13 +25,8 @@ interface RepSaleDetailPageProps {
  * another rep's sale by guessing/changing the orderNumber in the URL, since
  * the query below is filtered server-side, not just hidden in the UI. */
 export default async function RepSaleDetailPage({ params }: RepSaleDetailPageProps) {
-  const user = await requireRole([ROLES.SALES_REPRESENTATIVE]);
+  const effectiveRep = await requireEffectiveRepresentative();
   const { orderNumber } = await params;
-
-  const rep = await prisma.salesRepresentative.findUnique({
-    where: { userId: user.id },
-    select: { id: true },
-  });
 
   const order = await prisma.order.findUnique({
     where: { orderNumber },
@@ -109,7 +103,7 @@ export default async function RepSaleDetailPage({ params }: RepSaleDetailPagePro
     },
   });
 
-  if (!order || !rep || order.createdByRepId !== rep.id) {
+  if (!order || order.createdByRepId !== effectiveRep.repId) {
     notFound();
   }
 

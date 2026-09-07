@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { requireRole } from "@/lib/auth/guards";
-import { ROLES } from "@/lib/constants";
+import { requireEffectiveRepresentative } from "@/lib/auth/impersonation";
 import { prisma } from "@/lib/prisma";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { PaymentReceiptActions } from "@/components/shared/PaymentReceiptActions";
@@ -28,7 +27,7 @@ interface RepSalesPaymentReceiptPageProps {
  * every other receipt route renders — never a duplicated markup/print/PNG/
  * WhatsApp implementation. */
 export default async function RepSalesPaymentReceiptPage({ params }: RepSalesPaymentReceiptPageProps) {
-  const user = await requireRole([ROLES.SALES_REPRESENTATIVE]);
+  const effectiveRep = await requireEffectiveRepresentative();
   const { paymentId } = await params;
 
   const payment = await prisma.accountPayment.findUnique({
@@ -51,7 +50,7 @@ export default async function RepSalesPaymentReceiptPage({ params }: RepSalesPay
   // this rep did not personally create (another rep's, an admin's) 404s
   // here exactly like a mismatched merchantId/paymentId pair 404s on the
   // merchant-scoped route.
-  if (!payment || payment.createdById !== user.id) {
+  if (!payment || payment.createdById !== effectiveRep.actingUserId) {
     notFound();
   }
 

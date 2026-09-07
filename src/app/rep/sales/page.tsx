@@ -1,7 +1,5 @@
 import Link from "next/link";
-import { requireRole } from "@/lib/auth/guards";
-import { ROLES } from "@/lib/constants";
-import { prisma } from "@/lib/prisma";
+import { requireEffectiveRepresentative } from "@/lib/auth/impersonation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -46,39 +44,32 @@ const TABS = [
  * they appear as their own PAYMENT row, keeping sales totals and payment
  * totals separate. */
 export default async function RepSalesPage({ searchParams }: RepSalesPageProps) {
-  const user = await requireRole([ROLES.SALES_REPRESENTATIVE]);
+  const effectiveRep = await requireEffectiveRepresentative();
   const { type, from, to, q } = await searchParams;
-
-  const rep = await prisma.salesRepresentative.findUnique({
-    where: { userId: user.id },
-    select: { id: true },
-  });
 
   const defaults = getDefaultReportRange();
   const fromIso = from?.trim() || defaults.fromIso;
   const toIso = to?.trim() || defaults.toIso;
   const activeTab = type === "SALE" || type === "PAYMENT" ? type : "ALL";
 
-  const [sales, payments] = rep
-    ? await Promise.all([
-        fetchSaleActivityRows(
-          { fromIso, toIso, search: q, salesRepId: rep.id },
-          (orderNumber) => `/rep/sales/${orderNumber}`,
-        ),
-        fetchPaymentActivityRows(
-          { fromIso, toIso, search: q, collectorUserId: user.id },
-          (payment) => (payment.merchantId ? `/rep/merchants/${payment.merchantId}/payments/${payment.id}` : "#"),
-          (orderNumber) => `/rep/sales?q=${encodeURIComponent(orderNumber)}`,
-          // Correction-scoped replacement-payment entry point — NOT the
-          // generic merchant page. Ownership for a correction is based on
-          // AccountPayment.createdById, never current merchant assignment,
-          // so this never depends on the merchant still being assigned to
-          // this rep (see createRepReplacementPaymentAction's own doc
-          // comment in src/app/rep/sales/actions.ts).
-          (payment) => `/rep/sales/payments/new?replacementFor=${payment.id}`,
-        ),
-      ])
-    : [[], []];
+  const [sales, payments] = await Promise.all([
+    fetchSaleActivityRows(
+      { fromIso, toIso, search: q, salesRepId: effectiveRep.repId },
+      (orderNumber) => `/rep/sales/${orderNumber}`,
+    ),
+    fetchPaymentActivityRows(
+      { fromIso, toIso, search: q, collectorUserId: effectiveRep.actingUserId },
+      (payment) => (payment.merchantId ? `/rep/merchants/${payment.merchantId}/payments/${payment.id}` : "#"),
+      (orderNumber) => `/rep/sales?q=${encodeURIComponent(orderNumber)}`,
+      // Correction-scoped replacement-payment entry point — NOT the
+      // generic merchant page. Ownership for a correction is based on
+      // AccountPayment.createdById, never current merchant assignment,
+      // so this never depends on the merchant still being assigned to
+      // this rep (see createRepReplacementPaymentAction's own doc
+      // comment in src/app/rep/sales/actions.ts).
+      (payment) => `/rep/sales/payments/new?replacementFor=${payment.id}`,
+    ),
+  ]);
 
   const totals = computeActivityTotals(sales, payments);
   const rows =

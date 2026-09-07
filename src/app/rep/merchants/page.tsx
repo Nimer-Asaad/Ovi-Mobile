@@ -1,7 +1,5 @@
 import Link from "next/link";
-import { requireRole } from "@/lib/auth/guards";
-import { ROLES } from "@/lib/constants";
-import { prisma } from "@/lib/prisma";
+import { requireEffectiveRepresentative } from "@/lib/auth/impersonation";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
@@ -25,18 +23,14 @@ interface RepMerchantsPageProps {
  * server-side via a plain GET form, same convention as every other
  * search+filter page in this app. */
 export default async function RepMerchantsPage({ searchParams }: RepMerchantsPageProps) {
-  const user = await requireRole([ROLES.SALES_REPRESENTATIVE]);
+  const effectiveRep = await requireEffectiveRepresentative();
   const { region, q } = await searchParams;
   const trimmedQuery = q?.trim().toLowerCase();
 
-  const rep = await prisma.salesRepresentative.findUnique({
-    where: { userId: user.id },
-    select: { id: true },
-  });
-
-  const [allMerchants, regions] = rep
-    ? await Promise.all([getMerchantsForRep(rep.id, region), getRepMerchantRegions(rep.id)])
-    : [[], []];
+  const [allMerchants, regions] = await Promise.all([
+    getMerchantsForRep(effectiveRep.repId, region),
+    getRepMerchantRegions(effectiveRep.repId),
+  ]);
 
   const merchants = trimmedQuery
     ? allMerchants.filter(

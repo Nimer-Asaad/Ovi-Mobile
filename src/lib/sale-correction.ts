@@ -53,6 +53,15 @@ interface CorrectSaleInput {
   orderNumber: string;
   reason: string;
   actorUserId: string;
+  /** Optional hook invoked INSIDE the same transaction, immediately after a
+   * successful (non-no-op) transition — used only by the impersonation-
+   * aware REP wrapper (correctRepSaleAction) to write an AdminAuditLog row
+   * (IMPERSONATED_REP_SALE_CORRECTED) atomically with the correction
+   * itself, when an ADMIN is acting as this rep. Never invoked on a no-op
+   * transition (nothing changed, nothing to audit) or when the transition
+   * fails. The pre-existing ADMIN order-status screen (transitionOrderStatus)
+   * never passes this and behaves exactly as before. */
+  onCorrected?: (tx: Prisma.TransactionClient, order: { id: string; orderNumber: string }) => Promise<void>;
 }
 
 /** Safely cancels/reverses a wrong sale — "تصحيح المبيعة" in the UI, but
@@ -110,6 +119,10 @@ export async function correctSale(input: CorrectSaleInput): Promise<SaleCorrecti
             reason,
             actorUserId: input.actorUserId,
           });
+
+          if (!result.noOp && input.onCorrected) {
+            await input.onCorrected(tx, { id: result.order.id, orderNumber: result.orderNumber });
+          }
 
           return { ok: true, orderNumber: result.orderNumber } as const;
         },

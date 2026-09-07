@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { requireRole } from "@/lib/auth/guards";
-import { ROLES } from "@/lib/constants";
+import { requireEffectiveRepresentative } from "@/lib/auth/impersonation";
 import { prisma } from "@/lib/prisma";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -15,45 +14,40 @@ interface RepStockRequestDetailPageProps {
 
 export default async function RepStockRequestDetailPage({ params }: RepStockRequestDetailPageProps) {
   const { id } = await params;
-  const user = await requireRole([ROLES.SALES_REPRESENTATIVE]);
+  const effectiveRep = await requireEffectiveRepresentative();
 
-  const rep = await prisma.salesRepresentative.findUnique({
-    where: { userId: user.id },
-    select: { id: true },
-  });
-
-  const request = rep
-    ? await prisma.stockRequest.findUnique({
-        where: { id },
+  const request = await prisma.stockRequest.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      requestNumber: true,
+      salesRepId: true,
+      status: true,
+      repNote: true,
+      adminNote: true,
+      createdAt: true,
+      reviewedAt: true,
+      preparedAt: true,
+      completedAt: true,
+      rejectedAt: true,
+      items: {
         select: {
           id: true,
-          requestNumber: true,
-          salesRepId: true,
-          status: true,
-          repNote: true,
-          adminNote: true,
-          createdAt: true,
-          reviewedAt: true,
-          preparedAt: true,
-          completedAt: true,
-          rejectedAt: true,
-          items: {
-            select: {
-              id: true,
-              requestedQuantity: true,
-              approvedQuantity: true,
-              variant: { select: { phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } } } },
-              product: { select: { sku: true, name: true, nameAr: true } },
-            },
-          },
+          requestedQuantity: true,
+          approvedQuantity: true,
+          variant: { select: { phoneModel: { select: { name: true, nameAr: true, phoneBrand: { select: { name: true, nameAr: true } } } } } },
+          product: { select: { sku: true, name: true, nameAr: true } },
         },
-      })
-    : null;
+      },
+    },
+  });
 
   // A rep may only ever see their own requests — mismatched salesRepId
   // (including another rep's request id guessed via URL) 404s exactly like
-  // a nonexistent request, so no IDOR signal leaks.
-  if (!request || request.salesRepId !== rep?.id) {
+  // a nonexistent request, so no IDOR signal leaks. Under impersonation
+  // this is effectiveRep.repId, the impersonated rep's own scope — never
+  // the real admin's.
+  if (!request || request.salesRepId !== effectiveRep.repId) {
     notFound();
   }
 

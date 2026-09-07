@@ -32,6 +32,14 @@ interface CancelManualPaymentInput {
    * trust a client-provided id for this — always the authenticated actor's
    * own id, resolved server-side by the caller before this is invoked. */
   requireCreatedById?: string;
+  /** Optional hook invoked INSIDE the same transaction, immediately after
+   * the AccountPaymentCancellation row is created — used only by the
+   * impersonation-aware REP wrapper (cancelRepManualPaymentAction) to write
+   * an AdminAuditLog row (IMPERSONATED_REP_PAYMENT_CANCELLED) atomically
+   * with the cancellation itself, when an ADMIN is acting as this rep.
+   * ADMIN/ADMIN_ASSISTANT's own company-wide cancellation callers never
+   * pass this and behave exactly as before. */
+  onCancelled?: (tx: Prisma.TransactionClient, payment: { id: string; receiptNumber: string | null }) => Promise<void>;
 }
 
 /** Safely cancels/reverses a wrong MANUAL payment — "تصحيح / إلغاء الدفعة"
@@ -69,7 +77,7 @@ export async function cancelManualPayment(input: CancelManualPaymentInput): Prom
   return prisma.$transaction(async (tx) => {
     const payment = await tx.accountPayment.findUnique({
       where: { id: input.paymentId },
-      select: { id: true, createdById: true, origin: true, cancellation: { select: { id: true } } },
+      select: { id: true, createdById: true, origin: true, receiptNumber: true, cancellation: { select: { id: true } } },
     });
     if (!payment) {
       return { ok: false, code: "PAYMENT_NOT_FOUND", message: "الدفعة غير موجودة" } as const;
@@ -104,6 +112,10 @@ export async function cancelManualPayment(input: CancelManualPaymentInput): Prom
         return { ok: false, code: "ALREADY_CANCELLED", message: "تم إلغاء هذه الدفعة مسبقًا" } as const;
       }
       throw err;
+    }
+
+    if (input.onCancelled) {
+      await input.onCancelled(tx, { id: payment.id, receiptNumber: payment.receiptNumber });
     }
 
     return { ok: true, paymentId: payment.id } as const;

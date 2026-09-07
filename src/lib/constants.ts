@@ -166,6 +166,35 @@ export const ADMIN_AUDIT_ACTIONS = {
   MERCHANT_SUSPENDED: "MERCHANT_SUSPENDED",
   MERCHANT_STATUS_RESET: "MERCHANT_STATUS_RESET",
   PASSWORD_RESET: "PASSWORD_RESET",
+  /// "Act as Sales Representative" impersonation — see
+  /// src/lib/auth/impersonation.ts. targetUserId on these two rows is
+  /// always the impersonated rep's own User.id (never the rep's
+  /// SalesRepresentative.id), matching every other AdminAuditLog row's
+  /// convention. newValue/oldValue carry the SalesRepresentative.id and
+  /// employeeCode for readable traceability — never a password/token/
+  /// session value.
+  IMPERSONATION_STARTED: "IMPERSONATION_STARTED",
+  IMPERSONATION_ENDED: "IMPERSONATION_ENDED",
+  /// Business writes performed by an ADMIN while impersonating a rep — one
+  /// row per mutating REP action, written ONLY when
+  /// EffectiveRepresentative.isImpersonating === true (a genuine REP
+  /// session never creates any of these). targetUserId is always the
+  /// impersonated rep's own User.id; adminUserId is always the REAL admin
+  /// driving the browser — this is the "administrative real actor" record,
+  /// entirely separate from business ownership, which continues to belong
+  /// to the rep (Order.createdByRepId / AccountPayment.createdById /
+  /// StockRequest.salesRepId are never touched by this). newValue carries
+  /// only structured, non-secret entity ids/numbers — never a password,
+  /// token, session id, or DATABASE_URL. See the REP action files under
+  /// src/app/rep/**/actions.ts for where each of these is written, and
+  /// prefer writing it in the SAME transaction as the business write it
+  /// documents wherever that transaction's own tx client is reachable.
+  IMPERSONATED_REP_SALE_CREATED: "IMPERSONATED_REP_SALE_CREATED",
+  IMPERSONATED_REP_SALE_CORRECTED: "IMPERSONATED_REP_SALE_CORRECTED",
+  IMPERSONATED_REP_PAYMENT_CREATED: "IMPERSONATED_REP_PAYMENT_CREATED",
+  IMPERSONATED_REP_PAYMENT_CANCELLED: "IMPERSONATED_REP_PAYMENT_CANCELLED",
+  IMPERSONATED_REP_PAYMENT_REPLACED: "IMPERSONATED_REP_PAYMENT_REPLACED",
+  IMPERSONATED_REP_STOCK_REQUEST_CREATED: "IMPERSONATED_REP_STOCK_REQUEST_CREATED",
 } as const;
 
 /** Derived from User.passwordHash: Google-authenticated accounts are always

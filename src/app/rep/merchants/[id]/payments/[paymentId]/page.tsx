@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { requireRole } from "@/lib/auth/guards";
-import { ROLES } from "@/lib/constants";
+import { requireEffectiveRepresentative } from "@/lib/auth/impersonation";
 import { prisma } from "@/lib/prisma";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { PaymentReceiptActions } from "@/components/shared/PaymentReceiptActions";
@@ -26,45 +25,38 @@ interface RepPaymentReceiptPageProps {
  * URL independently, since both are re-verified together server-side, not
  * just hidden in the UI. */
 export default async function RepPaymentReceiptPage({ params }: RepPaymentReceiptPageProps) {
-  const user = await requireRole([ROLES.SALES_REPRESENTATIVE]);
+  const effectiveRep = await requireEffectiveRepresentative();
   const { id: merchantId, paymentId } = await params;
 
-  const rep = await prisma.salesRepresentative.findUnique({
-    where: { userId: user.id },
-    select: { id: true },
-  });
-
-  const merchant = rep
-    ? await prisma.merchant.findFirst({
-        where: { id: merchantId, assignedRepId: rep.id },
+  const merchant = await prisma.merchant.findFirst({
+    where: { id: merchantId, assignedRepId: effectiveRep.repId },
+    select: {
+      businessName: true,
+      contactName: true,
+      contactPhone: true,
+      whatsappPhone: true,
+      city: true,
+      region: true,
+      account: {
         select: {
-          businessName: true,
-          contactName: true,
-          contactPhone: true,
-          whatsappPhone: true,
-          city: true,
-          region: true,
-          account: {
+          id: true,
+          openingBalanceCents: true,
+          openingBalanceSetAt: true,
+          orders: { select: { orderNumber: true, createdAt: true, status: true, totalCents: true } },
+          payments: {
             select: {
               id: true,
-              openingBalanceCents: true,
-              openingBalanceSetAt: true,
-              orders: { select: { orderNumber: true, createdAt: true, status: true, totalCents: true } },
-              payments: {
-                select: {
-                  id: true,
-                  amountCents: true,
-                  method: true,
-                  createdAt: true,
-                  note: true,
-                  cancellation: { select: { reason: true, cancelledAt: true, cancelledBy: { select: { name: true } } } },
-                },
-              },
+              amountCents: true,
+              method: true,
+              createdAt: true,
+              note: true,
+              cancellation: { select: { reason: true, cancelledAt: true, cancelledBy: { select: { name: true } } } },
             },
           },
         },
-      })
-    : null;
+      },
+    },
+  });
 
   if (!merchant || !merchant.account) {
     notFound();

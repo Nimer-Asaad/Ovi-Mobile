@@ -3,8 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { requireRole } from "@/lib/auth/guards";
-import { ROLES } from "@/lib/constants";
+import { requireEffectiveRepresentative } from "@/lib/auth/impersonation";
+import { ADMIN_AUDIT_ACTIONS } from "@/lib/constants";
 import { recordManualAccountPayment } from "@/lib/accounts";
 import { recordAccountPaymentSchema } from "@/lib/validation/accounts";
 
@@ -20,17 +20,20 @@ export interface RecordMerchantPaymentState {
  * logic" requirement).
  *
  * The one thing that differs from the admin action: this one independently
- * re-verifies the target merchant is actually assigned to the calling rep
- * (Merchant.assignedRepId) BEFORE writing anything — `merchantId` is the
- * route's own bound argument (see RecordMerchantPaymentForm), never trusted
- * from arbitrary client input, but even so this re-derives the account id
- * itself from a server-side, ownership-scoped query rather than accepting
- * one from the form — a rep can never record a payment against another
- * rep's merchant, or any account with no merchant at all, no matter what a
- * manipulated request sends. createdById is always the authenticated rep's
- * own User.id — never taken from the client, matching the exact same
- * "who actually did this" convention already used by
- * createRepSale/assignStockToRep/returnStockFromRep.
+ * re-verifies the target merchant is actually assigned to the effective rep
+ * (Merchant.assignedRepId — the real rep, or the rep an admin is
+ * impersonating, resolved via requireEffectiveRepresentative) BEFORE writing
+ * anything — `merchantId` is the route's own bound argument (see
+ * RecordMerchantPaymentForm), never trusted from arbitrary client input, but
+ * even so this re-derives the account id itself from a server-side,
+ * ownership-scoped query rather than accepting one from the form — a rep
+ * can never record a payment against another rep's merchant, or any account
+ * with no merchant at all, no matter what a manipulated request sends (and
+ * under impersonation, "the rep" here always means the impersonated rep,
+ * never the real admin). createdById is always the effective rep's own
+ * User.id — never taken from the client, and never the real admin's id
+ * while impersonating — matching the exact same "who actually did this"
+ * convention already used by createRepSale/assignStockToRep/returnStockFromRep.
  *
  * Redirects straight to that payment's printable receipt ("سند قبض" — see
  * /rep/merchants/[id]/payments/[paymentId]) on success, exactly like
@@ -57,18 +60,10 @@ export async function recordMerchantPaymentAsRep(
   _prevState: RecordMerchantPaymentState,
   formData: FormData,
 ): Promise<RecordMerchantPaymentState> {
-  const user = await requireRole([ROLES.SALES_REPRESENTATIVE]);
-
-  const rep = await prisma.salesRepresentative.findUnique({
-    where: { userId: user.id },
-    select: { id: true },
-  });
-  if (!rep) {
-    return { error: "لم يتم العثور على بيانات المندوب" };
-  }
+  const effectiveRep = await requireEffectiveRepresentative();
 
   const merchant = await prisma.merchant.findFirst({
-    where: { id: merchantId, assignedRepId: rep.id },
+    where: { id: merchantId, assignedRepId: effectiveRep.repId },
     select: { account: { select: { id: true } } },
   });
   if (!merchant) {
@@ -89,12 +84,28 @@ export async function recordMerchantPaymentAsRep(
     return { error: parsed.error.issues[0]?.message ?? "بيانات الدفعة غير صالحة" };
   }
 
-  const payment = await prisma.$transaction((tx) =>
-    recordManualAccountPayment(tx, accountId, parsed.data.amountCents, user.id, {
+  const payment = await prisma.$transaction(async (tx) => {
+    const created = await recordManualAccountPayment(tx, accountId, parsed.data.amountCents, effectiveRep.actingUserId, {
       method: parsed.data.method,
       note: parsed.data.note,
-    }),
-  );
+    });
+
+    // Written INSIDE the same transaction as the payment itself — either
+    // both commit or both roll back. Never written for a genuine REP
+    // session (isImpersonating === false).
+    if (effectiveRep.isImpersonating) {
+      await tx.adminAuditLog.create({
+        data: {
+          adminUserId: effectiveRep.realUser.id,
+          targetUserId: effectiveRep.actingUserId,
+          action: ADMIN_AUDIT_ACTIONS.IMPERSONATED_REP_PAYMENT_CREATED,
+          newValue: { salesRepId: effectiveRep.repId, paymentId: created.id, receiptNumber: created.receiptNumber, accountId },
+        },
+      });
+    }
+
+    return created;
+  });
 
   revalidatePath("/rep/merchants");
   revalidatePath(`/rep/merchants/${merchantId}`);

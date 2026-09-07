@@ -179,7 +179,7 @@ export async function recordManualAccountPayment(
      * normal case) for every ordinary standalone payment. */
     correctsPaymentId?: string;
   },
-): Promise<{ id: string }> {
+): Promise<{ id: string; receiptNumber: string | null }> {
   const receiptNumber = await generateDailyPaymentReceiptNumber(tx);
   return tx.accountPayment.create({
     data: {
@@ -192,7 +192,7 @@ export async function recordManualAccountPayment(
       origin: ACCOUNT_PAYMENT_ORIGINS.MANUAL,
       correctsPaymentId: options?.correctsPaymentId,
     },
-    select: { id: true },
+    select: { id: true, receiptNumber: true },
   });
 }
 

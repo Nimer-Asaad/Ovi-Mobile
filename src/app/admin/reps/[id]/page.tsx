@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/Button";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { StatCard } from "@/components/ui/StatCard";
 import { AdminStatusBadge } from "@/components/admin/AdminStatusBadge";
+import { StartImpersonationButton } from "@/components/admin/reps/StartImpersonationButton";
 import { getRepStockStats, getRepStockValueCents } from "@/lib/reps";
 import { RepCarHero } from "@/components/reps/RepCarHero";
 import { RepCarStockSummary } from "@/components/reps/RepCarStockSummary";
@@ -204,6 +205,7 @@ export default async function AdminRepDetailPage({ params }: AdminRepDetailPageP
         actions={
           <>
             <AdminStatusBadge isActive={rep.isActive && rep.user.isActive} />
+            {rep.isActive && rep.user.isActive && <StartImpersonationButton repId={rep.id} repName={rep.user.name} />}
             <Link href={`/admin/rep-requests?salesRepId=${rep.id}`}>
               <Button variant="outline">طلبات المندوب</Button>
             </Link>

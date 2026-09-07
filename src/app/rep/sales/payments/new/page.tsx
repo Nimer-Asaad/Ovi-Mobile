@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
-import { requireRole } from "@/lib/auth/guards";
-import { ROLES, ACCOUNT_PAYMENT_ORIGINS } from "@/lib/constants";
+import { requireEffectiveRepresentative } from "@/lib/auth/impersonation";
+import { ACCOUNT_PAYMENT_ORIGINS } from "@/lib/constants";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { RecordAccountPaymentForm } from "@/components/admin/accounts/RecordAccountPaymentForm";
@@ -30,7 +30,7 @@ interface RepSalesNewPaymentPageProps {
  * enforcement is createRepReplacementPaymentAction's own identical re-check
  * at submission time (see its doc comment in src/app/rep/sales/actions.ts). */
 export default async function RepSalesNewPaymentPage({ searchParams }: RepSalesNewPaymentPageProps) {
-  const user = await requireRole([ROLES.SALES_REPRESENTATIVE]);
+  const effectiveRep = await requireEffectiveRepresentative();
   const { replacementFor } = await searchParams;
 
   const original = replacementFor
@@ -47,7 +47,7 @@ export default async function RepSalesNewPaymentPage({ searchParams }: RepSalesN
       })
     : null;
 
-  const isOwnPayment = original?.createdById === user.id;
+  const isOwnPayment = original?.createdById === effectiveRep.actingUserId;
 
   const blockedReason = !replacementFor
     ? "لا يمكن فتح هذه الصفحة مباشرة — الرجاء الوصول إليها من خلال رابط \"تسجيل دفعة صحيحة\" بعد إلغاء دفعة."

@@ -1,6 +1,5 @@
 import Link from "next/link";
-import { requireRole } from "@/lib/auth/guards";
-import { ROLES } from "@/lib/constants";
+import { requireEffectiveRepresentative } from "@/lib/auth/impersonation";
 import { prisma } from "@/lib/prisma";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
@@ -23,14 +22,9 @@ function SectionHeader({ title }: { title: string }) {
 }
 
 export default async function RepDashboardPage() {
-  const user = await requireRole([ROLES.SALES_REPRESENTATIVE]);
-
-  const rep = await prisma.salesRepresentative.findUnique({
-    where: { userId: user.id },
-    select: { id: true, carStockLocation: { select: { id: true } } },
-  });
-
-  const locationId = rep?.carStockLocation?.id ?? null;
+  const effectiveRep = await requireEffectiveRepresentative();
+  const repId = effectiveRep.repId;
+  const locationId = effectiveRep.carStockLocationId;
   const startOfToday = new Date();
   startOfToday.setHours(0, 0, 0, 0);
 
@@ -60,34 +54,26 @@ export default async function RepDashboardPage() {
           },
         })
       : Promise.resolve([]),
-    rep
-      ? prisma.order.count({
-          where: { createdByRepId: rep.id, source: ORDER_SOURCES.REP_SALE, createdAt: { gte: startOfToday } },
-        })
-      : Promise.resolve(0),
-    rep
-      ? prisma.order.aggregate({
-          where: { createdByRepId: rep.id, source: ORDER_SOURCES.REP_SALE, createdAt: { gte: startOfToday } },
-          _sum: { totalCents: true },
-        })
-      : Promise.resolve({ _sum: { totalCents: 0 } }),
-    rep
-      ? prisma.order.count({ where: { createdByRepId: rep.id, source: ORDER_SOURCES.REP_SALE } })
-      : Promise.resolve(0),
-    rep
-      ? prisma.order.aggregate({
-          where: { createdByRepId: rep.id, source: ORDER_SOURCES.REP_SALE },
-          _sum: { totalCents: true },
-        })
-      : Promise.resolve({ _sum: { totalCents: 0 } }),
-    rep ? getActiveRequestCountForRep(rep.id) : Promise.resolve(0),
-    rep ? getLatestRequestsForRep(rep.id, 3) : Promise.resolve([]),
-    rep ? getRepMerchantsFleetSummary(rep.id) : Promise.resolve({ merchantCount: 0, totalBalanceCents: 0 }),
+    prisma.order.count({
+      where: { createdByRepId: repId, source: ORDER_SOURCES.REP_SALE, createdAt: { gte: startOfToday } },
+    }),
+    prisma.order.aggregate({
+      where: { createdByRepId: repId, source: ORDER_SOURCES.REP_SALE, createdAt: { gte: startOfToday } },
+      _sum: { totalCents: true },
+    }),
+    prisma.order.count({ where: { createdByRepId: repId, source: ORDER_SOURCES.REP_SALE } }),
+    prisma.order.aggregate({
+      where: { createdByRepId: repId, source: ORDER_SOURCES.REP_SALE },
+      _sum: { totalCents: true },
+    }),
+    getActiveRequestCountForRep(repId),
+    getLatestRequestsForRep(repId, 3),
+    getRepMerchantsFleetSummary(repId),
   ]);
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-8">
-      <RepHero repName={user.name} />
+      <RepHero repName={effectiveRep.repName} />
 
       <section className="flex flex-col gap-4">
         <SectionHeader title="المبيعات" />

@@ -108,6 +108,16 @@ export interface CreateRepSaleContext {
    * rep's. Never changes whose sale this is: ownership is always
    * `salesRepId` above, resolved independently of this. */
   actorUserId: string;
+  /** Optional hook invoked INSIDE the same transaction, immediately after
+   * the Order row is created — used only by the impersonation-aware caller
+   * (createRepSale in src/app/rep/sales/actions.ts) to write an
+   * AdminAuditLog row (IMPERSONATED_REP_SALE_CREATED) atomically with the
+   * sale itself, when an ADMIN is acting as this rep — either both commit
+   * or both roll back together. This core otherwise stays entirely
+   * impersonation-unaware: createRepSaleForRep (the separate, openly-
+   * ADMIN-attributed feature in src/app/admin/reps/actions.ts) never passes
+   * this and behaves exactly as before. */
+  onOrderCreated?: (tx: Prisma.TransactionClient, order: { id: string; orderNumber: string }) => Promise<void>;
 }
 
 export type CreateRepSaleResult = { ok: true; orderNumber: string } | { ok: false; error: string };
@@ -130,7 +140,7 @@ export type CreateRepSaleResult = { ok: true; orderNumber: string } | { ok: fals
  * extracted. */
 export async function createRepSaleCore(input: RepSaleInput, context: CreateRepSaleContext): Promise<CreateRepSaleResult> {
   const { items: saleItems, customerName, customerPhone, city, address, notes, repCustomerOrderId, paidNowCents, paidNowMethod } = input;
-  const { salesRepId, carStockLocationId: locationId, actorUserId } = context;
+  const { salesRepId, carStockLocationId: locationId, actorUserId, onOrderCreated } = context;
 
   // A customer order is only ever a starting template (see the
   // RepCustomerOrder schema doc comment) — the rep (or the admin acting on
@@ -374,6 +384,10 @@ export async function createRepSaleCore(input: RepSaleInput, context: CreateRepS
             },
           },
         });
+
+        if (onOrderCreated) {
+          await onOrderCreated(tx, { id: createdOrder.id, orderNumber });
+        }
 
         // Order.totalCents above is always the FULL invoice amount — a
         // wholesale trader's unpaid remainder is meant to sit on their

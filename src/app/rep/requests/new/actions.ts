@@ -4,8 +4,8 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { requireRole } from "@/lib/auth/guards";
-import { ROLES, STOCK_REQUEST_STATUSES, STOCK_REQUEST_TYPES } from "@/lib/constants";
+import { requireEffectiveRepresentative } from "@/lib/auth/impersonation";
+import { ADMIN_AUDIT_ACTIONS, STOCK_REQUEST_STATUSES, STOCK_REQUEST_TYPES } from "@/lib/constants";
 import { generateRequestNumber } from "@/lib/rep-stock-requests";
 import { repStockRequestCreateSchema } from "@/lib/validation/repStockRequest";
 
@@ -24,24 +24,14 @@ function revalidateRequestPaths(requestId: string): void {
 }
 
 /** Creates a PENDING restock request only — never touches InventoryItem or
- * StockMovement. salesRepId is always resolved from the session user, never
- * trusted from the client. */
+ * StockMovement. salesRepId is always resolved from the effective REP scope
+ * (the real rep, or the rep an admin is impersonating), never trusted from
+ * the client. */
 export async function createStockRequest(
   _prevState: RepStockRequestState,
   formData: FormData,
 ): Promise<RepStockRequestState> {
-  const user = await requireRole([ROLES.SALES_REPRESENTATIVE]);
-
-  const rep = await prisma.salesRepresentative.findUnique({
-    where: { userId: user.id },
-    select: { id: true, isActive: true },
-  });
-  if (!rep) {
-    return { error: "لم يتم العثور على ملف المندوب" };
-  }
-  if (!rep.isActive) {
-    return { error: "لا يمكن إنشاء طلب لمندوب غير مفعل" };
-  }
+  const effectiveRep = await requireEffectiveRepresentative();
 
   let items: unknown;
   try {
@@ -92,22 +82,42 @@ export async function createStockRequest(
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const requestNumber = generateRequestNumber();
     try {
-      const created = await prisma.stockRequest.create({
-        data: {
-          requestNumber,
-          salesRepId: rep.id,
-          status: STOCK_REQUEST_STATUSES.PENDING,
-          type: STOCK_REQUEST_TYPES.RESTOCK,
-          repNote: parsed.data.repNote,
-          items: {
-            create: lines.map((item) => ({
-              productId: item.productId,
-              variantId: item.variantId,
-              requestedQuantity: item.requestedQuantity,
-            })),
+      // Wrapped in a transaction (rather than a bare create) only so the
+      // impersonation audit row below can be written atomically with the
+      // stock request itself — either both commit or both roll back. A
+      // genuine REP session pays the negligible cost of an extra
+      // transaction wrapper around what is otherwise the exact same insert.
+      const created = await prisma.$transaction(async (tx) => {
+        const request = await tx.stockRequest.create({
+          data: {
+            requestNumber,
+            salesRepId: effectiveRep.repId,
+            status: STOCK_REQUEST_STATUSES.PENDING,
+            type: STOCK_REQUEST_TYPES.RESTOCK,
+            repNote: parsed.data.repNote,
+            items: {
+              create: lines.map((item) => ({
+                productId: item.productId,
+                variantId: item.variantId,
+                requestedQuantity: item.requestedQuantity,
+              })),
+            },
           },
-        },
-        select: { id: true },
+          select: { id: true },
+        });
+
+        if (effectiveRep.isImpersonating) {
+          await tx.adminAuditLog.create({
+            data: {
+              adminUserId: effectiveRep.realUser.id,
+              targetUserId: effectiveRep.actingUserId,
+              action: ADMIN_AUDIT_ACTIONS.IMPERSONATED_REP_STOCK_REQUEST_CREATED,
+              newValue: { salesRepId: effectiveRep.repId, requestId: request.id },
+            },
+          });
+        }
+
+        return request;
       });
       requestId = created.id;
       succeeded = true;

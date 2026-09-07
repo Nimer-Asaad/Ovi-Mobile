@@ -1,7 +1,6 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { requireRole } from "@/lib/auth/guards";
-import { ROLES } from "@/lib/constants";
+import { requireEffectiveRepresentative } from "@/lib/auth/impersonation";
 import { prisma } from "@/lib/prisma";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";
@@ -30,55 +29,48 @@ const RECENT_ROW_LIMIT = 8;
  * pure transformation the printable statement uses — never a second,
  * competing balance calculation. */
 export default async function RepMerchantDetailPage({ params }: RepMerchantDetailPageProps) {
-  const user = await requireRole([ROLES.SALES_REPRESENTATIVE]);
+  const effectiveRep = await requireEffectiveRepresentative();
   const { id } = await params;
 
-  const rep = await prisma.salesRepresentative.findUnique({
-    where: { userId: user.id },
-    select: { id: true },
-  });
-
-  const merchant = rep
-    ? await prisma.merchant.findFirst({
-        where: { id, assignedRepId: rep.id },
+  const merchant = await prisma.merchant.findFirst({
+    where: { id, assignedRepId: effectiveRep.repId },
+    select: {
+      id: true,
+      businessName: true,
+      region: true,
+      status: true,
+      contactPhone: true,
+      user: { select: { phone: true } },
+      account: {
         select: {
-          id: true,
-          businessName: true,
-          region: true,
-          status: true,
-          contactPhone: true,
-          user: { select: { phone: true } },
-          account: {
+          openingBalanceCents: true,
+          openingBalanceSetAt: true,
+          orders: {
+            orderBy: { createdAt: "desc" },
             select: {
-              openingBalanceCents: true,
-              openingBalanceSetAt: true,
-              orders: {
-                orderBy: { createdAt: "desc" },
-                select: {
-                  orderNumber: true,
-                  createdAt: true,
-                  status: true,
-                  totalCents: true,
-                  createdByRep: { select: { user: { select: { name: true } } } },
-                },
-              },
-              payments: {
-                orderBy: { createdAt: "desc" },
-                select: {
-                  id: true,
-                  amountCents: true,
-                  method: true,
-                  createdAt: true,
-                  note: true,
-                  createdBy: { select: { name: true } },
-                  cancellation: { select: { reason: true, cancelledAt: true, cancelledBy: { select: { name: true } } } },
-                },
-              },
+              orderNumber: true,
+              createdAt: true,
+              status: true,
+              totalCents: true,
+              createdByRep: { select: { user: { select: { name: true } } } },
+            },
+          },
+          payments: {
+            orderBy: { createdAt: "desc" },
+            select: {
+              id: true,
+              amountCents: true,
+              method: true,
+              createdAt: true,
+              note: true,
+              createdBy: { select: { name: true } },
+              cancellation: { select: { reason: true, cancelledAt: true, cancelledBy: { select: { name: true } } } },
             },
           },
         },
-      })
-    : null;
+      },
+    },
+  });
 
   if (!merchant) {
     notFound();

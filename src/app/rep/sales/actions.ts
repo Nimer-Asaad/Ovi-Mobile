@@ -4,8 +4,8 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { requireRole } from "@/lib/auth/guards";
-import { ROLES, ACCOUNT_PAYMENT_ORIGINS } from "@/lib/constants";
+import { requireEffectiveRepresentative } from "@/lib/auth/impersonation";
+import { ACCOUNT_PAYMENT_ORIGINS, ADMIN_AUDIT_ACTIONS } from "@/lib/constants";
 import { repSaleSchema } from "@/lib/validation/repSale";
 import { recordReplacementPaymentSchema } from "@/lib/validation/accounts";
 import { createRepSaleCore } from "@/lib/rep-sales";
@@ -20,14 +20,18 @@ export interface RepSaleState {
 const PARSE_ERROR_MESSAGE = "بيانات البيع غير صالحة";
 
 /** Thin wrapper around the shared sale transaction (createRepSaleCore in
- * src/lib/rep-sales.ts) for a rep selling their own car stock: authorizes
- * SALES_REPRESENTATIVE, resolves "my own rep row + my own car location"
- * from the session, parses the form, then hands off to the core. An admin
- * recording a sale on a rep's behalf (createRepSaleForRep in
- * src/app/admin/reps/actions.ts) is the only other caller of that same
- * core — there is exactly one sale transaction in this codebase. */
+ * src/lib/rep-sales.ts) for a rep selling their own car stock: resolves the
+ * effective REP scope (the real rep, or the rep an admin is impersonating)
+ * via requireEffectiveRepresentative, parses the form, then hands off to
+ * the core using that scope's own rep id / car location / acting user id —
+ * so a sale created while impersonating is stamped exactly as if the
+ * impersonated rep made it themselves. An admin recording a sale on a rep's
+ * behalf (createRepSaleForRep in src/app/admin/reps/actions.ts) is a
+ * separate, openly-ADMIN-attributed feature and the only other caller of
+ * that same core — there is exactly one sale transaction in this
+ * codebase. */
 export async function createRepSale(_prevState: RepSaleState, formData: FormData): Promise<RepSaleState> {
-  const user = await requireRole([ROLES.SALES_REPRESENTATIVE]);
+  const effectiveRep = await requireEffectiveRepresentative();
 
   let items: unknown;
   try {
@@ -52,23 +56,31 @@ export async function createRepSale(_prevState: RepSaleState, formData: FormData
     return { error: parsed.error.issues[0]?.message ?? PARSE_ERROR_MESSAGE };
   }
 
-  const rep = await prisma.salesRepresentative.findUnique({
-    where: { userId: user.id },
-    select: { id: true, carStockLocation: { select: { id: true } } },
-  });
-  if (!rep) {
-    return { error: "لم يتم العثور على ملف المندوب" };
-  }
-
-  const locationId = rep.carStockLocation?.id ?? null;
+  const locationId = effectiveRep.carStockLocationId;
   if (!locationId) {
     return { error: "لم يتم العثور على موقع مخزون المندوب" };
   }
 
   const result = await createRepSaleCore(parsed.data, {
-    salesRepId: rep.id,
+    salesRepId: effectiveRep.repId,
     carStockLocationId: locationId,
-    actorUserId: user.id,
+    actorUserId: effectiveRep.actingUserId,
+    // Written INSIDE createRepSaleCore's own transaction — the sale and its
+    // impersonation audit trail either both commit or both roll back. Never
+    // invoked for a genuine REP session (isImpersonating === false), so a
+    // real rep's own sale never creates an AdminAuditLog row.
+    onOrderCreated: effectiveRep.isImpersonating
+      ? async (tx, order) => {
+          await tx.adminAuditLog.create({
+            data: {
+              adminUserId: effectiveRep.realUser.id,
+              targetUserId: effectiveRep.actingUserId,
+              action: ADMIN_AUDIT_ACTIONS.IMPERSONATED_REP_SALE_CREATED,
+              newValue: { salesRepId: effectiveRep.repId, orderId: order.id, orderNumber: order.orderNumber },
+            },
+          });
+        }
+      : undefined,
   });
 
   if (!result.ok) {
@@ -85,31 +97,48 @@ export interface RepCorrectionState {
 
 /** REP-facing wrapper around correctSale (src/lib/sale-correction.ts) —
  * server-side ownership is verified HERE before ever calling the shared
- * lib function: Order.createdByRepId must equal this rep's own id,
- * resolved from the authenticated session, never trusted from the client
- * (a manipulated orderNumber for another rep's sale simply 404s at this
- * check). createdByRepId never changes after a sale is created, so this
- * pre-check (outside correctSale's own transaction) can never race the
- * transition itself. */
+ * lib function: Order.createdByRepId must equal the effective rep's own id
+ * (the real rep, or the rep an admin is impersonating), resolved via
+ * requireEffectiveRepresentative, never trusted from the client (a
+ * manipulated orderNumber for another rep's sale simply 404s at this
+ * check — including when impersonating, since the effective scope is
+ * always the impersonated rep's own id, never the real admin's).
+ * createdByRepId never changes after a sale is created, so this pre-check
+ * (outside correctSale's own transaction) can never race the transition
+ * itself. */
 export async function correctRepSaleAction(_prevState: RepCorrectionState, formData: FormData): Promise<RepCorrectionState> {
-  const user = await requireRole([ROLES.SALES_REPRESENTATIVE]);
+  const effectiveRep = await requireEffectiveRepresentative();
   const orderNumber = formData.get("orderNumber")?.toString();
   const reason = formData.get("reason")?.toString() ?? "";
   if (!orderNumber) {
     return { error: "الطلب غير موجود" };
   }
 
-  const rep = await prisma.salesRepresentative.findUnique({ where: { userId: user.id }, select: { id: true } });
-  if (!rep) {
-    return { error: "لم يتم العثور على ملف المندوب" };
-  }
-
   const order = await prisma.order.findUnique({ where: { orderNumber }, select: { createdByRepId: true } });
-  if (!order || order.createdByRepId !== rep.id) {
+  if (!order || order.createdByRepId !== effectiveRep.repId) {
     return { error: "لا يمكنك تصحيح هذه المبيعة" };
   }
 
-  const result = await correctSale({ orderNumber, reason, actorUserId: user.id });
+  const result = await correctSale({
+    orderNumber,
+    reason,
+    actorUserId: effectiveRep.actingUserId,
+    // Written INSIDE correctSale's own transaction — the correction and its
+    // impersonation audit trail either both commit or both roll back. Never
+    // invoked for a genuine REP session.
+    onCorrected: effectiveRep.isImpersonating
+      ? async (tx, correctedOrder) => {
+          await tx.adminAuditLog.create({
+            data: {
+              adminUserId: effectiveRep.realUser.id,
+              targetUserId: effectiveRep.actingUserId,
+              action: ADMIN_AUDIT_ACTIONS.IMPERSONATED_REP_SALE_CORRECTED,
+              newValue: { salesRepId: effectiveRep.repId, orderId: correctedOrder.id, orderNumber: correctedOrder.orderNumber, reason },
+            },
+          });
+        }
+      : undefined,
+  });
   if (!result.ok) {
     return { error: result.message };
   }
@@ -119,19 +148,46 @@ export async function correctRepSaleAction(_prevState: RepCorrectionState, formD
 }
 
 /** REP-facing wrapper around cancelManualPayment (src/lib/payment-correction.ts)
- * — passes requireCreatedById: user.id so ownership (AccountPayment.createdById
- * === this authenticated user, never inferred from merchant assignment) is
- * enforced server-side INSIDE that function's own transaction, not just
- * here. Never authorizes based on a client-supplied id. */
+ * — passes requireCreatedById: effectiveRep.actingUserId so ownership
+ * (AccountPayment.createdById === the effective rep's own user id, never
+ * inferred from merchant assignment, and — under impersonation — never the
+ * real admin's id) is enforced server-side INSIDE that function's own
+ * transaction, not just here. Never authorizes based on a client-supplied
+ * id. */
 export async function cancelRepManualPaymentAction(_prevState: RepCorrectionState, formData: FormData): Promise<RepCorrectionState> {
-  const user = await requireRole([ROLES.SALES_REPRESENTATIVE]);
+  const effectiveRep = await requireEffectiveRepresentative();
   const paymentId = formData.get("paymentId")?.toString();
   const reason = formData.get("reason")?.toString() ?? "";
   if (!paymentId) {
     return { error: "الدفعة غير موجودة" };
   }
 
-  const result = await cancelManualPayment({ paymentId, reason, actorUserId: user.id, requireCreatedById: user.id });
+  const result = await cancelManualPayment({
+    paymentId,
+    reason,
+    actorUserId: effectiveRep.actingUserId,
+    requireCreatedById: effectiveRep.actingUserId,
+    // Written INSIDE cancelManualPayment's own transaction — the
+    // cancellation and its impersonation audit trail either both commit or
+    // both roll back. Never invoked for a genuine REP session.
+    onCancelled: effectiveRep.isImpersonating
+      ? async (tx, cancelledPayment) => {
+          await tx.adminAuditLog.create({
+            data: {
+              adminUserId: effectiveRep.realUser.id,
+              targetUserId: effectiveRep.actingUserId,
+              action: ADMIN_AUDIT_ACTIONS.IMPERSONATED_REP_PAYMENT_CANCELLED,
+              newValue: {
+                salesRepId: effectiveRep.repId,
+                paymentId: cancelledPayment.id,
+                receiptNumber: cancelledPayment.receiptNumber,
+                reason,
+              },
+            },
+          });
+        }
+      : undefined,
+  });
   if (!result.ok) {
     return { error: result.message };
   }
@@ -185,7 +241,7 @@ export async function createRepReplacementPaymentAction(
   _prevState: RepReplacementPaymentState,
   formData: FormData,
 ): Promise<RepReplacementPaymentState> {
-  const user = await requireRole([ROLES.SALES_REPRESENTATIVE]);
+  const effectiveRep = await requireEffectiveRepresentative();
 
   const replacementFor = formData.get("replacementFor")?.toString();
   if (!replacementFor) {
@@ -206,7 +262,7 @@ export async function createRepReplacementPaymentAction(
   if (!original) {
     return { error: "الدفعة الأصلية غير موجودة" };
   }
-  if (original.createdById !== user.id) {
+  if (original.createdById !== effectiveRep.actingUserId) {
     return { error: "لا يمكنك تصحيح هذه الدفعة" };
   }
   if (original.origin === ACCOUNT_PAYMENT_ORIGINS.SALE_INITIAL) {
@@ -233,13 +289,34 @@ export async function createRepReplacementPaymentAction(
 
   let paymentId: string;
   try {
-    const payment = await prisma.$transaction((tx) =>
-      recordManualAccountPayment(tx, original.accountId, parsed.data.amountCents, user.id, {
+    const payment = await prisma.$transaction(async (tx) => {
+      const created = await recordManualAccountPayment(tx, original.accountId, parsed.data.amountCents, effectiveRep.actingUserId, {
         method: parsed.data.method,
         note: parsed.data.note,
         correctsPaymentId: original.id,
-      }),
-    );
+      });
+
+      // Written INSIDE the same transaction as the replacement payment
+      // itself — either both commit or both roll back. Never written for a
+      // genuine REP session.
+      if (effectiveRep.isImpersonating) {
+        await tx.adminAuditLog.create({
+          data: {
+            adminUserId: effectiveRep.realUser.id,
+            targetUserId: effectiveRep.actingUserId,
+            action: ADMIN_AUDIT_ACTIONS.IMPERSONATED_REP_PAYMENT_REPLACED,
+            newValue: {
+              salesRepId: effectiveRep.repId,
+              originalPaymentId: original.id,
+              replacementPaymentId: created.id,
+              receiptNumber: created.receiptNumber,
+            },
+          },
+        });
+      }
+
+      return created;
+    });
     paymentId = payment.id;
   } catch (error) {
     if (isCorrectsPaymentUniqueError(error)) {

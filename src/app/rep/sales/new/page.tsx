@@ -1,5 +1,4 @@
-import { requireRole } from "@/lib/auth/guards";
-import { ROLES } from "@/lib/constants";
+import { requireEffectiveRepresentative } from "@/lib/auth/impersonation";
 import { prisma } from "@/lib/prisma";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { getAccountBalanceCents } from "@/lib/accounts";
@@ -18,15 +17,10 @@ interface RepNewSalePageProps {
 }
 
 export default async function RepNewSalePage({ searchParams }: RepNewSalePageProps) {
-  const user = await requireRole([ROLES.SALES_REPRESENTATIVE]);
+  const effectiveRep = await requireEffectiveRepresentative();
   const { merchantId } = await searchParams;
 
-  const rep = await prisma.salesRepresentative.findUnique({
-    where: { userId: user.id },
-    select: { id: true, carStockLocation: { select: { id: true } } },
-  });
-
-  const locationId = rep?.carStockLocation?.id ?? null;
+  const locationId = effectiveRep.carStockLocationId;
 
   const [options, customers, customerOrders, preselectedMerchant] = await Promise.all([
     getRepCarSaleProducts(locationId),
@@ -34,11 +28,11 @@ export default async function RepNewSalePage({ searchParams }: RepNewSalePagePro
     // auto-fill the customer fields instead of re-typing them — see
     // createRepSale, which resolves/creates the matching Merchant by phone
     // so repeat sales to the same trader never register a duplicate.
-    rep ? getRepTraderContactsForSaleForm(rep.id) : Promise.resolve([]),
-    rep ? getOpenCustomerOrdersForRep(rep.id) : Promise.resolve([]),
-    rep && merchantId
+    getRepTraderContactsForSaleForm(effectiveRep.repId),
+    getOpenCustomerOrdersForRep(effectiveRep.repId),
+    merchantId
       ? prisma.merchant.findFirst({
-          where: { id: merchantId, assignedRepId: rep.id },
+          where: { id: merchantId, assignedRepId: effectiveRep.repId },
           select: {
             businessName: true,
             contactPhone: true,

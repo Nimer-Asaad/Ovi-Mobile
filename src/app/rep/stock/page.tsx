@@ -1,6 +1,5 @@
 import { Prisma } from "@prisma/client";
-import { requireRole } from "@/lib/auth/guards";
-import { ROLES } from "@/lib/constants";
+import { requireEffectiveRepresentative } from "@/lib/auth/impersonation";
 import { prisma } from "@/lib/prisma";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { getRepStockStats } from "@/lib/reps";
@@ -34,14 +33,8 @@ const REP_STOCK_ITEM_SELECT = {
 } satisfies Prisma.InventoryItemSelect;
 
 export default async function RepStockPage() {
-  const user = await requireRole([ROLES.SALES_REPRESENTATIVE]);
-
-  const rep = await prisma.salesRepresentative.findUnique({
-    where: { userId: user.id },
-    select: { carStockLocation: { select: { id: true } } },
-  });
-
-  const locationId = rep?.carStockLocation?.id ?? null;
+  const effectiveRep = await requireEffectiveRepresentative();
+  const locationId = effectiveRep.carStockLocationId;
 
   const [stats, items] = await Promise.all([
     getRepStockStats(locationId),

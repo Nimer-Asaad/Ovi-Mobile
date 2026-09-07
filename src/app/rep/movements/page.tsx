@@ -1,5 +1,4 @@
-import { requireRole } from "@/lib/auth/guards";
-import { ROLES } from "@/lib/constants";
+import { requireEffectiveRepresentative } from "@/lib/auth/impersonation";
 import { prisma } from "@/lib/prisma";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
@@ -8,14 +7,8 @@ import { AdminTable, AdminTableHead, AdminTableBody, AdminEmptyRow } from "@/com
 import { getMovementTypeLabel, getMovementTypeBadgeVariant } from "@/lib/inventory-labels";
 
 export default async function RepMovementsPage() {
-  const user = await requireRole([ROLES.SALES_REPRESENTATIVE]);
-
-  const rep = await prisma.salesRepresentative.findUnique({
-    where: { userId: user.id },
-    select: { carStockLocation: { select: { id: true } } },
-  });
-
-  const locationId = rep?.carStockLocation?.id ?? null;
+  const effectiveRep = await requireEffectiveRepresentative();
+  const locationId = effectiveRep.carStockLocationId;
 
   const movements = locationId
     ? await prisma.stockMovement.findMany({

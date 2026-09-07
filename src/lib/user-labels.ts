@@ -67,6 +67,14 @@ const AUDIT_ACTION_LABELS: Record<string, string> = {
   [ADMIN_AUDIT_ACTIONS.MERCHANT_REJECTED]: "رفض التاجر",
   [ADMIN_AUDIT_ACTIONS.MERCHANT_SUSPENDED]: "إيقاف التاجر",
   [ADMIN_AUDIT_ACTIONS.MERCHANT_STATUS_RESET]: "إعادة التاجر لقيد المراجعة",
+  [ADMIN_AUDIT_ACTIONS.IMPERSONATION_STARTED]: "الدخول كمندوب",
+  [ADMIN_AUDIT_ACTIONS.IMPERSONATION_ENDED]: "إنهاء وضع المندوب",
+  [ADMIN_AUDIT_ACTIONS.IMPERSONATED_REP_SALE_CREATED]: "إنشاء بيع أثناء الدخول كمندوب",
+  [ADMIN_AUDIT_ACTIONS.IMPERSONATED_REP_SALE_CORRECTED]: "تصحيح بيع أثناء الدخول كمندوب",
+  [ADMIN_AUDIT_ACTIONS.IMPERSONATED_REP_PAYMENT_CREATED]: "تسجيل دفعة أثناء الدخول كمندوب",
+  [ADMIN_AUDIT_ACTIONS.IMPERSONATED_REP_PAYMENT_CANCELLED]: "إلغاء دفعة أثناء الدخول كمندوب",
+  [ADMIN_AUDIT_ACTIONS.IMPERSONATED_REP_PAYMENT_REPLACED]: "تسجيل دفعة تصحيحية أثناء الدخول كمندوب",
+  [ADMIN_AUDIT_ACTIONS.IMPERSONATED_REP_STOCK_REQUEST_CREATED]: "إنشاء طلب تزويد أثناء الدخول كمندوب",
 };
 
 export function getAuditActionLabel(action: string): string {

@@ -2,7 +2,7 @@ import "server-only";
 import { cache } from "react";
 import { cookies } from "next/headers";
 import { prisma } from "@/lib/prisma";
-import { SESSION_COOKIE_NAME, SESSION_TTL_MS } from "@/lib/auth/session-constants";
+import { SESSION_COOKIE_NAME, SESSION_TTL_MS, IMPERSONATION_COOKIE_NAME } from "@/lib/auth/session-constants";
 import { getRequestContext } from "@/lib/activity";
 import { USER_ACTIVITY_EVENT_TYPES } from "@/lib/constants";
 import type { Role } from "@/types";
@@ -51,13 +51,23 @@ export interface SessionUser {
  * records a real LOGIN activity event and refreshes lastLoginAt/lastActiveAt
  * — used by every login/registration path (email/password, Google, customer
  * and merchant self-registration), so this is the single place all of them
- * become visible in the Users admin section. */
+ * become visible in the Users admin section. This is also, deliberately,
+ * the single place that clears any pre-existing impersonation cookie BEFORE
+ * establishing the new session — an old browser cookie must never silently
+ * resurrect a previous admin's REP impersonation after a later login,
+ * including a DIFFERENT admin logging in on the same browser. (Belt-and-
+ * suspenders: the impersonation token is separately, cryptographically
+ * bound to a specific session id anyway — see src/lib/auth/impersonation.ts
+ * — so it would fail verification here regardless; this is an explicit,
+ * unconditional clear, not reliant on that alone.) */
 export async function createSession(userId: string): Promise<void> {
+  const cookieStore = await cookies();
+  cookieStore.delete(IMPERSONATION_COOKIE_NAME);
+
   const session = await prisma.session.create({
     data: { userId, expiresAt: new Date(Date.now() + SESSION_TTL_MS) },
   });
 
-  const cookieStore = await cookies();
   cookieStore.set(SESSION_COOKIE_NAME, session.id, {
     ...COOKIE_OPTIONS,
     expires: session.expiresAt,
@@ -121,7 +131,10 @@ export const getSession = cache(async (): Promise<SessionUser | null> => {
 });
 
 /** Delete the session row (if any), record a real LOGOUT activity event,
- * and clear the cookie. */
+ * and clear both the session cookie AND the impersonation cookie (if an
+ * ADMIN was impersonating a rep, that context must never survive their own
+ * logout — the next person to use this browser, admin or not, starts
+ * clean). */
 export async function destroySession(): Promise<void> {
   const cookieStore = await cookies();
   const sessionId = cookieStore.get(SESSION_COOKIE_NAME)?.value;
@@ -139,4 +152,5 @@ export async function destroySession(): Promise<void> {
   }
 
   cookieStore.delete(SESSION_COOKIE_NAME);
+  cookieStore.delete(IMPERSONATION_COOKIE_NAME);
 }

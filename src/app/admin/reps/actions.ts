@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth/guards";
-import { ROLES, STOCK_MOVEMENT_TYPES, REP_LOAD_TYPES, REP_CUSTOMER_ORDER_STATUSES } from "@/lib/constants";
+import { ROLES, STOCK_MOVEMENT_TYPES, REP_LOAD_TYPES, REP_CUSTOMER_ORDER_STATUSES, ADMIN_AUDIT_ACTIONS } from "@/lib/constants";
+import { setImpersonationCookie, clearImpersonationCookie, readValidatedImpersonationTarget } from "@/lib/auth/impersonation";
 import { getMainWarehouse } from "@/lib/inventory";
 import { getOrCreateRepLocation } from "@/lib/reps";
 import { resolveOrCreateRepMerchant } from "@/lib/rep-merchants";
@@ -768,4 +769,109 @@ export async function createRepSaleForRep(repId: string, _prevState: RepSaleStat
   revalidatePath(`/admin/reps/${repId}`);
   revalidatePath(`/admin/reps/${repId}/sales/new`);
   redirect(`/admin/orders/${result.orderNumber}`);
+}
+
+export interface ImpersonationState {
+  error?: string;
+}
+
+/** Starts "act as sales representative" impersonation — ADMIN-only,
+ * server-side enforced (requireRole here is the real boundary; the button
+ * on /admin/reps/[id] is only a convenience, never trusted on its own).
+ * Verifies the target SalesRepresentative exists, is active, and has an
+ * active linked User before setting the impersonation cookie — a
+ * nonexistent/deactivated/unlinked target is rejected before any cookie is
+ * ever written. Logs IMPERSONATION_STARTED to the existing AdminAuditLog
+ * (adminUserId = the real admin, targetUserId = the rep's own linked
+ * User.id, newValue carries the SalesRepresentative.id/employeeCode for
+ * readable traceability — never a password/token/session value). The
+ * cookie itself is a signed token bound to this exact admin's own session
+ * (see setImpersonationCookie/requireEffectiveRepresentative in
+ * src/lib/auth/impersonation.ts) — a raw SalesRepresentative.id manually
+ * set as a cookie can never be manufactured into a working impersonation
+ * context; only this action, going through this exact audit-then-sign
+ * sequence, ever produces a valid one. Redirects straight to /rep — from
+ * that point on, every /rep page and REP server action resolves scope
+ * through requireEffectiveRepresentative, never re-checking anything
+ * here. */
+export async function startImpersonationAction(
+  repId: string,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- useActionState requires this signature
+  _prevState: ImpersonationState,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- no form fields needed, target comes from the bound repId
+  _formData: FormData,
+): Promise<ImpersonationState> {
+  const admin = await requireRole([ROLES.ADMIN]);
+
+  const rep = await prisma.salesRepresentative.findUnique({
+    where: { id: repId },
+    select: { id: true, employeeCode: true, isActive: true, userId: true, user: { select: { isActive: true, name: true } } },
+  });
+  if (!rep) {
+    return { error: "المندوب غير موجود" };
+  }
+  if (!rep.isActive || !rep.user.isActive) {
+    return { error: "لا يمكن الدخول كمندوب غير مفعل" };
+  }
+
+  await prisma.adminAuditLog.create({
+    data: {
+      adminUserId: admin.id,
+      targetUserId: rep.userId,
+      action: ADMIN_AUDIT_ACTIONS.IMPERSONATION_STARTED,
+      newValue: { salesRepId: rep.id, employeeCode: rep.employeeCode, repName: rep.user.name },
+    },
+  });
+
+  // Starting a new impersonation always cleanly replaces any previous one
+  // — setImpersonationCookie overwrites the cookie outright, never leaving
+  // two overlapping contexts.
+  await setImpersonationCookie(admin.id, rep.id);
+
+  redirect("/rep");
+}
+
+/** Ends impersonation — clears the cookie, keeps the ADMIN authenticated
+ * as ADMIN (never touches the real session), and returns to the
+ * representative's own detail page. Callable by the real ADMIN at any
+ * time, including when the impersonation target has since become invalid
+ * (readValidatedImpersonationTarget fully verifies the token's signature
+ * and its binding to THIS admin's own id, but deliberately does not
+ * re-check the target rep's current DB state, so IMPERSONATION_ENDED can
+ * still be logged even if the rep was deactivated mid-session — this never
+ * authorizes anything; requireEffectiveRepresentative's own fresh DB check
+ * remains the only source of truth for what a request may actually do). A
+ * tampered/expired/foreign-admin cookie yields null here — clearing still
+ * proceeds, but nothing is logged, since there is nothing trustworthy to
+ * log. */
+export async function endImpersonationAction(
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- useActionState requires this signature
+  _prevState: ImpersonationState,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- useActionState requires this signature
+  _formData: FormData,
+): Promise<ImpersonationState> {
+  const admin = await requireRole([ROLES.ADMIN]);
+
+  const target = await readValidatedImpersonationTarget(admin.id);
+  await clearImpersonationCookie();
+
+  if (target) {
+    const rep = await prisma.salesRepresentative.findUnique({
+      where: { id: target.salesRepId },
+      select: { id: true, employeeCode: true, userId: true },
+    });
+    if (rep) {
+      await prisma.adminAuditLog.create({
+        data: {
+          adminUserId: admin.id,
+          targetUserId: rep.userId,
+          action: ADMIN_AUDIT_ACTIONS.IMPERSONATION_ENDED,
+          oldValue: { salesRepId: rep.id, employeeCode: rep.employeeCode },
+        },
+      });
+    }
+    redirect(`/admin/reps/${target.salesRepId}`);
+  }
+
+  redirect("/admin/reps");
 }

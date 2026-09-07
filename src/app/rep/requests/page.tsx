@@ -1,6 +1,5 @@
 import Link from "next/link";
-import { requireRole } from "@/lib/auth/guards";
-import { ROLES } from "@/lib/constants";
+import { requireEffectiveRepresentative } from "@/lib/auth/impersonation";
 import { prisma } from "@/lib/prisma";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -8,26 +7,19 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { RepStockRequestStatusBadge } from "@/components/reps/RepStockRequestStatusBadge";
 
 export default async function RepStockRequestsPage() {
-  const user = await requireRole([ROLES.SALES_REPRESENTATIVE]);
+  const effectiveRep = await requireEffectiveRepresentative();
 
-  const rep = await prisma.salesRepresentative.findUnique({
-    where: { userId: user.id },
-    select: { id: true },
+  const requests = await prisma.stockRequest.findMany({
+    where: { salesRepId: effectiveRep.repId },
+    orderBy: { createdAt: "desc" },
+    select: {
+      id: true,
+      requestNumber: true,
+      status: true,
+      createdAt: true,
+      items: { select: { requestedQuantity: true, approvedQuantity: true } },
+    },
   });
-
-  const requests = rep
-    ? await prisma.stockRequest.findMany({
-        where: { salesRepId: rep.id },
-        orderBy: { createdAt: "desc" },
-        select: {
-          id: true,
-          requestNumber: true,
-          status: true,
-          createdAt: true,
-          items: { select: { requestedQuantity: true, approvedQuantity: true } },
-        },
-      })
-    : [];
 
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-6">

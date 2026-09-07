@@ -1,12 +1,11 @@
-import { requireRole } from "@/lib/auth/guards";
-import { ROLES } from "@/lib/constants";
+import { requireEffectiveRepresentative } from "@/lib/auth/impersonation";
 import { prisma } from "@/lib/prisma";
 import { getMainWarehouse } from "@/lib/inventory";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { RepStockRequestForm } from "@/components/reps/RepStockRequestForm";
 
 export default async function NewRepStockRequestPage() {
-  await requireRole([ROLES.SALES_REPRESENTATIVE]);
+  await requireEffectiveRepresentative();
 
   const warehouse = await getMainWarehouse();
 
