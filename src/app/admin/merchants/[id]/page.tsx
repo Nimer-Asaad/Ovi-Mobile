@@ -60,7 +60,7 @@ export default async function AdminMerchantDetailPage({ params }: AdminMerchantD
             openingBalanceSetAt: true,
             openingBalanceSetById: true,
             orders: { select: { status: true, totalCents: true } },
-            payments: { select: { amountCents: true } },
+            payments: { select: { amountCents: true, cancellation: { select: { id: true } } } },
             _count: { select: { orders: true, payments: true } },
           },
         },

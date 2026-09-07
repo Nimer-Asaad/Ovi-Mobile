@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth/guards";
 import { ROLES } from "@/lib/constants";
-import { generateDailyPaymentReceiptNumber } from "@/lib/payment-number";
+import { recordManualAccountPayment } from "@/lib/accounts";
 import { recordAccountPaymentSchema } from "@/lib/validation/accounts";
 
 export interface RecordMerchantPaymentState {
@@ -89,20 +89,12 @@ export async function recordMerchantPaymentAsRep(
     return { error: parsed.error.issues[0]?.message ?? "بيانات الدفعة غير صالحة" };
   }
 
-  const payment = await prisma.$transaction(async (tx) => {
-    const receiptNumber = await generateDailyPaymentReceiptNumber(tx);
-    return tx.accountPayment.create({
-      data: {
-        accountId,
-        amountCents: parsed.data.amountCents,
-        method: parsed.data.method,
-        note: parsed.data.note,
-        createdById: user.id,
-        receiptNumber,
-      },
-      select: { id: true },
-    });
-  });
+  const payment = await prisma.$transaction((tx) =>
+    recordManualAccountPayment(tx, accountId, parsed.data.amountCents, user.id, {
+      method: parsed.data.method,
+      note: parsed.data.note,
+    }),
+  );
 
   revalidatePath("/rep/merchants");
   revalidatePath(`/rep/merchants/${merchantId}`);

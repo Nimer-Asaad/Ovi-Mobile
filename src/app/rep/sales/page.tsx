@@ -16,6 +16,7 @@ import {
   computeActivityTotals,
   getDefaultReportRange,
 } from "@/lib/reporting";
+import { correctRepSaleAction, cancelRepManualPaymentAction } from "@/app/rep/sales/actions";
 
 interface RepSalesPageProps {
   searchParams: Promise<{ type?: string; from?: string; to?: string; q?: string }>;
@@ -67,6 +68,14 @@ export default async function RepSalesPage({ searchParams }: RepSalesPageProps) 
         fetchPaymentActivityRows(
           { fromIso, toIso, search: q, collectorUserId: user.id },
           (payment) => (payment.merchantId ? `/rep/merchants/${payment.merchantId}/payments/${payment.id}` : "#"),
+          (orderNumber) => `/rep/sales?q=${encodeURIComponent(orderNumber)}`,
+          // Correction-scoped replacement-payment entry point — NOT the
+          // generic merchant page. Ownership for a correction is based on
+          // AccountPayment.createdById, never current merchant assignment,
+          // so this never depends on the merchant still being assigned to
+          // this rep (see createRepReplacementPaymentAction's own doc
+          // comment in src/app/rep/sales/actions.ts).
+          (payment) => `/rep/sales/payments/new?replacementFor=${payment.id}`,
         ),
       ])
     : [[], []];
@@ -147,7 +156,15 @@ export default async function RepSalesPage({ searchParams }: RepSalesPageProps) 
             </div>
           </form>
 
-          <ActivityReportTable rows={rows} emptyMessage={emptyMessage} />
+          <ActivityReportTable
+            rows={rows}
+            emptyMessage={emptyMessage}
+            correctionActions={{
+              correctSale: correctRepSaleAction,
+              cancelPayment: cancelRepManualPaymentAction,
+              newSaleHref: "/rep/sales/new",
+            }}
+          />
         </CardContent>
       </Card>
     </div>

@@ -1,6 +1,7 @@
 import { formatCurrencyFromCents, formatBusinessDateTime } from "@/lib/utils";
 import { formatDebtOrCredit } from "@/lib/account-labels";
-import { getOrderSourceLabel, getPaymentMethodLabel, getPaymentStatusLabel } from "@/lib/order-labels";
+import { getOrderSourceLabel, getPaymentMethodLabel, getPaymentStatusLabel, getOrderStatusLabel } from "@/lib/order-labels";
+import { isTerminalOrderStatus } from "@/lib/order-lifecycle-rules";
 
 export interface InvoiceItem {
   id: string;
@@ -35,6 +36,15 @@ export interface InvoiceAccountPosition {
   debtAfterSaleCents: number;
 }
 
+export interface InvoiceCancellationInfo {
+  reason: string;
+  changedByName: string | null;
+  /** Already the TRUE, business-corrected instant (see
+   * getOrderStatusHistoryBusinessCreatedAt in src/lib/business-time.ts) —
+   * pass straight to formatBusinessDateTime, never format it twice. */
+  businessChangedAt: Date;
+}
+
 export interface InvoiceData {
   orderNumber: string;
   /** A TRUE, unambiguous UTC instant — NOT the raw Prisma `Order.createdAt`
@@ -44,6 +54,20 @@ export interface InvoiceData {
    * (src/lib/business-time.ts) before building InvoiceData. See
    * formatBusinessDateTime (src/lib/utils.ts) for the display half. */
   businessCreatedAt: Date;
+  /** Order.status — the order lifecycle status (PENDING/.../CANCELLED/
+   * RETURNED), NOT paymentStatus below. Used only to decide whether to
+   * show the "ملغاة"/"مرتجعة" badge and `cancellation` info (via
+   * isTerminalOrderStatus) — every other field on this invoice (totals,
+   * items, historical amounts) stays exactly as originally recorded
+   * regardless of this value. */
+  status: string;
+  /** Present only when `status` is terminal (CANCELLED/RETURNED) — sourced
+   * from this order's own latest OrderStatusHistory row (the one that made
+   * it terminal; a terminal order never transitions again, so "latest" is
+   * always "the terminalizing one" — see order-lifecycle-rules.ts). Never
+   * fabricated: null whenever no such history row exists (a legacy order
+   * whose terminal status predates OrderStatusHistory, if any). */
+  cancellation: InvoiceCancellationInfo | null;
   source: string;
   paymentMethod: string;
   paymentStatus: string;
@@ -91,13 +115,21 @@ export interface InvoiceData {
 export function InvoiceView({ order }: { order: InvoiceData }) {
   const remainingOnInvoiceCents = Math.max(order.totalCents - order.paidAmountCents, 0);
   const customerLabel = order.merchant?.businessName ?? order.customer?.name ?? order.contactName ?? "—";
+  const isCancelledOrReturned = isTerminalOrderStatus(order.status);
 
   return (
     <div className="mx-auto max-w-3xl rounded-card border border-neutral-200 bg-white p-6 text-neutral-900 shadow-sm sm:p-8 print:m-0 print:max-w-none print:border-0 print:shadow-none">
       <div className="flex flex-wrap items-start justify-between gap-4 border-b border-neutral-200 pb-6">
         <div>
           <h1 className="text-2xl font-bold text-neutral-900">Ovi Mobile</h1>
-          <p className="mt-1 text-sm text-neutral-500">فاتورة بيع</p>
+          <p className="mt-1 flex items-center gap-2 text-sm text-neutral-500">
+            فاتورة بيع
+            {isCancelledOrReturned && (
+              <span className="rounded-full border border-rose-300 bg-rose-50 px-2 py-0.5 text-xs font-semibold text-rose-700">
+                {getOrderStatusLabel(order.status)}
+              </span>
+            )}
+          </p>
         </div>
         <div className="text-end text-sm text-neutral-600">
           <p>
@@ -108,6 +140,17 @@ export function InvoiceView({ order }: { order: InvoiceData }) {
           {order.repName && <p>المندوب: {order.repName}</p>}
         </div>
       </div>
+
+      {isCancelledOrReturned && order.cancellation && (
+        <div className="mt-4 rounded-card border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
+          <p className="font-semibold">
+            هذه المبيعة {getOrderStatusLabel(order.status)} ولا تُحتسب على رصيد الحساب الحالي — البيانات أدناه سجل تاريخي.
+          </p>
+          <p className="mt-1">السبب: {order.cancellation.reason}</p>
+          {order.cancellation.changedByName && <p>بواسطة: {order.cancellation.changedByName}</p>}
+          <p>التاريخ: {formatBusinessDateTime(order.cancellation.businessChangedAt)}</p>
+        </div>
+      )}
 
       <div className="mt-6 grid grid-cols-1 gap-6 sm:grid-cols-2">
         {order.merchant ? (

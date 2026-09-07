@@ -17,6 +17,7 @@ import {
   computeActivityTotals,
   getDefaultReportRange,
 } from "@/lib/reporting";
+import { correctSaleAction, cancelManualPaymentAction } from "@/app/admin/reports/actions";
 
 interface AdminReportsPageProps {
   searchParams: Promise<{ type?: string; from?: string; to?: string; q?: string; repId?: string; merchantId?: string }>;
@@ -28,16 +29,19 @@ const TABS = [
   { value: "PAYMENT", label: "الدفعات" },
 ];
 
-/** Company-wide sales + payments report — ADMIN-only (no suitable existing
- * report surface covered both entity types together: /admin/orders is
- * sales-only, /admin/accounts is per-account, /admin/inventory/company-report
- * is inventory-only — so this is the one new "تقارير المبيعات والدفعات"
- * page the task explicitly allows when nothing suitable already exists).
- * Deliberately ADMIN-only, not ADMIN_ASSISTANT — no existing report screen
- * in this app is currently open to that role, and this task does not ask to
- * extend it. */
+/** Company-wide sales + payments report — ADMIN and ADMIN_ASSISTANT (no
+ * suitable existing report surface covered both entity types together:
+ * /admin/orders is sales-only, /admin/accounts is per-account (and stays
+ * ADMIN-only via its own layout — this route grants NO access to it),
+ * /admin/inventory/company-report is inventory-only — so this is the one
+ * new "تقارير المبيعات والدفعات" page). ADMIN_ASSISTANT was added
+ * alongside the sales/payments correction feature (explicitly approved) —
+ * this route-local guard is the actual access boundary; payment receipts
+ * linked from here go through /admin/reports/payments/[paymentId] (a
+ * report-scoped mirror), never /admin/accounts/**, so ADMIN_ASSISTANT
+ * never touches that ADMIN-only surface. */
 export default async function AdminReportsPage({ searchParams }: AdminReportsPageProps) {
-  await requireRole([ROLES.ADMIN]);
+  await requireRole([ROLES.ADMIN, ROLES.ADMIN_ASSISTANT]);
   const { type, from, to, q, repId, merchantId } = await searchParams;
 
   const defaults = getDefaultReportRange();
@@ -71,7 +75,16 @@ export default async function AdminReportsPage({ searchParams }: AdminReportsPag
     ),
     fetchPaymentActivityRows(
       { fromIso, toIso, search: q, collectorUserId: selectedRep?.userId, merchantId: selectedMerchantId },
-      (payment) => `/admin/accounts/${payment.accountId}/payments/${payment.id}`,
+      // Report-scoped receipt route (not /admin/accounts/**) — reachable by
+      // both ADMIN and ADMIN_ASSISTANT, see this page's own doc comment.
+      (payment) => `/admin/reports/payments/${payment.id}`,
+      (orderNumber) => `/admin/reports?q=${encodeURIComponent(orderNumber)}`,
+      // Report-scoped replacement-payment entry point — correction-scoped
+      // to THIS exact cancelled payment (never a bare accountId), so the
+      // destination account is always re-derived server-side from the
+      // original payment, never trusted from the URL. Reachable by both
+      // ADMIN and ADMIN_ASSISTANT.
+      (payment) => `/admin/reports/payments/new?replacementFor=${payment.id}`,
     ),
   ]);
 
@@ -161,7 +174,21 @@ export default async function AdminReportsPage({ searchParams }: AdminReportsPag
             </div>
           </form>
 
-          <ActivityReportTable rows={rows} emptyMessage={emptyMessage} />
+          <ActivityReportTable
+            rows={rows}
+            emptyMessage={emptyMessage}
+            correctionActions={{
+              correctSale: correctSaleAction,
+              cancelPayment: cancelManualPaymentAction,
+              // Shared by ADMIN and ADMIN_ASSISTANT — /admin/orders/new is
+              // already open to both roles (see its own guard), isolated to
+              // sale creation only. Payment replacement is now per-row (see
+              // fetchPaymentActivityRows's buildReplacementHref above),
+              // pointing both roles at /admin/reports/payments/new instead
+              // of the ADMIN-only /admin/accounts.
+              newSaleHref: "/admin/orders/new",
+            }}
+          />
         </CardContent>
       </Card>
     </div>

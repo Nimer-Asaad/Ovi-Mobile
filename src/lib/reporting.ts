@@ -1,6 +1,8 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
 import { resolvePaymentReceiptReference } from "@/lib/account-labels";
+import { ORDER_STATUSES } from "@/lib/constants";
+import { getValidNextOrderStatuses, isTerminalOrderStatus } from "@/lib/order-lifecycle-rules";
 
 const BUSINESS_TIMEZONE = "Asia/Hebron";
 
@@ -107,11 +109,21 @@ export interface SaleActivityRow {
   paymentStatus: string;
   repName: string | null;
   href: string;
+  /** True when getValidNextOrderStatuses(status, source) currently allows a
+   * CANCELLED/RETURNED transition — the same eligibility rule
+   * src/lib/sale-correction.ts's correctSale itself re-validates
+   * server-side before ever writing anything. Purely a UI hint (show/hide
+   * the "تصحيح / إلغاء المبيعة" button) — never trusted as the real
+   * authorization boundary. */
+  isCorrectable: boolean;
 }
 
 export interface PaymentActivityRow {
   type: "PAYMENT";
   key: string;
+  /** AccountPayment.id — needed to submit a cancellation (paymentId hidden
+   * field), distinct from `key` (a display-safe React key prefix). */
+  id: string;
   createdAt: Date;
   /** TRUE absolute instant — see SaleActivityRow.businessCreatedAt. */
   businessCreatedAt: Date;
@@ -127,6 +139,30 @@ export interface PaymentActivityRow {
    * — an admin or a rep, whichever authenticated user actually submitted it. */
   collectorName: string | null;
   href: string;
+  /** AccountPayment.origin — "MANUAL" | "SALE_INITIAL" | null (legacy). See
+   * ACCOUNT_PAYMENT_ORIGINS in src/lib/constants.ts and
+   * cancelManualPayment's own doc comment (src/lib/payment-correction.ts)
+   * for exactly which origin is eligible for direct cancellation. Never
+   * inferred from note text — read straight off the persisted column. */
+  origin: string | null;
+  /** True once this payment has been cancelled/reversed — see
+   * AccountPaymentCancellation in schema.prisma. Purely a UI hint (show
+   * "ملغاة" instead of a correction button); the real state lives in the
+   * database, re-checked server-side by cancelManualPayment itself. */
+  isCancelled: boolean;
+  /** Set only when origin === SALE_INITIAL (via the persisted
+   * sourceOrderId relation — never inferred from note text) — where
+   * "صحّح المبيعة الأصلية" should send the user: back to the report,
+   * pre-filtered to the linked sale's own order number, where that SALE
+   * row's own correction button lives. Never a second, competing
+   * correction control on the payment row itself. */
+  sourceOrderCorrectionHref: string | null;
+  /** Where "تسجيل دفعة صحيحة" sends the user after successfully cancelling
+   * THIS payment — built per-row (via buildReplacementHref) so REP goes to
+   * their own merchant's payment form and ADMIN/ADMIN_ASSISTANT goes to
+   * the report-scoped payment-entry route preselecting this exact
+   * account. Only ever shown for origin === MANUAL rows. */
+  replacementHref: string;
 }
 
 export type ReportActivityRow = SaleActivityRow | PaymentActivityRow;
@@ -151,13 +187,25 @@ export interface ActivityTotals {
  * (a payment is account cash collection, not a second sale, and never
  * treated as revenue/profit here). Computed from the FULL filtered row set
  * the caller fetched — never just the current page of a paginated view —
- * so the totals always agree with what "الكل" actually contains. */
+ * so the totals always agree with what "الكل" actually contains.
+ *
+ * ACTIVE-ONLY: a cancelled/returned sale (isTerminalOrderStatus — the same
+ * canonical helper transitionOrderStatus/getAccountBalanceCents already
+ * use, never a hardcoded CANCELLED/RETURNED check of our own) and a
+ * cancelled payment (row.isCancelled) are EXCLUDED from these four totals —
+ * they no longer represent valid current business activity, exactly like
+ * getAccountBalanceCents already excludes them from the account balance.
+ * This never removes anything from the ROWS the caller renders (see
+ * mergeActivityRows) — only from these four KPI numbers. The cancellation
+ * event itself is never counted as a second payment/sale here. */
 export function computeActivityTotals(sales: SaleActivityRow[], payments: PaymentActivityRow[]): ActivityTotals {
+  const activeSales = sales.filter((row) => !isTerminalOrderStatus(row.status));
+  const activePayments = payments.filter((row) => !row.isCancelled);
   return {
-    salesTotalCents: sales.reduce((sum, row) => sum + row.totalCents, 0),
-    salesCount: sales.length,
-    paymentsTotalCents: payments.reduce((sum, row) => sum + row.amountCents, 0),
-    paymentsCount: payments.length,
+    salesTotalCents: activeSales.reduce((sum, row) => sum + row.totalCents, 0),
+    salesCount: activeSales.length,
+    paymentsTotalCents: activePayments.reduce((sum, row) => sum + row.amountCents, 0),
+    paymentsCount: activePayments.length,
   };
 }
 
@@ -189,6 +237,7 @@ const SALE_ORDER_SELECT = {
   totalCents: true,
   paidAmountCents: true,
   status: true,
+  source: true,
   paymentStatus: true,
   contactName: true,
   merchant: { select: { businessName: true } },
@@ -246,6 +295,9 @@ export async function fetchSaleActivityRows(
       paidNowCents,
       remainingCents: Math.max(totalCents - paidNowCents, 0),
       status: order.status,
+      isCorrectable: getValidNextOrderStatuses(order.status, order.source).some(
+        (next) => next === ORDER_STATUSES.CANCELLED || next === ORDER_STATUSES.RETURNED,
+      ),
       paymentStatus: order.paymentStatus,
       repName: order.createdByRep?.user.name ?? null,
       href: buildHref(order.orderNumber),
@@ -261,6 +313,9 @@ const PAYMENT_SELECT = {
   amountCents: true,
   method: true,
   note: true,
+  origin: true,
+  cancellation: { select: { id: true } },
+  sourceOrder: { select: { orderNumber: true } },
   createdBy: { select: { name: true } },
   account: {
     select: {
@@ -290,6 +345,17 @@ export interface PaymentHrefContext {
 export async function fetchPaymentActivityRows(
   filters: ActivityReportFilters,
   buildHref: (payment: PaymentHrefContext) => string,
+  /** Same shape as fetchSaleActivityRows's own buildHref — builds the
+   * "صحّح المبيعة الأصلية" link for a SALE_INITIAL payment row, pointing
+   * back at THIS SAME report pre-filtered to that sale's order number. */
+  buildSourceOrderHref: (orderNumber: string) => string,
+  /** Builds the "تسجيل دفعة صحيحة" replacement link shown after a MANUAL
+   * payment is successfully cancelled — REP's own merchant payment form,
+   * or ADMIN/ADMIN_ASSISTANT's report-scoped payment-entry route
+   * preselecting this exact account. Reuses the same PaymentHrefContext
+   * shape as buildHref (id/accountId/merchantId) — whichever fields the
+   * caller's own destination route needs. */
+  buildReplacementHref: (payment: PaymentHrefContext) => string,
 ): Promise<PaymentActivityRow[]> {
   const idRows = await getPaymentIdsInRange(filters.fromIso, filters.toIso, filters.collectorUserId);
   if (idRows.length === 0) return [];
@@ -322,6 +388,7 @@ export async function fetchPaymentActivityRows(
   return payments.map((payment) => ({
     type: "PAYMENT" as const,
     key: `payment:${payment.id}`,
+    id: payment.id,
     createdAt: payment.createdAt,
     // Non-null: idRows is exactly the set of ids this payment came from.
     businessCreatedAt: businessCreatedAtById.get(payment.id)!,
@@ -331,6 +398,10 @@ export async function fetchPaymentActivityRows(
     method: payment.method,
     note: payment.note,
     collectorName: payment.createdBy.name,
+    origin: payment.origin,
+    isCancelled: Boolean(payment.cancellation),
+    sourceOrderCorrectionHref: payment.sourceOrder ? buildSourceOrderHref(payment.sourceOrder.orderNumber) : null,
     href: buildHref({ id: payment.id, accountId: payment.accountId, merchantId: payment.account.merchantId }),
+    replacementHref: buildReplacementHref({ id: payment.id, accountId: payment.accountId, merchantId: payment.account.merchantId }),
   }));
 }

@@ -386,7 +386,7 @@ export async function createManualOrder(
         // then insert" critical section.
         orderNumber = await generateDailyOrderNumber(tx);
 
-        await tx.order.create({
+        const createdOrder = await tx.order.create({
           data: {
             orderNumber,
             source: ORDER_SOURCES.ADMIN_MANUAL,
@@ -411,7 +411,7 @@ export async function createManualOrder(
         });
 
         if (accountId && paidAmountCents > 0) {
-          await recordInitialAccountPayment(tx, accountId, paidAmountCents, actor.id);
+          await recordInitialAccountPayment(tx, accountId, paidAmountCents, actor.id, createdOrder.id);
         }
 
         // Atomic conditional decrement per line — never writes an absolute

@@ -37,7 +37,7 @@ export async function getMerchantsForRep(repId: string, region?: string): Promis
         select: {
           openingBalanceCents: true,
           orders: { select: { status: true, totalCents: true } },
-          payments: { select: { amountCents: true } },
+          payments: { select: { amountCents: true, cancellation: { select: { id: true } } } },
         },
       },
     },
@@ -111,7 +111,7 @@ export async function getRepTraderContactsForSaleForm(repId: string): Promise<Re
         select: {
           openingBalanceCents: true,
           orders: { select: { status: true, totalCents: true } },
-          payments: { select: { amountCents: true } },
+          payments: { select: { amountCents: true, cancellation: { select: { id: true } } } },
         },
       },
     },

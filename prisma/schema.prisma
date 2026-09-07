@@ -70,10 +70,12 @@ model User {
   auditLogsAsTarget              AdminAuditLog[]                 @relation("AuditLogTarget")
   accountAsCustomer              CustomerAccount?                @relation("AccountCustomer")
   accountPaymentsRecorded        AccountPayment[]                @relation("AccountPaymentCreatedBy")
+  accountPaymentCancellations    AccountPaymentCancellation[]    @relation("AccountPaymentCancelledBy")
   accountOpeningBalancesSet      CustomerAccount[]               @relation("AccountOpeningBalanceSetBy")
   completedVariantAllocations    ProductVariantAllocationBatch[] @relation("VariantAllocationCompletedBy")
   repStockTransferBatchesCreated RepStockTransferBatch[]         @relation("RepStockTransferBatchCreatedBy")
   repCustomerOrdersCreated       RepCustomerOrder[]              @relation("RepCustomerOrderCreatedBy")
+  manualInventoryBatchesCreated  ManualInventoryBatch[]          @relation("ManualInventoryBatchCreatedBy")
 
   @@map("users")
 }
@@ -703,6 +705,16 @@ model StockMovement {
   /// REP_ASSIGNMENT/REP_RETURN rows created before this batching existed.
   transferBatchId      String?
   transferBatch        RepStockTransferBatch?         @relation(fields: [transferBatchId], references: [id])
+  /// Groups this row with the other lines created by the same manual
+  /// STOCK_IN/STOCK_OUT submission (see /admin/inventory/receive, /issue,
+  /// and single-line /admin/inventory/adjust) — or marks it as part of a
+  /// reversal batch created to cancel one of those. Null for every other
+  /// movement type, and for every manual movement created before this
+  /// column existed (never backfilled, never auto-grouped by guessing from
+  /// createdAt/note/user/adjacent rows — see ManualInventoryBatch's own doc
+  /// comment).
+  manualBatchId        String?
+  manualBatch          ManualInventoryBatch?          @relation(fields: [manualBatchId], references: [id])
   fromLocationId       String?
   fromLocation         StockLocation?                 @relation("MovementFromLocation", fields: [fromLocationId], references: [id])
   toLocationId         String?
@@ -719,7 +731,49 @@ model StockMovement {
   @@index([deviceColorVariantId])
   @@index([allocationBatchId])
   @@index([transferBatchId])
+  @@index([manualBatchId])
   @@map("stock_movements")
+}
+
+/// Groups the StockMovement row(s) created by one manual STOCK_IN/STOCK_OUT
+/// submission (a single line from /admin/inventory/adjust, or the N lines
+/// of one /admin/inventory/receive or /admin/inventory/issue bulk
+/// submission) — the batch-level unit a correction cancels or reverses as
+/// one atomic operation, exactly the same "group first, reverse the whole
+/// group atomically" shape OrderInventoryCompensation already proves out
+/// for a sale's inventory effect.
+///
+/// A REVERSAL batch (reversalOfId set) is a brand-new batch containing
+/// brand-new StockMovement rows with the exact opposite effect of the
+/// original batch's own rows — the original batch and its StockMovement
+/// rows are NEVER edited or deleted (StockMovement stays a strictly
+/// append-only ledger). reversalOfId is @unique — the DB-level "a batch may
+/// be reversed at most once" guarantee, the same backstop
+/// OrderInventoryCompensation's orderId @unique already proves out for
+/// orders. correctionReason is required on a reversal batch, always null on
+/// an original one.
+///
+/// A batch predating this table's existence simply has no row here to
+/// reference it (StockMovement.manualBatchId stays null on those rows) —
+/// never auto-grouped after the fact by guessing.
+model ManualInventoryBatch {
+  id               String                @id @default(cuid())
+  /// ManualStockMovementType values: "STOCK_IN" | "STOCK_OUT" — see
+  /// MANUAL_STOCK_MOVEMENT_TYPES in src/lib/constants.ts. The type every
+  /// StockMovement row in this batch shares. ADJUSTMENT (absolute-quantity)
+  /// batches are out of scope for this table — never created for them.
+  movementType     String
+  createdById      String
+  createdBy        User                  @relation("ManualInventoryBatchCreatedBy", fields: [createdById], references: [id])
+  createdAt        DateTime              @default(now())
+  reversalOfId     String?               @unique
+  reversalOf       ManualInventoryBatch? @relation("ManualInventoryBatchReversal", fields: [reversalOfId], references: [id])
+  reversedBy       ManualInventoryBatch? @relation("ManualInventoryBatchReversal")
+  correctionReason String?
+
+  movements StockMovement[]
+
+  @@map("manual_inventory_batches")
 }
 
 /// Groups the per-product StockMovement rows created by one multi-product
@@ -931,6 +985,12 @@ model Order {
   items                 OrderItem[]
   statusHistory         OrderStatusHistory[]
   inventoryCompensation OrderInventoryCompensation?
+  /// Inverse of AccountPayment.sourceOrderId — the "paid now" AccountPayment
+  /// recorded at the same moment as this sale, if any (null when
+  /// paidAmountCents was 0 at sale time, or for a legacy sale that predates
+  /// this relation). Never set/read anywhere except through this real
+  /// relation — never inferred from note text.
+  initialPayment        AccountPayment?             @relation("OrderInitialPayment")
 
   @@index([customerId])
   @@index([stockLocationId])
@@ -1074,6 +1134,11 @@ model CustomerAccount {
 /// money received against an account's overall balance (not necessarily tied
 /// to one specific order, since a merchant's payment often settles a running
 /// balance rather than one exact invoice).
+///
+/// Correction model: a wrong payment is NEVER edited/deleted in place — see
+/// AccountPaymentCancellation below, a separate immutable record. This row's
+/// own amountCents/method/note/receiptNumber/createdAt stay exactly as
+/// originally recorded forever, cancelled or not.
 model AccountPayment {
   id            String          @id @default(cuid())
   accountId     String
@@ -1095,8 +1160,71 @@ model AccountPayment {
   createdBy     User            @relation("AccountPaymentCreatedBy", fields: [createdById], references: [id])
   createdAt     DateTime        @default(now())
 
+  /// AccountPaymentOrigin values: "MANUAL" | "SALE_INITIAL" — see
+  /// ACCOUNT_PAYMENT_ORIGINS in src/lib/constants.ts. Null only for a
+  /// legacy row that predates this column (never backfilled — its true
+  /// origin is genuinely unknown and must never be guessed from note
+  /// text). MANUAL = a standalone payment recorded directly against an
+  /// account (by ADMIN, ADMIN_ASSISTANT, or a rep) — eligible for direct
+  /// cancellation. SALE_INITIAL = the "paid now" portion recorded at the
+  /// same moment as a sale (see sourceOrderId below) — never eligible for
+  /// DIRECT cancellation; correcting it requires correcting the sale
+  /// itself (see src/lib/sale-correction.ts), which cancels this payment
+  /// as part of that one atomic transaction.
+  origin            String?
+  /// Set ONLY when origin = SALE_INITIAL — the Order this payment was
+  /// recorded for, written at creation time inside the SAME transaction
+  /// that created both rows (see createRepSaleCore). The ONE reliable way
+  /// to identify a sale-linked payment; never inferred from note text.
+  /// @unique because a sale has at most one initial payment.
+  sourceOrderId     String?                     @unique
+  sourceOrder       Order?                      @relation("OrderInitialPayment", fields: [sourceOrderId], references: [id])
+  /// Present only once this payment has been cancelled/reversed. The
+  /// original row above is never mutated when this is set — see
+  /// AccountPaymentCancellation's own doc comment.
+  cancellation      AccountPaymentCancellation?
+  /// Set ONLY on a brand-new replacement payment created through the
+  /// report-scoped correction flow — points at the ONE original MANUAL
+  /// payment this one corrects. @unique enforces "one cancelled payment
+  /// gets at most one replacement payment" at the DB level, the same
+  /// backstop sourceOrderId/reversalOfId already prove out elsewhere —
+  /// never guessed or inferred, always an explicit, server-validated
+  /// correction context (see createReplacementPaymentAction in
+  /// src/app/admin/reports/actions.ts). NULL for every ordinary
+  /// standalone payment (the normal, unconstrained case) and for every
+  /// existing row (never backfilled).
+  correctsPaymentId String?                     @unique
+  correctsPayment   AccountPayment?             @relation("AccountPaymentCorrection", fields: [correctsPaymentId], references: [id])
+  /// Inverse of correctsPaymentId — the replacement payment THIS payment
+  /// was corrected by, if any.
+  correctedBy       AccountPayment?             @relation("AccountPaymentCorrection")
+
   @@index([accountId, createdAt])
   @@map("account_payments")
+}
+
+/// Immutable record of a single AccountPayment's cancellation/reversal —
+/// created exactly once per payment (paymentId is @unique, the DB-level
+/// "at most one cancellation" guarantee, the same backstop
+/// OrderInventoryCompensation's orderId @unique already proves out for
+/// orders). Never updated or deleted once created. The cancelled
+/// AccountPayment's own amountCents/method/note/receiptNumber/createdAt are
+/// NEVER touched — its original chronological position (previous debt /
+/// payment / after-payment debt) stays exactly as it was; this row instead
+/// represents a SEPARATE, later accounting event (a "+amount back to debt"
+/// reversal at cancelledAt) — see buildAccountStatementRows and
+/// getAccountBalanceCents in src/lib/accounts.ts /
+/// src/lib/account-statement.ts.
+model AccountPaymentCancellation {
+  id            String         @id @default(cuid())
+  paymentId     String         @unique
+  payment       AccountPayment @relation(fields: [paymentId], references: [id])
+  reason        String
+  cancelledById String
+  cancelledBy   User           @relation("AccountPaymentCancelledBy", fields: [cancelledById], references: [id])
+  cancelledAt   DateTime       @default(now())
+
+  @@map("account_payment_cancellations")
 }
 
 // ---------------------------------------------------------------------------

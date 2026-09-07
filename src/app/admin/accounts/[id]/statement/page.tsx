@@ -34,7 +34,15 @@ export default async function AdminAccountStatementPage({ params }: AdminAccount
       },
       payments: {
         orderBy: { createdAt: "desc" },
-        select: { id: true, amountCents: true, method: true, createdAt: true, note: true, createdBy: { select: { name: true } } },
+        select: {
+          id: true,
+          amountCents: true,
+          method: true,
+          createdAt: true,
+          note: true,
+          createdBy: { select: { name: true } },
+          cancellation: { select: { reason: true, cancelledAt: true, cancelledBy: { select: { name: true } } } },
+        },
       },
     },
   });

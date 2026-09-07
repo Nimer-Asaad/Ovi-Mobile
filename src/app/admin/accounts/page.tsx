@@ -40,7 +40,7 @@ export default async function AdminAccountsPage({ searchParams }: AdminAccountsP
       merchant: { select: { id: true, businessName: true } },
       customer: { select: { id: true, name: true } },
       orders: { select: { status: true, totalCents: true } },
-      payments: { select: { amountCents: true } },
+      payments: { select: { amountCents: true, cancellation: { select: { id: true } } } },
     },
   });
 

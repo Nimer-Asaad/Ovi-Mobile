@@ -7,7 +7,8 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { InvoiceActions } from "@/components/admin/orders/InvoiceActions";
 import type { InvoiceData } from "@/components/admin/orders/InvoiceView";
 import { getOrderAccountPosition } from "@/lib/accounts";
-import { getOrderBusinessCreatedAt } from "@/lib/business-time";
+import { getOrderBusinessCreatedAt, getOrderStatusHistoryBusinessCreatedAt } from "@/lib/business-time";
+import { isTerminalOrderStatus } from "@/lib/order-lifecycle-rules";
 
 interface RepSaleDetailPageProps {
   params: Promise<{ orderNumber: string }>;
@@ -38,6 +39,12 @@ export default async function RepSaleDetailPage({ params }: RepSaleDetailPagePro
     select: {
       orderNumber: true,
       source: true,
+      status: true,
+      statusHistory: {
+        orderBy: { createdAt: "desc" },
+        take: 1,
+        select: { id: true, reason: true, changedBy: { select: { name: true } } },
+      },
       createdByRepId: true,
       createdByRep: { select: { user: { select: { name: true } } } },
       subtotalCents: true,
@@ -71,7 +78,16 @@ export default async function RepSaleDetailPage({ params }: RepSaleDetailPagePro
           // the exact chronological ordering buildAccountStatementRows uses
           // — never just the bare totals getAccountBalanceCents alone needs.
           orders: { select: { orderNumber: true, createdAt: true, status: true, totalCents: true } },
-          payments: { select: { id: true, createdAt: true, amountCents: true, method: true, note: true } },
+          payments: {
+            select: {
+              id: true,
+              createdAt: true,
+              amountCents: true,
+              method: true,
+              note: true,
+              cancellation: { select: { reason: true, cancelledAt: true, cancelledBy: { select: { name: true } } } },
+            },
+          },
         },
       },
       items: {
@@ -102,9 +118,21 @@ export default async function RepSaleDetailPage({ params }: RepSaleDetailPagePro
   // formatted directly.
   const businessCreatedAt = (await getOrderBusinessCreatedAt(order.orderNumber)) ?? order.createdAt;
 
+  const latestHistory = order.statusHistory[0] ?? null;
+  const cancellation =
+    isTerminalOrderStatus(order.status) && latestHistory && latestHistory.reason
+      ? {
+          reason: latestHistory.reason,
+          changedByName: latestHistory.changedBy.name,
+          businessChangedAt: (await getOrderStatusHistoryBusinessCreatedAt(latestHistory.id)) ?? businessCreatedAt,
+        }
+      : null;
+
   const invoiceData: InvoiceData = {
     orderNumber: order.orderNumber,
     businessCreatedAt,
+    status: order.status,
+    cancellation,
     source: order.source,
     paymentMethod: order.paymentMethod,
     paymentStatus: order.paymentStatus,

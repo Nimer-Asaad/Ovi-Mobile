@@ -7,7 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth/guards";
 import { ROLES } from "@/lib/constants";
 import { hashPassword } from "@/lib/auth/password";
-import { generateDailyPaymentReceiptNumber } from "@/lib/payment-number";
+import { recordManualAccountPayment } from "@/lib/accounts";
 import { createWalkInAccountSchema, recordAccountPaymentSchema, setOpeningBalanceSchema } from "@/lib/validation/accounts";
 
 export interface CreateWalkInAccountState {
@@ -156,20 +156,12 @@ export async function recordAccountPayment(
     return { error: "الحساب غير موجود" };
   }
 
-  const payment = await prisma.$transaction(async (tx) => {
-    const receiptNumber = await generateDailyPaymentReceiptNumber(tx);
-    return tx.accountPayment.create({
-      data: {
-        accountId: parsed.data.accountId,
-        amountCents: parsed.data.amountCents,
-        method: parsed.data.method,
-        note: parsed.data.note,
-        createdById: admin.id,
-        receiptNumber,
-      },
-      select: { id: true },
-    });
-  });
+  const payment = await prisma.$transaction((tx) =>
+    recordManualAccountPayment(tx, parsed.data.accountId, parsed.data.amountCents, admin.id, {
+      method: parsed.data.method,
+      note: parsed.data.note,
+    }),
+  );
 
   revalidateAccountPaths(parsed.data.accountId);
   redirect(`/admin/accounts/${parsed.data.accountId}/payments/${payment.id}`);

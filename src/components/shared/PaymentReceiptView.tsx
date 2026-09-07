@@ -60,8 +60,18 @@ export interface PaymentReceiptData {
   /** Derived via getPaymentAccountPosition (src/lib/accounts.ts) — never a
    * second, competing balance calculation, and never today's live balance:
    * a HISTORICAL snapshot of the account's position immediately before/
-   * after this specific payment. */
+   * after this specific payment. previousBalanceCents/afterBalanceCents
+   * are NEVER rewritten by a later cancellation — see `cancellation`
+   * below and getPaymentAccountPosition's own doc comment. */
   account: PaymentReceiptAccountPosition;
+  /** Present only once this payment has been cancelled/reversed — see
+   * AccountPaymentCancellation in schema.prisma. Purely additional display
+   * information; never changes amountCents/method/note/receiptNumber or
+   * the `account` position above. `cancelledAt` here is already the TRUE,
+   * business-corrected instant (see getPaymentCancellationBusinessCancelledAt
+   * in src/lib/business-time.ts) — pass it straight to
+   * formatBusinessDateTime, never format it a second time. */
+  cancellation: { reason: string; cancelledAt: Date; cancelledByName: string | null } | null;
 }
 
 /** Pure, server-renderable printable payment receipt — سند قبض. Visually
@@ -88,7 +98,14 @@ export function PaymentReceiptView({ payment }: { payment: PaymentReceiptData })
       <div className="flex flex-wrap items-start justify-between gap-4 border-b border-neutral-200 pb-6">
         <div>
           <h1 className="text-2xl font-bold text-neutral-900">Ovi Mobile</h1>
-          <p className="mt-1 text-sm text-neutral-500">سند قبض</p>
+          <p className="mt-1 flex items-center gap-2 text-sm text-neutral-500">
+            سند قبض
+            {payment.cancellation && (
+              <span className="rounded-full border border-rose-300 bg-rose-50 px-2 py-0.5 text-xs font-semibold text-rose-700">
+                ملغاة
+              </span>
+            )}
+          </p>
         </div>
         <div className="text-end text-sm text-neutral-600">
           <p>
@@ -98,6 +115,15 @@ export function PaymentReceiptView({ payment }: { payment: PaymentReceiptData })
           {payment.collectedByName && <p>بواسطة: {payment.collectedByName}</p>}
         </div>
       </div>
+
+      {payment.cancellation && (
+        <div className="mt-4 rounded-card border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
+          <p className="font-semibold">هذه الدفعة ملغاة ولا تُحتسب على رصيد الحساب الحالي.</p>
+          <p className="mt-1">سبب الإلغاء: {payment.cancellation.reason}</p>
+          {payment.cancellation.cancelledByName && <p>ألغيت بواسطة: {payment.cancellation.cancelledByName}</p>}
+          <p>تاريخ الإلغاء: {formatBusinessDateTime(payment.cancellation.cancelledAt)}</p>
+        </div>
+      )}
 
       <div className="mt-6 grid grid-cols-1 gap-6 sm:grid-cols-2">
         {payment.merchant ? (

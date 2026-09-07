@@ -1,7 +1,7 @@
 import "server-only";
 import { Prisma } from "@prisma/client";
 import { isTerminalOrderStatus } from "@/lib/order-lifecycle-rules";
-import { ACCOUNT_PAYMENT_METHODS } from "@/lib/constants";
+import { ACCOUNT_PAYMENT_METHODS, ACCOUNT_PAYMENT_ORIGINS } from "@/lib/constants";
 import { generateDailyPaymentReceiptNumber } from "@/lib/payment-number";
 import {
   buildAccountStatementRows,
@@ -126,6 +126,13 @@ export async function recordInitialAccountPayment(
   accountId: string,
   amountCents: number,
   createdById: string,
+  /** The Order this payment is the "paid now" portion of — written into
+   * AccountPayment.sourceOrderId (with origin = SALE_INITIAL) so the sale
+   * correction workflow (src/lib/sale-correction.ts) can later find this
+   * exact payment through a real persisted relation, never by parsing
+   * `note`. Required: every call to this function is, by definition,
+   * recording a sale's own initial payment. */
+  orderId: string,
   options?: { method?: string; note?: string },
 ): Promise<void> {
   const receiptNumber = await generateDailyPaymentReceiptNumber(tx);
@@ -137,7 +144,55 @@ export async function recordInitialAccountPayment(
       note: options?.note ?? "دفعة عند إنشاء الطلب",
       createdById,
       receiptNumber,
+      origin: ACCOUNT_PAYMENT_ORIGINS.SALE_INITIAL,
+      sourceOrderId: orderId,
     },
+  });
+}
+
+/** The ONE canonical way a standalone MANUAL payment is ever created —
+ * always origin = MANUAL, always a fresh persisted PAY-YYYYMMDD-NNNN
+ * (generateDailyPaymentReceiptNumber, same daily sequence/advisory-lock
+ * technique used everywhere else), always createdById = the actual
+ * authenticated actor. Every entry point that lets a human record a
+ * standalone payment — ADMIN's recordAccountPayment
+ * (src/app/admin/accounts/actions.ts), REP's recordMerchantPaymentAsRep
+ * (src/app/rep/merchants/actions.ts), and ADMIN/ADMIN_ASSISTANT's
+ * report-scoped createReplacementPaymentAction
+ * (src/app/admin/reports/actions.ts) — calls this same function instead of
+ * re-inlining the create, so receipt numbering / origin tagging / account
+ * balance semantics can never drift between them. Callers still own their
+ * own role guard, input validation, and post-create redirect target — this
+ * only does the one shared insert. */
+export async function recordManualAccountPayment(
+  tx: Tx,
+  accountId: string,
+  amountCents: number,
+  createdById: string,
+  options?: {
+    method?: string;
+    note?: string;
+    /** Set ONLY by the report-scoped replacement-payment flow — the
+     * original cancelled MANUAL payment this new one corrects
+     * (AccountPayment.correctsPaymentId, @unique — the DB-level "at most
+     * one replacement per cancelled payment" guarantee). Omitted (the
+     * normal case) for every ordinary standalone payment. */
+    correctsPaymentId?: string;
+  },
+): Promise<{ id: string }> {
+  const receiptNumber = await generateDailyPaymentReceiptNumber(tx);
+  return tx.accountPayment.create({
+    data: {
+      accountId,
+      amountCents,
+      method: options?.method ?? ACCOUNT_PAYMENT_METHODS.CASH,
+      note: options?.note,
+      createdById,
+      receiptNumber,
+      origin: ACCOUNT_PAYMENT_ORIGINS.MANUAL,
+      correctsPaymentId: options?.correctsPaymentId,
+    },
+    select: { id: true },
   });
 }
 
@@ -168,25 +223,38 @@ export interface AccountBalanceInput {
    * for a genuinely brand-new account that has none. */
   openingBalanceCents: number;
   orders: { status: string; totalCents: number }[];
-  payments: { amountCents: number }[];
+  /** `cancellation` present (non-null) means this payment has been
+   * reversed — see AccountPaymentCancellation in schema.prisma. Its
+   * amountCents is still summed into totalPaidCents below (the original
+   * payment's own historical effect is never erased) but is then added
+   * straight back via totalReversedCents, netting to zero CURRENT effect —
+   * never by silently excluding the payment from the sum, which would
+   * produce the same number but not the same auditable formula. */
+  payments: { amountCents: number; cancellation?: { id: string } | null }[];
 }
 
 /** The single source of truth for an account's balance due — never
  * duplicate this formula inline. Cancelled/returned orders are excluded
  * (isTerminalOrderStatus covers exactly the two statuses that also restore
- * inventory in order-lifecycle.ts, i.e. the sale was undone), and the
- * result is always computed live from openingBalanceCents + orders -
- * payments, never stored, matching Order.paidAmountCents's existing "never
- * stored" convention. openingBalanceCents represents pre-system debt
- * entered once by an ADMIN (see setAccountOpeningBalance in
- * src/app/admin/accounts/actions.ts) — never a fabricated Order or
- * AccountPayment. */
+ * inventory in order-lifecycle.ts, i.e. the sale was undone); a cancelled
+ * payment nets to zero CURRENT effect (its original amount is still
+ * subtracted, then added straight back — see AccountBalanceInput's own doc
+ * comment) while its historical statement position stays untouched (see
+ * buildAccountStatementRows). The result is always computed live from
+ * openingBalanceCents + orders - payments + reversals, never stored,
+ * matching Order.paidAmountCents's existing "never stored" convention.
+ * openingBalanceCents represents pre-system debt entered once by an ADMIN
+ * (see setAccountOpeningBalance in src/app/admin/accounts/actions.ts) —
+ * never a fabricated Order or AccountPayment. */
 export function getAccountBalanceCents(account: AccountBalanceInput): number {
   const totalOwedCents = account.orders
     .filter((order) => !isTerminalOrderStatus(order.status))
     .reduce((sum, order) => sum + order.totalCents, 0);
   const totalPaidCents = account.payments.reduce((sum, payment) => sum + payment.amountCents, 0);
-  return account.openingBalanceCents + totalOwedCents - totalPaidCents;
+  const totalReversedCents = account.payments
+    .filter((payment) => payment.cancellation)
+    .reduce((sum, payment) => sum + payment.amountCents, 0);
+  return account.openingBalanceCents + totalOwedCents - totalPaidCents + totalReversedCents;
 }
 
 export interface OrderAccountPosition {

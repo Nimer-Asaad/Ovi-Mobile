@@ -13,6 +13,7 @@ const ROW_TYPE_LABELS: Record<AccountStatementRowType, string> = {
   OPENING: "رصيد افتتاحي",
   SALE: "بيع",
   PAYMENT: "دفعة",
+  PAYMENT_REVERSAL: "إلغاء دفعة",
 };
 
 /** Pure, server-renderable printable statement — mirrors InvoiceView's
@@ -29,7 +30,13 @@ const ROW_TYPE_LABELS: Record<AccountStatementRowType, string> = {
 export function AccountStatementView({ account }: { account: AccountStatementData }) {
   const rows = buildAccountStatementRows(account);
   const totalInvoicedCents = rows.filter((row) => row.type === "SALE").reduce((sum, row) => sum + row.debitCents, 0);
-  const totalPaidCents = rows.filter((row) => row.type === "PAYMENT").reduce((sum, row) => sum + row.creditCents, 0);
+  // Net of any reversal — a cancelled payment's original creditCents is
+  // still summed here (its historical row is never rewritten), then the
+  // matching PAYMENT_REVERSAL row's debitCents cancels it back out, so
+  // this KPI always agrees with the running balance below.
+  const totalPaidCents =
+    rows.filter((row) => row.type === "PAYMENT").reduce((sum, row) => sum + row.creditCents, 0) -
+    rows.filter((row) => row.type === "PAYMENT_REVERSAL").reduce((sum, row) => sum + row.debitCents, 0);
   const balanceCents = rows.length > 0 ? rows[rows.length - 1]!.balanceCents : account.openingBalanceCents;
 
   return (
@@ -85,9 +92,19 @@ export function AccountStatementView({ account }: { account: AccountStatementDat
           </thead>
           <tbody className="divide-y divide-neutral-100">
             {rows.map((row) => (
-              <tr key={row.key} className={row.isTerminalOrder ? "text-neutral-400" : "text-neutral-900"}>
+              <tr
+                key={row.key}
+                className={row.isTerminalOrder || row.isCancelledPayment || row.type === "PAYMENT_REVERSAL" ? "text-neutral-400" : "text-neutral-900"}
+              >
                 <td className="py-2 pe-2 align-top whitespace-nowrap">{row.date ? new Date(row.date).toLocaleDateString("ar") : "—"}</td>
-                <td className="py-2 pe-2 align-top whitespace-nowrap">{ROW_TYPE_LABELS[row.type]}</td>
+                <td className="py-2 pe-2 align-top whitespace-nowrap">
+                  {ROW_TYPE_LABELS[row.type]}
+                  {row.isCancelledPayment && (
+                    <span className="ms-1 rounded-full border border-rose-300 bg-rose-50 px-1.5 py-0.5 text-[10px] font-semibold text-rose-700">
+                      ملغاة
+                    </span>
+                  )}
+                </td>
                 <td className="py-2 pe-2 align-top whitespace-normal break-words">{row.reference}</td>
                 <td className="max-w-xs py-2 pe-2 align-top whitespace-normal break-words">{row.description}</td>
                 <td className="py-2 pe-2 align-top">{row.debitCents > 0 ? formatCurrencyFromCents(row.debitCents) : "—"}</td>

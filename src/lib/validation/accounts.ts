@@ -52,6 +52,19 @@ export const recordAccountPaymentSchema = z
   })
   .strict();
 
+/** Same fields as recordAccountPaymentSchema, minus accountId — used by the
+ * report-scoped replacement-payment action (createReplacementPaymentAction
+ * in src/app/admin/reports/actions.ts), which derives accountId itself,
+ * server-side, from the persisted original payment being corrected —
+ * never from a client-submitted field. */
+export const recordReplacementPaymentSchema = z
+  .object({
+    amountCents: positiveMoneyString,
+    method: z.enum(Object.values(ACCOUNT_PAYMENT_METHODS) as [string, ...string[]]),
+    note: z.string().trim().max(500, "الملاحظات طويلة جداً").optional(),
+  })
+  .strict();
+
 /** Admin types a plain NIS amount (e.g. "4350" or "0"); converts to integer
  * agorot cents. Unlike positiveMoneyString above, zero (and an empty/omitted
  * field, treated the same as "0") is valid here — most accounts have no

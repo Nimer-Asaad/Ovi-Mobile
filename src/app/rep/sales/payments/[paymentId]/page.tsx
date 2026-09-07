@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { requireRole } from "@/lib/auth/guards";
+import { ROLES } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { PaymentReceiptActions } from "@/components/shared/PaymentReceiptActions";
@@ -7,30 +9,54 @@ import type { PaymentReceiptData } from "@/components/shared/PaymentReceiptView"
 import { getPaymentAccountPosition } from "@/lib/accounts";
 import { getPaymentBusinessCreatedAt, getPaymentCancellationBusinessCancelledAt } from "@/lib/business-time";
 
-interface AdminPaymentReceiptPageProps {
-  params: Promise<{ id: string; paymentId: string }>;
+interface RepSalesPaymentReceiptPageProps {
+  params: Promise<{ paymentId: string }>;
 }
 
-/** Admin's own payment receipt — "سند قبض" — reachable for ANY CustomerAccount
- * type (merchant, registered-customer, or walk-in), since recordAccountPayment
- * (src/app/admin/accounts/actions.ts) works generically for all of them, not
- * only merchants. Reuses the exact same PaymentReceiptView/PaymentReceiptActions
- * a rep's own receipt renders — one shared component, never a duplicated
- * receipt/print/PNG/WhatsApp implementation.
+/** A report-scoped, ownership-based mirror of
+ * /rep/merchants/[id]/payments/[paymentId] — exists so a rep can always
+ * open a receipt for a payment THEY personally created (createdById ===
+ * this rep's own user id), even when the merchant is no longer currently
+ * assigned to them. The original merchant-scoped route's own guard
+ * (assignedRepId === rep.id) is deliberately left unchanged for its own
+ * use case; this is a SEPARATE, additive route, not a weakening of that
+ * one — reached from /rep/sales (the rep's own activity report) and from
+ * the replacement-payment flow (createRepReplacementPaymentAction), never
+ * from anywhere that depends on current merchant assignment.
  *
- * ADMIN-only via the inherited src/app/admin/accounts/layout.tsx guard
- * (narrows the outer ADMIN | ADMIN_ASSISTANT gate down to ADMIN alone,
- * matching every other page under /admin/accounts/**) — no separate
- * requireRole call here, exactly like the sibling [id]/page.tsx and
- * [id]/statement/page.tsx. Still scoped by both `accountId` and `paymentId`
- * together (the payment must belong to THAT account) as defense-in-depth
- * against a manipulated URL pairing mismatched ids, even though ADMIN
- * already has broad access to every account. */
-export default async function AdminPaymentReceiptPage({ params }: AdminPaymentReceiptPageProps) {
-  const { id: accountId, paymentId } = await params;
+ * Reuses the exact same shared PaymentReceiptView/PaymentReceiptActions
+ * every other receipt route renders — never a duplicated markup/print/PNG/
+ * WhatsApp implementation. */
+export default async function RepSalesPaymentReceiptPage({ params }: RepSalesPaymentReceiptPageProps) {
+  const user = await requireRole([ROLES.SALES_REPRESENTATIVE]);
+  const { paymentId } = await params;
+
+  const payment = await prisma.accountPayment.findUnique({
+    where: { id: paymentId },
+    select: {
+      id: true,
+      accountId: true,
+      createdById: true,
+      receiptNumber: true,
+      amountCents: true,
+      method: true,
+      note: true,
+      createdAt: true,
+      createdBy: { select: { name: true } },
+      cancellation: { select: { reason: true, cancelledAt: true, cancelledBy: { select: { name: true } } } },
+    },
+  });
+
+  // Ownership check — createdById, never merchant assignment. A payment
+  // this rep did not personally create (another rep's, an admin's) 404s
+  // here exactly like a mismatched merchantId/paymentId pair 404s on the
+  // merchant-scoped route.
+  if (!payment || payment.createdById !== user.id) {
+    notFound();
+  }
 
   const account = await prisma.customerAccount.findUnique({
-    where: { id: accountId },
+    where: { id: payment.accountId },
     select: {
       displayName: true,
       phone: true,
@@ -64,27 +90,6 @@ export default async function AdminPaymentReceiptPage({ params }: AdminPaymentRe
     notFound();
   }
 
-  const payment = await prisma.accountPayment.findFirst({
-    where: { id: paymentId, accountId },
-    select: {
-      id: true,
-      receiptNumber: true,
-      amountCents: true,
-      method: true,
-      note: true,
-      createdAt: true,
-      createdBy: { select: { name: true } },
-      cancellation: { select: { reason: true, cancelledAt: true, cancelledBy: { select: { name: true } } } },
-    },
-  });
-
-  if (!payment) {
-    notFound();
-  }
-
-  // Real, unambiguous UTC instant for display — never the raw
-  // payment.createdAt directly (that stays reserved for
-  // resolvePaymentReceiptReference's legacy fallback, unchanged below).
   const businessCreatedAt = (await getPaymentBusinessCreatedAt(payment.id)) ?? payment.createdAt;
 
   const receiptData: PaymentReceiptData = {
@@ -112,14 +117,14 @@ export default async function AdminPaymentReceiptPage({ params }: AdminPaymentRe
   const whatsappNumber = account.merchant?.whatsappPhone ?? account.merchant?.contactPhone ?? account.phone ?? null;
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="mx-auto flex max-w-2xl flex-col gap-6">
       <div className="print:hidden">
         <PageHeader
           title="سند قبض"
-          subtitle={account.displayName}
+          subtitle={account.merchant?.businessName ?? account.displayName}
           actions={
-            <Link href={`/admin/accounts/${accountId}`} className="text-sm text-gold-champagne hover:underline">
-              العودة إلى الحساب
+            <Link href="/rep/sales" className="text-sm text-gold-champagne hover:underline">
+              العودة إلى مبيعاتي ودفعاتي
             </Link>
           }
         />

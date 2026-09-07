@@ -49,7 +49,7 @@ export default async function RepNewSalePage({ searchParams }: RepNewSalePagePro
               select: {
                 openingBalanceCents: true,
                 orders: { select: { status: true, totalCents: true } },
-                payments: { select: { amountCents: true } },
+                payments: { select: { amountCents: true, cancellation: { select: { id: true } } } },
               },
             },
           },

@@ -47,6 +47,7 @@ export default async function AdminAccountDetailPage({ params }: AdminAccountDet
           note: true,
           createdAt: true,
           createdBy: { select: { name: true } },
+          cancellation: { select: { id: true } },
         },
       },
     },
@@ -57,7 +58,12 @@ export default async function AdminAccountDetailPage({ params }: AdminAccountDet
   }
 
   const balanceCents = getAccountBalanceCents(account);
-  const totalPaidCents = account.payments.reduce((sum, payment) => sum + payment.amountCents, 0);
+  // Excludes cancelled payments — matches getAccountBalanceCents's own
+  // "net zero CURRENT effect" treatment of a reversed payment, so this KPI
+  // never disagrees with the balance figure right next to it.
+  const totalPaidCents = account.payments
+    .filter((payment) => !payment.cancellation)
+    .reduce((sum, payment) => sum + payment.amountCents, 0);
   const kindLabel = account.merchant ? "تاجر جملة" : account.customer ? "عميل مسجّل" : "عميل مباشر";
   const newOrderHref = getNewOrderHrefForAccount(account.id, {
     merchantId: account.merchant?.id ?? null,
@@ -216,6 +222,11 @@ export default async function AdminAccountDetailPage({ params }: AdminAccountDet
                 <tr key={payment.id}>
                   <td className="px-4 py-3 font-medium text-emerald-700">
                     {formatCurrencyFromCents(payment.amountCents)}
+                    {payment.cancellation && (
+                      <Badge variant="danger" className="ms-2">
+                        ملغاة
+                      </Badge>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-neutral-bg/70">{getAccountPaymentMethodLabel(payment.method)}</td>
                   <td className="px-4 py-3 text-neutral-bg/70">{payment.createdBy.name}</td>

@@ -23,9 +23,27 @@ export interface AccountStatementPaymentInput {
    * (AccountPayment.createdById -> User.name) — an admin or a sales rep,
    * whichever authenticated user actually submitted it. */
   collectedByName?: string | null;
+  /** Present only once this payment has been cancelled/reversed (see
+   * AccountPaymentCancellation in schema.prisma). When set,
+   * buildAccountStatementRows below (a) marks the ORIGINAL payment row
+   * "ملغاة" without changing its debitCents/creditCents/position — its
+   * historical previous/after balance stays exactly what it always was —
+   * and (b) appends a SEPARATE new PAYMENT_REVERSAL row at cancelledAt,
+   * the actual later accounting event that restores the amount to the
+   * running balance. Never removes or rewrites the original row.
+   * `cancelledBy` is nested (not a flat `cancelledByName`) so this shape
+   * matches a Prisma `cancellation: { select: { reason, cancelledAt,
+   * cancelledBy: { select: { name } } } }` result exactly — every call
+   * site can pass its query result straight through, no mapping step. A
+   * caller that only needs correct balance numbers (an invoice/receipt's
+   * own previousDebt/afterDebt position, never rendering `description`)
+   * may select `cancelledBy: null`-shaped data or omit it — cancelledBy is
+   * only ever read for the description text, never for the balance math
+   * itself. */
+  cancellation?: { reason: string; cancelledAt: Date; cancelledBy?: { name: string } | null } | null;
 }
 
-export type AccountStatementRowType = "OPENING" | "SALE" | "PAYMENT";
+export type AccountStatementRowType = "OPENING" | "SALE" | "PAYMENT" | "PAYMENT_REVERSAL";
 
 export interface AccountStatementRow {
   key: string;
@@ -59,6 +77,12 @@ export interface AccountStatementRow {
    * order still happened), but visually de-emphasized and contributing
    * nothing to debit/balance. Always false for OPENING/PAYMENT rows. */
   isTerminalOrder: boolean;
+  /** True only for a PAYMENT row that has since been cancelled/reversed —
+   * shown, never hidden or rewritten (debitCents/creditCents/balanceCents
+   * stay exactly what they always were; see the separate PAYMENT_REVERSAL
+   * row for the actual later accounting event). Always false for every
+   * other row type, including PAYMENT_REVERSAL itself. */
+  isCancelledPayment: boolean;
 }
 
 export interface AccountStatementInput {
@@ -87,14 +111,16 @@ export interface AccountStatementInput {
 export function buildAccountStatementRows(input: AccountStatementInput): AccountStatementRow[] {
   interface RawRow {
     date: Date;
-    type: "SALE" | "PAYMENT";
+    type: "SALE" | "PAYMENT" | "PAYMENT_REVERSAL";
     reference: string;
     description: string;
     debitCents: number;
     creditCents: number;
     isTerminalOrder: boolean;
+    isCancelledPayment: boolean;
     /** Deterministic tie-break for identical timestamps — orders sort
-     * before payments at the exact same instant, then by reference. */
+     * before payments, which sort before payment reversals, at the exact
+     * same instant, then by reference. */
     sortTieBreak: string;
   }
 
@@ -116,17 +142,23 @@ export function buildAccountStatementRows(input: AccountStatementInput): Account
       debitCents: terminal ? 0 : order.totalCents,
       creditCents: 0,
       isTerminalOrder: terminal,
+      isCancelledPayment: false,
       sortTieBreak: `0:${order.orderNumber}`,
     });
   }
 
   for (const payment of input.payments) {
+    const isCancelled = Boolean(payment.cancellation);
     const descriptionParts = [
       `دفعة (${getAccountPaymentMethodLabel(payment.method)})`,
       payment.collectedByName ? `— استلمها: ${payment.collectedByName}` : null,
       payment.note ? `— ${payment.note}` : null,
+      isCancelled ? "(ملغاة)" : null,
     ].filter((part): part is string => Boolean(part));
 
+    // The original payment row — unchanged debitCents/creditCents/position
+    // even when cancelled. A cancellation is a SEPARATE, later accounting
+    // event (the PAYMENT_REVERSAL row below), never a rewrite of this one.
     raw.push({
       date: payment.createdAt,
       type: "PAYMENT",
@@ -135,8 +167,29 @@ export function buildAccountStatementRows(input: AccountStatementInput): Account
       debitCents: 0,
       creditCents: payment.amountCents,
       isTerminalOrder: false,
+      isCancelledPayment: isCancelled,
       sortTieBreak: `1:${payment.id}`,
     });
+
+    if (payment.cancellation) {
+      const reversalDescriptionParts = [
+        `إلغاء دفعة (${getAccountPaymentMethodLabel(payment.method)})`,
+        `— السبب: ${payment.cancellation.reason}`,
+        payment.cancellation.cancelledBy?.name ? `— ألغاها: ${payment.cancellation.cancelledBy.name}` : null,
+      ].filter((part): part is string => Boolean(part));
+
+      raw.push({
+        date: payment.cancellation.cancelledAt,
+        type: "PAYMENT_REVERSAL",
+        reference: payment.id,
+        description: reversalDescriptionParts.join(" "),
+        debitCents: payment.amountCents,
+        creditCents: 0,
+        isTerminalOrder: false,
+        isCancelledPayment: false,
+        sortTieBreak: `2:${payment.id}`,
+      });
+    }
   }
 
   raw.sort((a, b) => {
@@ -164,6 +217,7 @@ export function buildAccountStatementRows(input: AccountStatementInput): Account
       creditCents: 0,
       balanceCents: runningBalanceCents,
       isTerminalOrder: false,
+      isCancelledPayment: false,
     });
   }
 
@@ -179,6 +233,7 @@ export function buildAccountStatementRows(input: AccountStatementInput): Account
       creditCents: row.creditCents,
       balanceCents: runningBalanceCents,
       isTerminalOrder: row.isTerminalOrder,
+      isCancelledPayment: row.isCancelledPayment,
     });
   });
 

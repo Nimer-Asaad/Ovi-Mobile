@@ -20,6 +20,7 @@ import {
   recordStockMovement,
   InsufficientInventoryError,
 } from "@/lib/inventory-transactions";
+import { cancelManualInventoryBatch } from "@/lib/manual-inventory-correction";
 
 export interface StockAdjustmentState {
   error?: string;
@@ -174,6 +175,18 @@ export async function createStockMovement(
         throw err;
       }
 
+      // A single-line ManualInventoryBatch — the same batch-level unit a
+      // multi-line bulk receive/issue submission gets below, so this
+      // single manual movement is eligible for the same safe
+      // cancel/reverse correction workflow (see
+      // src/lib/manual-inventory-correction.ts). Never created for
+      // ADJUSTMENT (handled in the branch above, returns before here) —
+      // that absolute-quantity operation stays out of scope for automatic
+      // reversal.
+      const batch = await tx.manualInventoryBatch.create({
+        data: { movementType, createdById: admin.id },
+      });
+
       await recordStockMovement(tx, {
         type: movementType,
         productId,
@@ -186,6 +199,7 @@ export async function createStockMovement(
         createdById: admin.id,
         toLocationId: isStockOut ? undefined : warehouse.id,
         fromLocationId: isStockOut ? warehouse.id : undefined,
+        manualBatchId: batch.id,
       });
     });
   } catch (err) {
@@ -413,6 +427,15 @@ export async function createBulkStockMovement(
 
   try {
     await prisma.$transaction(async (tx) => {
+      // One ManualInventoryBatch groups every line this submission creates
+      // — the batch-level unit a correction later cancels/reverses as one
+      // atomic operation (see src/lib/manual-inventory-correction.ts).
+      // Created once per submission, before the per-line loop, so every
+      // line below can point its own manualBatchId at the same batch.id.
+      const batch = await tx.manualInventoryBatch.create({
+        data: { movementType: direction, createdById: actor.id },
+      });
+
       for (const line of lines) {
         const key = { productId: line.productId, variantId: line.variantId, deviceColorVariantId: line.deviceColorVariantId, locationId: warehouse.id };
         let change;
@@ -440,6 +463,7 @@ export async function createBulkStockMovement(
           newQuantity: change.newQuantity,
           note: notes,
           createdById: actor.id,
+          manualBatchId: batch.id,
           fromLocationId: isOut ? warehouse.id : undefined,
           toLocationId: isOut ? undefined : warehouse.id,
         });
@@ -458,4 +482,38 @@ export async function createBulkStockMovement(
     ? `تم إخراج ${lines.length} صنفاً (${totalQuantity} قطعة) من المخزون بنجاح`
     : `تم إدخال ${lines.length} صنفاً (${totalQuantity} قطعة) إلى المخزون بنجاح`;
   return { success: message };
+}
+
+export interface ManualInventoryCorrectionState {
+  error?: string;
+  success?: string;
+}
+
+/** Cancels/reverses one manual STOCK_IN/STOCK_OUT batch — see
+ * cancelManualInventoryBatch's own doc comment in
+ * src/lib/manual-inventory-correction.ts for the full safety model
+ * (multi-line atomicity, insufficient-stock blocking, double-cancel
+ * protection). ADMIN and ADMIN_ASSISTANT both eligible, company-wide — the
+ * same two roles already allowed to CREATE a manual STOCK_IN/STOCK_OUT
+ * batch via createBulkStockMovement above; this never broadens beyond
+ * that. */
+export async function cancelManualInventoryBatchAction(
+  _prevState: ManualInventoryCorrectionState,
+  formData: FormData,
+): Promise<ManualInventoryCorrectionState> {
+  const actor = await requireRole([ROLES.ADMIN, ROLES.ADMIN_ASSISTANT]);
+
+  const batchId = formData.get("batchId")?.toString();
+  const reason = formData.get("reason")?.toString() ?? "";
+  if (!batchId) {
+    return { error: "العملية غير موجودة" };
+  }
+
+  const result = await cancelManualInventoryBatch({ batchId, reason, actorUserId: actor.id });
+  if (!result.ok) {
+    return { error: result.message };
+  }
+
+  revalidatePath("/admin/inventory/movements");
+  return { success: "تم إلغاء العملية بنجاح" };
 }

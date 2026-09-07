@@ -54,3 +54,34 @@ export async function getPaymentBusinessCreatedAt(paymentId: string): Promise<Da
   `;
   return rows[0]?.businessCreatedAt ?? null;
 }
+
+/** AccountPayment.id (NOT the cancellation's own id — paymentId is @unique
+ * on AccountPaymentCancellation, so every call site that already has the
+ * payment's id on hand needs no extra lookup) -> the true UTC instant of
+ * that payment's cancellation.cancelledAt, or null if this payment has no
+ * cancellation row. Same technique, same reasoning — cancelledAt is
+ * exactly as naive/DB-session-tagged as any other createdAt column here,
+ * since it's the same plain `DateTime @default(now())` type. Used by the
+ * payment receipt's "تاريخ الإلغاء" line. */
+export async function getPaymentCancellationBusinessCancelledAt(paymentId: string): Promise<Date | null> {
+  const rows = await prisma.$queryRaw<{ businessCancelledAt: Date }[]>`
+    SELECT ("cancelledAt" AT TIME ZONE current_setting('TIMEZONE')) AS "businessCancelledAt"
+    FROM "account_payment_cancellations"
+    WHERE "paymentId" = ${paymentId}
+  `;
+  return rows[0]?.businessCancelledAt ?? null;
+}
+
+/** OrderStatusHistory.id -> the true UTC instant of that history row's
+ * createdAt, or null if no such row exists. Same technique. Used by the
+ * cancelled/returned sale invoice's "تاريخ الإلغاء" line (see
+ * OrderStatusHistory in schema.prisma — already carries reason/changedBy
+ * for every status transition, sale corrections included). */
+export async function getOrderStatusHistoryBusinessCreatedAt(historyId: string): Promise<Date | null> {
+  const rows = await prisma.$queryRaw<{ businessCreatedAt: Date }[]>`
+    SELECT ("createdAt" AT TIME ZONE current_setting('TIMEZONE')) AS "businessCreatedAt"
+    FROM "order_status_history"
+    WHERE "id" = ${historyId}
+  `;
+  return rows[0]?.businessCreatedAt ?? null;
+}

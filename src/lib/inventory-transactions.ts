@@ -217,6 +217,10 @@ export interface StockMovementInput {
   deviceColorVariantId?: string | null;
   allocationBatchId?: string | null;
   transferBatchId?: string | null;
+  /** Groups this row with the other lines of the same manual STOCK_IN/
+   * STOCK_OUT submission, or marks it as part of a reversal batch — see
+   * ManualInventoryBatch in schema.prisma and src/lib/manual-inventory-correction.ts. */
+  manualBatchId?: string | null;
   fromLocationId?: string | null;
   toLocationId?: string | null;
   quantity: number;

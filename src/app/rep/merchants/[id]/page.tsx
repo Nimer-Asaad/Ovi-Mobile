@@ -64,7 +64,15 @@ export default async function RepMerchantDetailPage({ params }: RepMerchantDetai
               },
               payments: {
                 orderBy: { createdAt: "desc" },
-                select: { id: true, amountCents: true, method: true, createdAt: true, note: true, createdBy: { select: { name: true } } },
+                select: {
+                  id: true,
+                  amountCents: true,
+                  method: true,
+                  createdAt: true,
+                  note: true,
+                  createdBy: { select: { name: true } },
+                  cancellation: { select: { reason: true, cancelledAt: true, cancelledBy: { select: { name: true } } } },
+                },
               },
             },
           },
@@ -81,7 +89,11 @@ export default async function RepMerchantDetailPage({ params }: RepMerchantDetai
   const openingBalanceCents = merchant.account?.openingBalanceCents ?? 0;
   const rows = buildAccountStatementRows({ openingBalanceCents, openingBalanceSetAt: merchant.account?.openingBalanceSetAt ?? null, orders, payments });
   const totalPurchasesCents = rows.filter((row) => row.type === "SALE").reduce((sum, row) => sum + row.debitCents, 0);
-  const totalPaymentsCents = rows.filter((row) => row.type === "PAYMENT").reduce((sum, row) => sum + row.creditCents, 0);
+  // Net of any reversal — see AccountStatementView's identical totalPaidCents
+  // comment for why.
+  const totalPaymentsCents =
+    rows.filter((row) => row.type === "PAYMENT").reduce((sum, row) => sum + row.creditCents, 0) -
+    rows.filter((row) => row.type === "PAYMENT_REVERSAL").reduce((sum, row) => sum + row.debitCents, 0);
   const balanceCents = rows.length > 0 ? rows[rows.length - 1]!.balanceCents : openingBalanceCents;
   const recentRows = [...rows].reverse().slice(0, RECENT_ROW_LIMIT);
   const phone = merchant.contactPhone ?? merchant.user?.phone ?? null;

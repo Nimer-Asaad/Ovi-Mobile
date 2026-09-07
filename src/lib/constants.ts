@@ -205,6 +205,17 @@ export const ACCOUNT_PAYMENT_METHODS = {
   OTHER: "OTHER",
 } as const;
 
+/** AccountPayment.origin — MANUAL (a standalone payment recorded directly
+ * against an account, by ADMIN/ADMIN_ASSISTANT/a rep) or SALE_INITIAL (the
+ * "paid now" portion recorded at the same moment as a sale, linked via
+ * AccountPayment.sourceOrderId). Every NEW payment must set one of these
+ * explicitly; null is reserved for legacy rows that predate this column
+ * (never backfilled) — see the schema doc comment on AccountPayment.origin. */
+export const ACCOUNT_PAYMENT_ORIGINS = {
+  MANUAL: "MANUAL",
+  SALE_INITIAL: "SALE_INITIAL",
+} as const;
+
 /** Active products with total on-hand quantity below this are "low stock"
  * on the admin dashboard. */
 export const LOW_STOCK_THRESHOLD = 5;
@@ -250,6 +261,7 @@ export const ADMIN_NAV_ITEMS = [
  * an absolute-quantity operation, was never part of this role's scope). */
 export const ADMIN_ASSISTANT_NAV_ITEMS = [
   { label: "Orders", labelAr: "الطلبات", href: "/admin/orders" },
+  { label: "Sales & Payments Reports", labelAr: "تقارير المبيعات والدفعات", href: "/admin/reports" },
   { label: "Inventory", labelAr: "المخزون", href: "/admin/inventory" },
   { label: "Receive Stock", labelAr: "إدخال منتجات", href: "/admin/inventory/receive" },
   { label: "Issue Stock", labelAr: "إخراج منتجات", href: "/admin/inventory/issue" },

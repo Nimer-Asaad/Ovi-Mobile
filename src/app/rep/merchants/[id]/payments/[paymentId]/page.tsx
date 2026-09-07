@@ -7,7 +7,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { PaymentReceiptActions } from "@/components/shared/PaymentReceiptActions";
 import type { PaymentReceiptData } from "@/components/shared/PaymentReceiptView";
 import { getPaymentAccountPosition } from "@/lib/accounts";
-import { getPaymentBusinessCreatedAt } from "@/lib/business-time";
+import { getPaymentBusinessCreatedAt, getPaymentCancellationBusinessCancelledAt } from "@/lib/business-time";
 
 interface RepPaymentReceiptPageProps {
   params: Promise<{ id: string; paymentId: string }>;
@@ -50,7 +50,16 @@ export default async function RepPaymentReceiptPage({ params }: RepPaymentReceip
               openingBalanceCents: true,
               openingBalanceSetAt: true,
               orders: { select: { orderNumber: true, createdAt: true, status: true, totalCents: true } },
-              payments: { select: { id: true, amountCents: true, method: true, createdAt: true, note: true } },
+              payments: {
+                select: {
+                  id: true,
+                  amountCents: true,
+                  method: true,
+                  createdAt: true,
+                  note: true,
+                  cancellation: { select: { reason: true, cancelledAt: true, cancelledBy: { select: { name: true } } } },
+                },
+              },
             },
           },
         },
@@ -71,6 +80,7 @@ export default async function RepPaymentReceiptPage({ params }: RepPaymentReceip
       note: true,
       createdAt: true,
       createdBy: { select: { name: true } },
+      cancellation: { select: { reason: true, cancelledAt: true, cancelledBy: { select: { name: true } } } },
     },
   });
 
@@ -103,6 +113,13 @@ export default async function RepPaymentReceiptPage({ params }: RepPaymentReceip
     accountDisplayName: merchant.businessName,
     accountPhone: merchant.contactPhone,
     account: getPaymentAccountPosition(merchant.account, payment),
+    cancellation: payment.cancellation
+      ? {
+          reason: payment.cancellation.reason,
+          cancelledByName: payment.cancellation.cancelledBy.name,
+          cancelledAt: (await getPaymentCancellationBusinessCancelledAt(payment.id)) ?? payment.cancellation.cancelledAt,
+        }
+      : null,
   };
 
   const whatsappNumber = merchant.whatsappPhone ?? merchant.contactPhone ?? null;

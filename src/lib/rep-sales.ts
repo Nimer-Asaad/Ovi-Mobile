@@ -314,7 +314,7 @@ export async function createRepSaleCore(input: RepSaleInput, context: CreateRepS
         // "read current max, then insert" critical section.
         orderNumber = await generateDailyOrderNumber(tx);
 
-        await tx.order.create({
+        const createdOrder = await tx.order.create({
           data: {
             orderNumber,
             source: ORDER_SOURCES.REP_SALE,
@@ -390,7 +390,7 @@ export async function createRepSaleCore(input: RepSaleInput, context: CreateRepS
         // relied on for accounting itself (see recordInitialAccountPayment's
         // doc comment).
         if (paidNowCents > 0) {
-          await recordInitialAccountPayment(tx, accountId, paidNowCents, actorUserId, {
+          await recordInitialAccountPayment(tx, accountId, paidNowCents, actorUserId, createdOrder.id, {
             method: paidNowMethod,
             note: `دفعة عند إنشاء الطلب - فاتورة #${orderNumber}`,
           });
