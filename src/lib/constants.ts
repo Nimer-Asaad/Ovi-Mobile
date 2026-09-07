@@ -229,6 +229,7 @@ export const ADMIN_NAV_ITEMS = [
   { label: "Issue Stock", labelAr: "إخراج منتجات", href: "/admin/inventory/issue" },
   { label: "Company Inventory", labelAr: "مخزون الشركة", href: "/admin/inventory/overview" },
   { label: "Orders", labelAr: "الطلبات", href: "/admin/orders" },
+  { label: "Sales & Payments Reports", labelAr: "تقارير المبيعات والدفعات", href: "/admin/reports" },
   { label: "Users", labelAr: "المستخدمون", href: "/admin/users" },
   { label: "Merchants", labelAr: "التجار", href: "/admin/merchants" },
   { label: "Sales Reps", labelAr: "المندوبون", href: "/admin/reps" },

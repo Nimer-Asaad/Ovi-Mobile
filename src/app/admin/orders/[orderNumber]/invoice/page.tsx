@@ -6,6 +6,7 @@ import { ROLES } from "@/lib/constants";
 import { InvoiceActions } from "@/components/admin/orders/InvoiceActions";
 import type { InvoiceData } from "@/components/admin/orders/InvoiceView";
 import { getOrderAccountPosition } from "@/lib/accounts";
+import { getOrderBusinessCreatedAt } from "@/lib/business-time";
 
 interface AdminInvoicePageProps {
   params: Promise<{ orderNumber: string }>;
@@ -96,9 +97,15 @@ export default async function AdminInvoicePage({ params }: AdminInvoicePageProps
     notFound();
   }
 
+  // Real, unambiguous UTC instant for display — never the raw (mis-tagged)
+  // order.createdAt directly. Falls back to the raw value only in the
+  // defensive/never-expected case the lookup returns null for an order we
+  // just successfully loaded.
+  const businessCreatedAt = (await getOrderBusinessCreatedAt(order.orderNumber)) ?? order.createdAt;
+
   const invoiceData: InvoiceData = {
     orderNumber: order.orderNumber,
-    createdAt: order.createdAt,
+    businessCreatedAt,
     source: order.source,
     paymentMethod: order.paymentMethod,
     paymentStatus: order.paymentStatus,

@@ -7,6 +7,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { InvoiceActions } from "@/components/admin/orders/InvoiceActions";
 import type { InvoiceData } from "@/components/admin/orders/InvoiceView";
 import { getOrderAccountPosition } from "@/lib/accounts";
+import { getOrderBusinessCreatedAt } from "@/lib/business-time";
 
 interface RepSaleDetailPageProps {
   params: Promise<{ orderNumber: string }>;
@@ -96,9 +97,14 @@ export default async function RepSaleDetailPage({ params }: RepSaleDetailPagePro
     notFound();
   }
 
+  // Real, unambiguous UTC instant for display — see the ADMIN invoice
+  // page's identical comment for why the raw order.createdAt is never
+  // formatted directly.
+  const businessCreatedAt = (await getOrderBusinessCreatedAt(order.orderNumber)) ?? order.createdAt;
+
   const invoiceData: InvoiceData = {
     orderNumber: order.orderNumber,
-    createdAt: order.createdAt,
+    businessCreatedAt,
     source: order.source,
     paymentMethod: order.paymentMethod,
     paymentStatus: order.paymentStatus,

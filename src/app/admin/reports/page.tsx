@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
+import { Select } from "@/components/ui/Select";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { StatCard } from "@/components/ui/StatCard";
 import { ActivityReportTable } from "@/components/shared/ActivityReportTable";
@@ -17,8 +18,8 @@ import {
   getDefaultReportRange,
 } from "@/lib/reporting";
 
-interface RepSalesPageProps {
-  searchParams: Promise<{ type?: string; from?: string; to?: string; q?: string }>;
+interface AdminReportsPageProps {
+  searchParams: Promise<{ type?: string; from?: string; to?: string; q?: string; repId?: string; merchantId?: string }>;
 }
 
 const TABS = [
@@ -27,49 +28,52 @@ const TABS = [
   { value: "PAYMENT", label: "الدفعات" },
 ];
 
-/** REP's own sales + payments activity report — extends what used to be a
- * sales-only list ("مبيعاتي") into a unified chronological report, per the
- * business requirement that a rep review both their sales AND the payments
- * they personally collected. Reuses the existing /rep/sales route/nav entry
- * rather than adding a second, competing report page.
- *
- * Ownership rule (payments): scoped by AccountPayment.createdById === this
- * rep's own User.id — the actual persisted collector, never inferred from
- * "merchant assigned to this rep." A payment an ADMIN recorded for one of
- * this rep's own merchants is correctly excluded here (it still shows on
- * that merchant's full account statement, just not as this rep's own
- * collected-payment activity) — see fetchPaymentActivityRows's own doc
- * comment. Sale-linked "paid now" payments ARE included when this rep is
- * the one who actually made the sale (createdById is always the acting
- * rep — see createRepSaleCore) — never hidden or merged into the sale row;
- * they appear as their own PAYMENT row, keeping sales totals and payment
- * totals separate. */
-export default async function RepSalesPage({ searchParams }: RepSalesPageProps) {
-  const user = await requireRole([ROLES.SALES_REPRESENTATIVE]);
-  const { type, from, to, q } = await searchParams;
-
-  const rep = await prisma.salesRepresentative.findUnique({
-    where: { userId: user.id },
-    select: { id: true },
-  });
+/** Company-wide sales + payments report — ADMIN-only (no suitable existing
+ * report surface covered both entity types together: /admin/orders is
+ * sales-only, /admin/accounts is per-account, /admin/inventory/company-report
+ * is inventory-only — so this is the one new "تقارير المبيعات والدفعات"
+ * page the task explicitly allows when nothing suitable already exists).
+ * Deliberately ADMIN-only, not ADMIN_ASSISTANT — no existing report screen
+ * in this app is currently open to that role, and this task does not ask to
+ * extend it. */
+export default async function AdminReportsPage({ searchParams }: AdminReportsPageProps) {
+  await requireRole([ROLES.ADMIN]);
+  const { type, from, to, q, repId, merchantId } = await searchParams;
 
   const defaults = getDefaultReportRange();
   const fromIso = from?.trim() || defaults.fromIso;
   const toIso = to?.trim() || defaults.toIso;
   const activeTab = type === "SALE" || type === "PAYMENT" ? type : "ALL";
+  const selectedRepId = repId?.trim() || undefined;
+  const selectedMerchantId = merchantId?.trim() || undefined;
 
-  const [sales, payments] = rep
-    ? await Promise.all([
-        fetchSaleActivityRows(
-          { fromIso, toIso, search: q, salesRepId: rep.id },
-          (orderNumber) => `/rep/sales/${orderNumber}`,
-        ),
-        fetchPaymentActivityRows(
-          { fromIso, toIso, search: q, collectorUserId: user.id },
-          (payment) => (payment.merchantId ? `/rep/merchants/${payment.merchantId}/payments/${payment.id}` : "#"),
-        ),
-      ])
-    : [[], []];
+  const [reps, merchants, selectedRep] = await Promise.all([
+    prisma.salesRepresentative.findMany({
+      orderBy: { user: { name: "asc" } },
+      select: { id: true, employeeCode: true, user: { select: { name: true } } },
+    }),
+    // Every merchant, not just currently-approved ones — a report must still
+    // let admin filter to a merchant whose historical sales/payments predate
+    // a later status change (see the feature's "historical data" rule).
+    prisma.merchant.findMany({
+      orderBy: { businessName: "asc" },
+      select: { id: true, businessName: true },
+    }),
+    selectedRepId
+      ? prisma.salesRepresentative.findUnique({ where: { id: selectedRepId }, select: { userId: true } })
+      : Promise.resolve(null),
+  ]);
+
+  const [sales, payments] = await Promise.all([
+    fetchSaleActivityRows(
+      { fromIso, toIso, search: q, salesRepId: selectedRepId, merchantId: selectedMerchantId },
+      (orderNumber) => `/admin/orders/${orderNumber}/invoice`,
+    ),
+    fetchPaymentActivityRows(
+      { fromIso, toIso, search: q, collectorUserId: selectedRep?.userId, merchantId: selectedMerchantId },
+      (payment) => `/admin/accounts/${payment.accountId}/payments/${payment.id}`,
+    ),
+  ]);
 
   const totals = computeActivityTotals(sales, payments);
   const rows =
@@ -88,21 +92,15 @@ export default async function RepSalesPage({ searchParams }: RepSalesPageProps) 
     if (from) params.set("from", from);
     if (to) params.set("to", to);
     if (q) params.set("q", q);
+    if (repId) params.set("repId", repId);
+    if (merchantId) params.set("merchantId", merchantId);
     const qs = params.toString();
-    return qs ? `/rep/sales?${qs}` : "/rep/sales";
+    return qs ? `/admin/reports?${qs}` : "/admin/reports";
   }
 
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-6">
-      <PageHeader
-        title="مبيعاتي ودفعاتي"
-        subtitle="سجل المبيعات والدفعات التي قمت بتسجيلها"
-        actions={
-          <Link href="/rep/sales/new">
-            <Button>بيع جديد</Button>
-          </Link>
-        }
-      />
+    <div className="flex flex-col gap-6">
+      <PageHeader title="تقارير المبيعات والدفعات" subtitle="مراجعة جميع المبيعات والدفعات عبر كل المندوبين" />
 
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <StatCard label="إجمالي المبيعات" value={formatCurrencyFromCents(totals.salesTotalCents)} />
@@ -135,14 +133,30 @@ export default async function RepSalesPage({ searchParams }: RepSalesPageProps) 
             ))}
           </div>
 
-          <form method="GET" className="grid grid-cols-1 gap-3 rounded-card border border-navy-soft bg-navy-deep/40 p-4 sm:grid-cols-4">
+          <form method="GET" className="grid grid-cols-1 gap-3 rounded-card border border-navy-soft bg-navy-surface p-4 sm:grid-cols-2 lg:grid-cols-6">
             <input type="hidden" name="type" value={activeTab === "ALL" ? "" : activeTab} />
             <Input type="date" name="from" label="من تاريخ" defaultValue={fromIso} />
             <Input type="date" name="to" label="إلى تاريخ" defaultValue={toIso} />
-            <div className="sm:col-span-2">
+            <Select name="repId" label="المندوب" defaultValue={repId ?? ""}>
+              <option value="">كل المندوبين</option>
+              {reps.map((rep) => (
+                <option key={rep.id} value={rep.id}>
+                  {rep.user.name} ({rep.employeeCode})
+                </option>
+              ))}
+            </Select>
+            <Select name="merchantId" label="التاجر" defaultValue={merchantId ?? ""}>
+              <option value="">كل التجار</option>
+              {merchants.map((merchant) => (
+                <option key={merchant.id} value={merchant.id}>
+                  {merchant.businessName}
+                </option>
+              ))}
+            </Select>
+            <div className="lg:col-span-2">
               <Input name="q" label="بحث برقم الطلب أو السند أو اسم التاجر" defaultValue={q ?? ""} />
             </div>
-            <div className="flex items-end sm:col-span-4">
+            <div className="flex items-end lg:col-span-6">
               <Button type="submit">تصفية</Button>
             </div>
           </form>

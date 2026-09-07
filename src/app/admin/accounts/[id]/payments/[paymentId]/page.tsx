@@ -5,6 +5,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { PaymentReceiptActions } from "@/components/shared/PaymentReceiptActions";
 import type { PaymentReceiptData } from "@/components/shared/PaymentReceiptView";
 import { getPaymentAccountPosition } from "@/lib/accounts";
+import { getPaymentBusinessCreatedAt } from "@/lib/business-time";
 
 interface AdminPaymentReceiptPageProps {
   params: Promise<{ id: string; paymentId: string }>;
@@ -71,10 +72,16 @@ export default async function AdminPaymentReceiptPage({ params }: AdminPaymentRe
     notFound();
   }
 
+  // Real, unambiguous UTC instant for display — never the raw
+  // payment.createdAt directly (that stays reserved for
+  // resolvePaymentReceiptReference's legacy fallback, unchanged below).
+  const businessCreatedAt = (await getPaymentBusinessCreatedAt(payment.id)) ?? payment.createdAt;
+
   const receiptData: PaymentReceiptData = {
     id: payment.id,
     receiptNumber: payment.receiptNumber,
     createdAt: payment.createdAt,
+    businessCreatedAt,
     amountCents: payment.amountCents,
     method: payment.method,
     note: payment.note,

@@ -1,4 +1,4 @@
-import { formatCurrencyFromCents } from "@/lib/utils";
+import { formatCurrencyFromCents, formatBusinessDateTime } from "@/lib/utils";
 import { formatDebtOrCredit } from "@/lib/account-labels";
 import { getOrderSourceLabel, getPaymentMethodLabel, getPaymentStatusLabel } from "@/lib/order-labels";
 
@@ -37,7 +37,13 @@ export interface InvoiceAccountPosition {
 
 export interface InvoiceData {
   orderNumber: string;
-  createdAt: Date;
+  /** A TRUE, unambiguous UTC instant — NOT the raw Prisma `Order.createdAt`
+   * (that naive `timestamp without time zone` column is mis-tagged as UTC
+   * by Prisma; formatting it directly would shift the displayed time). Both
+   * call sites resolve this via getOrderBusinessCreatedAt
+   * (src/lib/business-time.ts) before building InvoiceData. See
+   * formatBusinessDateTime (src/lib/utils.ts) for the display half. */
+  businessCreatedAt: Date;
   source: string;
   paymentMethod: string;
   paymentStatus: string;
@@ -97,7 +103,7 @@ export function InvoiceView({ order }: { order: InvoiceData }) {
           <p>
             رقم الفاتورة: <span className="font-semibold text-neutral-900">{order.orderNumber}</span>
           </p>
-          <p>التاريخ: {new Date(order.createdAt).toLocaleString("ar")}</p>
+          <p>التاريخ: {formatBusinessDateTime(order.businessCreatedAt)}</p>
           <p>نوع الطلب: {getOrderSourceLabel(order.source)}</p>
           {order.repName && <p>المندوب: {order.repName}</p>}
         </div>

@@ -1,4 +1,4 @@
-import { formatCurrencyFromCents } from "@/lib/utils";
+import { formatCurrencyFromCents, formatBusinessDateTime } from "@/lib/utils";
 import { formatDebtOrCredit, getAccountPaymentMethodLabel, resolvePaymentReceiptReference } from "@/lib/account-labels";
 
 export interface PaymentReceiptMerchantInfo {
@@ -19,7 +19,18 @@ export interface PaymentReceiptAccountPosition {
 
 export interface PaymentReceiptData {
   id: string;
+  /** The RAW Prisma AccountPayment.createdAt (naive, mis-tagged-as-UTC by
+   * Prisma) — kept exactly as before and used ONLY by
+   * resolvePaymentReceiptReference's legacy fallback reference, which is
+   * deliberately NOT business-timezone-corrected (see its own doc comment
+   * in account-labels.ts). Never used for display — see businessCreatedAt
+   * below for that. */
   createdAt: Date;
+  /** A TRUE, unambiguous UTC instant, resolved via getPaymentBusinessCreatedAt
+   * (src/lib/business-time.ts) before building PaymentReceiptData — the
+   * ONLY field this component's date/time line reads. See
+   * formatBusinessDateTime (src/lib/utils.ts) for the display half. */
+  businessCreatedAt: Date;
   /** AccountPayment.receiptNumber — the real, persisted "PAY-YYYYMMDD-NNNN"
    * daily-sequential number (see generateDailyPaymentReceiptNumber in
    * src/lib/payment-number.ts) for every payment created after this field
@@ -83,7 +94,7 @@ export function PaymentReceiptView({ payment }: { payment: PaymentReceiptData })
           <p>
             رقم السند: <span className="font-semibold text-neutral-900">{reference}</span>
           </p>
-          <p>التاريخ: {new Date(payment.createdAt).toLocaleString("ar")}</p>
+          <p>التاريخ: {formatBusinessDateTime(payment.businessCreatedAt)}</p>
           {payment.collectedByName && <p>بواسطة: {payment.collectedByName}</p>}
         </div>
       </div>
