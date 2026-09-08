@@ -4,18 +4,25 @@ import type { ResponseInputItem } from "openai/resources/responses/responses";
 
 /** The ONLY file in this app that imports the OpenAI SDK — every other AI
  * module (orchestrator, tools, system prompt) talks to this thin wrapper,
- * never the SDK directly, so swapping providers later touches one file.
+ * never the SDK directly, so swapping providers (as this file itself now
+ * proves — OpenAI-hosted -> Groq) only ever touches this one file.
+ *
+ * INFERENCE PROVIDER: Groq — reached through the same official `openai` npm
+ * SDK (no new dependency), pointed at Groq's OpenAI-compatible endpoint via
+ * `baseURL`. `GROQ_API_KEY` (not `OPENAI_API_KEY`) is the only credential
+ * read here now.
  *
  * Uses the official Responses API (`client.responses.create`) — the
- * SDK-recommended tool-calling surface as of this SDK version, superseding
- * Chat Completions for new integrations. Responses-API-specific item shapes
- * (`ResponseInputItem`) are re-exported here as the opaque `ProviderInputItem`
- * type; the orchestrator accumulates and replays them across tool-calling
- * steps without inspecting their internal fields, and the business tool
- * layer (src/lib/ai/tools/**) never imports this module or any OpenAI type
- * at all. */
+ * SDK-recommended tool-calling surface, kept unchanged across this provider
+ * switch per explicit instruction (never falls back to Chat Completions).
+ * Responses-API-specific item shapes (`ResponseInputItem`) are re-exported
+ * here as the opaque `ProviderInputItem` type; the orchestrator accumulates
+ * and replays them across tool-calling steps without inspecting their
+ * internal fields, and the business tool layer (src/lib/ai/tools/**) never
+ * imports this module or any OpenAI/Groq type at all. */
 
-const DEFAULT_MODEL = "gpt-5.6-terra";
+const GROQ_BASE_URL = "https://api.groq.com/openai/v1";
+const DEFAULT_MODEL = "qwen/qwen3.8-27b";
 const PROVIDER_TIMEOUT_MS = 20_000;
 /** Bounded output — keeps replies concise (per the "fast, practical, no
  * essays" response-style requirement) and caps cost/latency per turn.
@@ -31,27 +38,28 @@ export class OviAiProviderError extends Error {
   }
 }
 
-/** Lazily constructs the OpenAI client from the server-only env var — never
- * read anywhere else, never sent to the client. Throws a typed error
- * (caught by the orchestrator/server action, turned into the generic Arabic
- * "صار خلل مؤقت" message) if the key is missing, rather than crashing with
- * the SDK's own error text (which could leak configuration details). */
+/** Lazily constructs the OpenAI SDK client pointed at Groq's OpenAI-
+ * compatible endpoint, from the server-only env var — never read anywhere
+ * else, never sent to the client. Throws a typed error (caught by the
+ * orchestrator/server action, turned into the generic Arabic "صار خلل مؤقت"
+ * message) if the key is missing, rather than crashing with the SDK's own
+ * error text (which could leak configuration details). */
 function getClient(): OpenAI {
   if (cachedClient) return cachedClient;
-  const apiKey = process.env.OPENAI_API_KEY;
+  const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) {
-    throw new OviAiProviderError("OPENAI_API_KEY is not configured");
+    throw new OviAiProviderError("GROQ_API_KEY is not configured");
   }
-  cachedClient = new OpenAI({ apiKey });
+  cachedClient = new OpenAI({ apiKey, baseURL: GROQ_BASE_URL });
   return cachedClient;
 }
 
-/** Default model: gpt-5.6-terra — chosen for strong Arabic/English mixed
- * understanding and entity/tool-call reasoning while staying cost-conscious
- * (see the feature report for the full rationale). Override via
- * OPENAI_MODEL; never hardcoded elsewhere. */
+/** Default model: qwen/qwen3.8-27b (served by Groq) — chosen for strong
+ * Arabic/English mixed understanding and entity/tool-call reasoning while
+ * staying fast/cost-conscious. Override via GROQ_MODEL (OPENAI_MODEL is no
+ * longer read at all); never hardcoded elsewhere. */
 function getModel(): string {
-  return process.env.OPENAI_MODEL?.trim() || DEFAULT_MODEL;
+  return process.env.GROQ_MODEL?.trim() || DEFAULT_MODEL;
 }
 
 /** Opaque Responses-API input/output item — the orchestrator only ever
@@ -106,10 +114,11 @@ export interface ProviderRequestOptions {
 
 /** One Responses API call with function/tool calling — bounded by a hard
  * timeout (PROVIDER_TIMEOUT_MS) so a slow/hung provider call can never stall
- * a request indefinitely. `reasoning.effort: "low"` — gpt-5.6-terra's
- * supported effort values are none/low/medium/high/xhigh/max ("minimal" is
- * NOT one of them and was a mistake in an earlier round — never use it).
- * "low" is the lowest value that still gives the model real room for
+ * a request indefinitely. `reasoning.effort: "low"` — kept unchanged across
+ * the Groq switch; qwen/qwen3.8-27b (as served by Groq) supports this
+ * effort value. "minimal" is never used (a mistake in an earlier round,
+ * fixed since). "low" is the lowest value that still gives the model real
+ * room for
  * Arabic/company-language understanding and correct tool selection, while
  * staying fast for these short, concrete business-data lookups (inventory/
  * sales/debt) — "none" risks degrading tool-call accuracy for the messier
