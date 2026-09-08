@@ -1,25 +1,23 @@
-/** Deterministic business-intent classifier — the input to the CATEGORY-
- * AWARE grounding safeguard in orchestrator-core.ts. Pure function, no DB,
- * no provider call (per the explicit "do NOT use a second paid model call
- * merely to classify" instruction) — plain keyword + context matching,
+/** Deterministic business-intent/category classifier — originally the input
+ * to the (now removed) LLM grounding safeguard; since Ovi AI's local V1
+ * redesign it is the CATEGORY layer the local router (src/lib/ai/local/
+ * router.ts) builds its more specific LocalIntent decisions on top of. Pure
+ * function, no DB, no provider call — plain keyword + context matching,
  * deliberately conservative: when in doubt about WHETHER data is needed, it
  * says YES; it is never exhaustive about WHICH exact category a sentence
  * maps to (natural language is too varied for a keyword list to fully
- * capture) — see requiresOviData's own predecessor design note, carried
- * forward here. The grounding check this feeds (orchestrator-core.ts) is
- * itself strict either way: it only ever ALLOWS a final answer when actual
- * executed tools cover every category this module names, never the
- * reverse — so a classification gap here can make Ovi AI ask an
- * unnecessary follow-up tool, but can never let an ungrounded fact through. */
+ * capture). `matchesTerm`/`includesAny` are exported so the local router can
+ * reuse the exact same word-boundary-aware matching (never a second,
+ * subtly-different keyword matcher). */
 
 import { normalizeSearchText, DOMAIN_GLOSSARY } from "@/lib/ai/normalization";
 import type { OviAiContext } from "@/lib/ai/types";
 
 /** The closed set of real business-fact categories a question can require —
- * matches src/lib/ai/orchestrator-core.ts's TOOL_CAPABILITIES map 1:1. Not
- * a general-purpose taxonomy; every value here exists because at least one
- * real Ovi AI tool's ACTUAL return shape provides it (see TOOL_CAPABILITIES'
- * own doc comment for the schema-by-schema audit). */
+ * the coarse layer src/lib/ai/local/router.ts's own, more specific
+ * LocalIntent decisions are built on top of. Not a general-purpose
+ * taxonomy; every value here exists because at least one real Ovi AI tool
+ * (src/lib/ai/tools/**.ts) actually returns that kind of fact. */
 export type OviDataCategory = "CATALOG" | "INVENTORY" | "PRICE" | "SALES" | "PAYMENTS" | "MERCHANT_ACCOUNT" | "MERCHANT_ACTIVITY" | "REP";
 
 export interface IntentClassification {
@@ -43,7 +41,7 @@ const norm = (term: string) => normalizeSearchText(term);
  * adjacency that makes it meaningful. This fixed a real bug found by
  * REQUIRED TEST F in this round: "بعنا" (SALES) was being misclassified as
  * also requiring INVENTORY purely because it happens to end in "عنا". */
-function matchesTerm(messageTokens: string[], normalizedMessage: string, term: string): boolean {
+export function matchesTerm(messageTokens: string[], normalizedMessage: string, term: string): boolean {
   const normalizedTerm = norm(term);
   if (normalizedTerm.includes(" ")) {
     return normalizedMessage.includes(normalizedTerm);
@@ -51,7 +49,7 @@ function matchesTerm(messageTokens: string[], normalizedMessage: string, term: s
   return messageTokens.includes(normalizedTerm);
 }
 
-const includesAny = (messageTokens: string[], normalizedMessage: string, terms: string[]) => terms.some((term) => matchesTerm(messageTokens, normalizedMessage, term));
+export const includesAny = (messageTokens: string[], normalizedMessage: string, terms: string[]) => terms.some((term) => matchesTerm(messageTokens, normalizedMessage, term));
 /** DOMAIN_GLOSSARY's index signature makes a lookup `string[] | undefined`
  * under this project's `noUncheckedIndexedAccess` — every key referenced
  * below is always actually present, but this keeps the access honest for
@@ -129,8 +127,11 @@ function detectCategoriesFromKeywords(normalized: string): Set<OviDataCategory> 
 }
 
 /** Short, purely conversational messages that never need business data
- * regardless of active context — never force a tool call for small talk. */
-const CONVERSATIONAL_CLOSERS: string[] = ["شكرا", "شكراً", "تمام", "حلو", "أوك", "اوك", "ok", "okay", "thanks", "thank you", "hi", "hello", "مرحبا", "اهلا", "أهلا", "السلام عليكم", "يعطيك العافية"].map(norm);
+ * regardless of active context — never force a tool call for small talk.
+ * Exported so the local router (src/lib/ai/local/router.ts) can special-case
+ * a friendly reply distinct from its "message too vague, here's how to ask"
+ * GENERAL_HELP reply. */
+export const CONVERSATIONAL_CLOSERS: string[] = ["شكرا", "شكراً", "تمام", "حلو", "أوك", "اوك", "ok", "okay", "thanks", "thank you", "hi", "hello", "مرحبا", "اهلا", "أهلا", "السلام عليكم", "يعطيك العافية"].map(norm);
 
 /** Maps a prior turn's `lastIntent` label to the category set a contextless
  * follow-up ("مين معه منهم؟", "وأحمد؟") most likely still needs — used ONLY
