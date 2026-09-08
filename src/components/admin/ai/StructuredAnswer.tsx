@@ -44,14 +44,20 @@ export function StructuredAnswer({ response }: StructuredAnswerProps) {
           {response.sections.map((section, index) => (
             <div key={section.title ?? index}>
               {section.title && <div className="mb-1 text-xs font-medium text-neutral-bg/70">{section.title}</div>}
-              <ul className="flex flex-col gap-1">
+              {/* A two-column GRID (not flex+justify-between) — label/value
+                  separation stays explicit and deterministic regardless of
+                  text length or RTL bidi quirks (production showed rows
+                  like "شفاف340" reading as visually concatenated). The
+                  literal "— " before the value is a second, text-level
+                  guarantee of separation on top of the layout itself. */}
+              <ul className="flex flex-col gap-1.5">
                 {section.rows.map((row, rowIndex) => (
-                  <li key={rowIndex} className="flex items-center justify-between gap-2 text-xs">
+                  <li key={rowIndex} className="grid grid-cols-[1fr_auto] items-baseline gap-x-3 text-xs">
                     <span className="text-neutral-bg/80">
                       {row.label}
                       {row.subLabel ? ` — ${row.subLabel}` : ""}
                     </span>
-                    <span className="font-medium text-neutral-bg">{row.value}</span>
+                    <span className="whitespace-nowrap font-medium text-neutral-bg">— {row.value}</span>
                   </li>
                 ))}
               </ul>
@@ -62,21 +68,24 @@ export function StructuredAnswer({ response }: StructuredAnswerProps) {
 
       {response.table && response.table.rows.length > 0 && (
         <div className="mt-3 overflow-x-auto">
+          {/* divide-x/divide-y draw explicit column/row borders — production
+              showed table headers reading as "الصنفالكمية" with no visible
+              boundary between cells; padding alone wasn't enough. */}
           <table className="w-full min-w-[280px] border-collapse text-xs">
             <thead>
-              <tr className="border-b border-navy-soft text-neutral-bg/60">
+              <tr className="divide-x divide-navy-soft border-b border-navy-soft text-neutral-bg/60">
                 {response.table.columns.map((column) => (
-                  <th key={column} className="px-2 py-1.5 text-start font-medium">
+                  <th key={column} className="px-3 py-2 text-start font-medium">
                     {column}
                   </th>
                 ))}
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-navy-soft/50">
               {response.table.rows.map((row, rowIndex) => (
-                <tr key={rowIndex} className="border-b border-navy-soft/50 last:border-0">
+                <tr key={rowIndex} className="divide-x divide-navy-soft/40">
                   {row.map((cell, cellIndex) => (
-                    <td key={cellIndex} className="px-2 py-1.5 text-neutral-bg">
+                    <td key={cellIndex} className="px-3 py-2 text-neutral-bg">
                       {cell}
                     </td>
                   ))}

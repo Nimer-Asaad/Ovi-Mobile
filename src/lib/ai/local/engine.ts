@@ -28,6 +28,10 @@ import {
   buildMerchantActivityResponse,
   buildRepSummaryResponse,
   buildProductPriceResponse,
+  buildGlobalCaseCountResponse,
+  buildGlobalCaseInventoryResponse,
+  buildRepPaymentsSummaryResponse,
+  buildMerchantAccountsOverviewResponse,
   buildReadOnlyResponse,
   buildConversationalResponse,
   buildGeneralHelpResponse,
@@ -35,10 +39,10 @@ import {
   buildNoMatchResponse,
   buildErrorResponse,
 } from "@/lib/ai/local/response-builder";
-import { getInventorySummary, getRepInventoryBreakdown, getLowStockItems, getStockLocationsForItem } from "@/lib/ai/tools/inventory";
+import { getInventorySummary, getRepInventoryBreakdown, getLowStockItems, getStockLocationsForItem, getGlobalCaseInventorySummary } from "@/lib/ai/tools/inventory";
 import { getSalesSummary, getProductSales, getTopSellingProducts } from "@/lib/ai/tools/sales";
-import { getMerchantAccountSummary, getMerchantRecentActivity } from "@/lib/ai/tools/merchants";
-import { getRepSummary } from "@/lib/ai/tools/reps";
+import { getMerchantAccountSummary, getMerchantRecentActivity, getMerchantAccountsOverview } from "@/lib/ai/tools/merchants";
+import { getRepSummary, getRepPaymentsSummary } from "@/lib/ai/tools/reps";
 import { getProductDetails } from "@/lib/ai/tools/catalog";
 import type { OviAiContext, OviAiTurnResult, StructuredResponse } from "@/lib/ai/types";
 import type { EntityResolutionResult, LearnedHintInput } from "@/lib/ai/local/types";
@@ -102,8 +106,9 @@ export async function runLocalOviTurn(input: LocalTurnInput): Promise<OviAiTurnR
     }
 
     if (plan.intent === "GENERAL_HELP") {
-      const suggestions = buildGeneralHelpSuggestions(plan.entityQuery).map((s) => ({ label: s.label, message: s.message }));
-      return { response: buildGeneralHelpResponse(), context, suggestions };
+      const { summary, suggestions } = buildGeneralHelpSuggestions(input.message, plan.entityQuery);
+      const response = summary ? { ...buildGeneralHelpResponse(), summary } : buildGeneralHelpResponse();
+      return { response, context, suggestions: suggestions.map((s) => ({ label: s.label, message: s.message })) };
     }
 
     let outcome: TurnOutcome;
@@ -124,17 +129,37 @@ export async function runLocalOviTurn(input: LocalTurnInput): Promise<OviAiTurnR
         outcome = { response: buildTopSellingResponse(result.period, result.rows), contextPatch: { lastIntent: CTX.SALES, period: result.period } };
         break;
       }
+      case "GLOBAL_CASE_COUNT": {
+        const summary = await getGlobalCaseInventorySummary();
+        outcome = { response: buildGlobalCaseCountResponse(summary), contextPatch: { lastIntent: CTX.INVENTORY } };
+        break;
+      }
+      case "GLOBAL_CASE_INVENTORY": {
+        const summary = await getGlobalCaseInventorySummary();
+        outcome = { response: buildGlobalCaseInventoryResponse(summary), contextPatch: { lastIntent: CTX.INVENTORY } };
+        break;
+      }
+      case "REP_PAYMENTS_SUMMARY": {
+        const result = await getRepPaymentsSummary(plan.period ?? { type: "TODAY" });
+        outcome = { response: buildRepPaymentsSummaryResponse(result), contextPatch: { lastIntent: CTX.REP, period: result.period } };
+        break;
+      }
+      case "MERCHANT_ACCOUNTS_OVERVIEW": {
+        const result = await getMerchantAccountsOverview();
+        outcome = { response: buildMerchantAccountsOverviewResponse(result), contextPatch: { lastIntent: CTX.MERCHANT } };
+        break;
+      }
       case "INVENTORY_SUMMARY":
       case "STOCK_LOCATIONS":
       case "REP_INVENTORY":
       case "PRODUCT_PRICE": {
         const resolution = await resolveEntity({ entityKind: plan.entityKind, entityQuery: plan.entityQuery, rawMessage: input.message, context, learnedHint: input.learnedHint });
-        outcome = await handleCatalogIntent(plan.intent, resolution, plan.materialFilter);
+        outcome = await handleCatalogIntent(plan.intent, resolution, plan.materialFilter, plan.productScope);
         break;
       }
       case "PRODUCT_SALES": {
         const resolution = await resolveEntity({ entityKind: plan.entityKind, entityQuery: plan.entityQuery, rawMessage: input.message, context, learnedHint: input.learnedHint });
-        outcome = await handleProductSales(resolution, plan.period);
+        outcome = await handleProductSales(resolution, plan.period, plan.productScope);
         break;
       }
       case "MERCHANT_BALANCE":
@@ -163,19 +188,31 @@ export async function runLocalOviTurn(input: LocalTurnInput): Promise<OviAiTurnR
 /** Resolution outcomes shared by every entity-scoped intent: AMBIGUOUS/
  * NOT_FOUND never reach a tool call at all — only a clarification or
  * closest-candidates message, exactly mirroring the old orchestrator's
- * deterministic short-circuit (never left to guesswork). */
+ * deterministic short-circuit (never left to guesswork). NOT_FOUND always
+ * uses buildNoMatchResponse (never the generic "GENERAL_HELP" text) even
+ * with zero candidates — a correctly-routed question that found no real
+ * match ("ما لقيت نتيجة مطابقة") reads very differently from "I didn't
+ * understand the question type at all" ("حدد أكثر شو حاب تعرف"), and
+ * conflating the two (a real production failure this round audited) made a
+ * correctly-classified MERCHANT_ACTIVITY search with a genuinely obscure
+ * name look identical to a total routing failure. */
 function unresolvedOutcome(resolution: EntityResolutionResult): TurnOutcome | null {
   if (resolution.status === "AMBIGUOUS") {
     return { response: buildClarificationResponse(true), contextPatch: {}, candidates: resolution.candidates };
   }
   if (resolution.status === "NOT_FOUND") {
     const hasCandidates = Boolean(resolution.candidates && resolution.candidates.length > 0);
-    return { response: hasCandidates ? buildNoMatchResponse(true) : buildGeneralHelpResponse(), contextPatch: {}, candidates: resolution.candidates };
+    return { response: buildNoMatchResponse(hasCandidates), contextPatch: {}, candidates: resolution.candidates };
   }
   return null;
 }
 
-async function handleCatalogIntent(intent: "INVENTORY_SUMMARY" | "STOCK_LOCATIONS" | "REP_INVENTORY" | "PRODUCT_PRICE", resolution: EntityResolutionResult, materialFilter: string | null): Promise<TurnOutcome> {
+async function handleCatalogIntent(
+  intent: "INVENTORY_SUMMARY" | "STOCK_LOCATIONS" | "REP_INVENTORY" | "PRODUCT_PRICE",
+  resolution: EntityResolutionResult,
+  materialFilter: string | null,
+  productScope: import("@/lib/ai/local/product-scope").RequestedProductScope | null,
+): Promise<TurnOutcome> {
   const unresolved = unresolvedOutcome(resolution);
   if (unresolved) return unresolved;
   if (resolution.status !== "RESOLVED" || (resolution.type !== "PRODUCT" && resolution.type !== "PHONE_MODEL") || !resolution.id) {
@@ -196,23 +233,27 @@ async function handleCatalogIntent(intent: "INVENTORY_SUMMARY" | "STOCK_LOCATION
   }
 
   if (intent === "STOCK_LOCATIONS") {
-    const result = await getStockLocationsForItem(resolution.type, resolution.id);
+    const result = await getStockLocationsForItem(resolution.type, resolution.id, productScope);
     if (!result) return { response: buildNoMatchResponse(false), contextPatch: {} };
-    return { response: buildStockLocationsResponse(result), contextPatch: { ...entityContextPatch(resolution), lastIntent: CTX.INVENTORY } };
+    return { response: buildStockLocationsResponse(result), contextPatch: { ...entityContextPatch(resolution), lastIntent: CTX.INVENTORY, productScope } };
   }
 
   if (intent === "REP_INVENTORY") {
-    const result = await getRepInventoryBreakdown(resolution.type, resolution.id);
+    const result = await getRepInventoryBreakdown(resolution.type, resolution.id, productScope);
     if (!result) return { response: buildNoMatchResponse(false), contextPatch: {} };
-    return { response: buildRepInventoryResponse(result.label, result.warehouseQuantity, result.reps), contextPatch: { ...entityContextPatch(resolution), lastIntent: CTX.INVENTORY } };
+    return { response: buildRepInventoryResponse(result.label, result.warehouseQuantity, result.reps), contextPatch: { ...entityContextPatch(resolution), lastIntent: CTX.INVENTORY, productScope } };
   }
 
-  const summary = await getInventorySummary(resolution.type, resolution.id);
+  const summary = await getInventorySummary(resolution.type, resolution.id, productScope);
   if (!summary) return { response: buildNoMatchResponse(false), contextPatch: {} };
-  return { response: buildInventoryResponse(summary, materialFilter), contextPatch: { ...entityContextPatch(resolution), lastIntent: CTX.INVENTORY } };
+  return { response: buildInventoryResponse(summary, materialFilter, productScope), contextPatch: { ...entityContextPatch(resolution), lastIntent: CTX.INVENTORY, productScope } };
 }
 
-async function handleProductSales(resolution: EntityResolutionResult, period: import("@/lib/ai/tools/sales").SalesPeriodInput | null): Promise<TurnOutcome> {
+async function handleProductSales(
+  resolution: EntityResolutionResult,
+  period: import("@/lib/ai/tools/sales").SalesPeriodInput | null,
+  productScope: import("@/lib/ai/local/product-scope").RequestedProductScope | null,
+): Promise<TurnOutcome> {
   const unresolved = unresolvedOutcome(resolution);
   if (unresolved) return unresolved;
   if (resolution.status !== "RESOLVED" || !resolution.id || !resolution.type) return { response: buildGeneralHelpResponse(), contextPatch: {} };
@@ -225,9 +266,9 @@ async function handleProductSales(resolution: EntityResolutionResult, period: im
   }
   if (resolution.type !== "PRODUCT" && resolution.type !== "PHONE_MODEL") return { response: buildGeneralHelpResponse(), contextPatch: {} };
 
-  const result = await getProductSales(resolution.type, resolution.id, period ?? { type: "TODAY" });
+  const result = await getProductSales(resolution.type, resolution.id, period ?? { type: "TODAY" }, productScope);
   if (!result) return { response: buildNoMatchResponse(false), contextPatch: {} };
-  return { response: buildProductSalesResponse(result), contextPatch: { ...entityContextPatch(resolution), lastIntent: CTX.SALES, period: result.period } };
+  return { response: buildProductSalesResponse(result), contextPatch: { ...entityContextPatch(resolution), lastIntent: CTX.SALES, period: result.period, productScope } };
 }
 
 async function handleMerchantIntent(intent: "MERCHANT_BALANCE" | "MERCHANT_ACTIVITY", resolution: EntityResolutionResult): Promise<TurnOutcome> {

@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { STOCK_LOCATION_TYPES } from "@/lib/constants";
 import { isLowStock } from "@/lib/inventory";
 import { buildInventoryOverviewData, type InventoryOverviewLocation } from "@/lib/inventory-overview";
+import { classifyProductScope, type ProductScope } from "@/lib/ai/local/product-scope";
 import type { CatalogTargetType } from "@/lib/ai/tools/catalog";
 
 /** One breakdown row inside an InventoryTargetSummary — either a single
@@ -190,8 +191,17 @@ async function resolveProductSummary(productId: string): Promise<InventoryTarget
  * are queried FILTERED to this exact phoneModelId so a product compatible
  * with multiple models never leaks another model's stock into this
  * summary. Reuses buildInventoryOverviewData per matching product — never a
- * second, hand-rolled aggregation. */
-async function resolvePhoneModelSummary(phoneModelId: string): Promise<InventoryTargetSummary | null> {
+ * second, hand-rolled aggregation.
+ *
+ * `productScope`, when given, narrows the compatible-product SET to only
+ * CASE_COVER/SCREEN_PROTECTOR products (classifyProductScope, keyword-
+ * driven off each product's own real name/category — see product-scope.ts)
+ * BEFORE any aggregation runs — so totalQuantity/byLocation/groups all come
+ * out already correctly scoped, the same canonical buildInventoryOverviewData
+ * math just applied to a narrower real input set, never a second formula.
+ * Fixes the real production bug where "جفرات A26؟" (explicitly asking for
+ * cases only) included screen protectors in the 399-unit total. */
+async function resolvePhoneModelSummary(phoneModelId: string, productScope?: ProductScope | null): Promise<InventoryTargetSummary | null> {
   const [phoneModel, locations] = await Promise.all([
     prisma.phoneModel.findUnique({
       where: { id: phoneModelId },
@@ -226,7 +236,12 @@ async function resolvePhoneModelSummary(phoneModelId: string): Promise<Inventory
     },
     take: 40,
   });
-  if (products.length === 0) {
+
+  const scopedProducts = productScope
+    ? products.filter((product) => classifyProductScope({ name: product.name, nameAr: product.nameAr, categoryName: product.category?.name, categoryNameAr: product.category?.nameAr }) === productScope)
+    : products;
+
+  if (scopedProducts.length === 0) {
     const modelLabel = `${phoneModel.phoneBrand.nameAr ?? phoneModel.phoneBrand.name} ${phoneModel.nameAr ?? phoneModel.name}`;
     return {
       targetType: "PHONE_MODEL",
@@ -242,8 +257,8 @@ async function resolvePhoneModelSummary(phoneModelId: string): Promise<Inventory
     };
   }
 
-  const variantIds = products.flatMap((product) => product.variants.map((variant) => variant.id));
-  const comboIds = products.flatMap((product) => product.deviceColorVariants.map((combo) => combo.id));
+  const variantIds = scopedProducts.flatMap((product) => product.variants.map((variant) => variant.id));
+  const comboIds = scopedProducts.flatMap((product) => product.deviceColorVariants.map((combo) => combo.id));
 
   const items = await prisma.inventoryItem.findMany({
     where: {
@@ -254,7 +269,7 @@ async function resolvePhoneModelSummary(phoneModelId: string): Promise<Inventory
     select: { productId: true, locationId: true, variantId: true, deviceColorVariantId: true, quantity: true },
   });
 
-  const overviewProducts = buildInventoryOverviewData(products, items);
+  const overviewProducts = buildInventoryOverviewData(scopedProducts, items);
 
   let totalQuantity = 0;
   const aggregateByLocation: Record<string, number> = {};
@@ -307,8 +322,12 @@ async function resolvePhoneModelSummary(phoneModelId: string): Promise<Inventory
  * (material/color/model as applicable) — the canonical, single source of
  * truth every other Ovi AI inventory tool below reuses. Returns null when
  * the id doesn't resolve to a real row. */
-export async function getInventorySummary(targetType: CatalogTargetType, targetId: string): Promise<InventoryTargetSummary | null> {
-  return targetType === "PRODUCT" ? resolveProductSummary(targetId) : resolvePhoneModelSummary(targetId);
+export async function getInventorySummary(targetType: CatalogTargetType, targetId: string, productScope?: ProductScope | null): Promise<InventoryTargetSummary | null> {
+  // productScope only ever narrows a PHONE_MODEL's compatible-product set
+  // (see resolvePhoneModelSummary) — a PRODUCT target is already one
+  // specific, already-resolved item; a scope word alongside it (rare) has
+  // nothing further to narrow.
+  return targetType === "PRODUCT" ? resolveProductSummary(targetId) : resolvePhoneModelSummary(targetId, productScope);
 }
 
 export interface RepInventoryRow {
@@ -325,8 +344,9 @@ export interface RepInventoryRow {
 export async function getRepInventoryBreakdown(
   targetType: CatalogTargetType,
   targetId: string,
+  productScope?: ProductScope | null,
 ): Promise<{ label: string; warehouseQuantity: number; reps: RepInventoryRow[] } | null> {
-  const summary = await getInventorySummary(targetType, targetId);
+  const summary = await getInventorySummary(targetType, targetId, productScope);
   if (!summary) return null;
 
   const reps: RepInventoryRow[] = summary.byLocation
@@ -394,8 +414,68 @@ export interface StockLocationsResult {
 
 /** "وين موجود A26؟" — thin, explicitly location-shaped view over
  * getInventorySummary's own byLocation breakdown (never a second query). */
-export async function getStockLocationsForItem(targetType: CatalogTargetType, targetId: string): Promise<StockLocationsResult | null> {
-  const summary = await getInventorySummary(targetType, targetId);
+export async function getStockLocationsForItem(targetType: CatalogTargetType, targetId: string, productScope?: ProductScope | null): Promise<StockLocationsResult | null> {
+  const summary = await getInventorySummary(targetType, targetId, productScope);
   if (!summary) return null;
   return { label: summary.label, warehouseQuantity: summary.warehouseQuantity, locations: summary.byLocation };
+}
+
+export interface GlobalCaseSummary {
+  totalQuantity: number;
+  warehouseQuantity: number;
+  repCarQuantity: number;
+  distinctProductCount: number;
+  topProducts: { productId: string; label: string; quantity: number }[];
+}
+
+const GLOBAL_CASE_TOP_PRODUCTS_LIMIT = 10;
+
+/** "جميع الجفرات"/"كم عدد جميع الجفرات" — a company-wide CASE_COVER
+ * inventory view that needs NO PhoneModel/Product entity at all. Classifies
+ * every active product via classifyProductScope (name/category keywords,
+ * never a hardcoded id list — see product-scope.ts), then reads real
+ * InventoryItem rows for exactly that product set — never Product.stock,
+ * never a fabricated "range" field. Two bounded queries total (the active
+ * catalog, then one IN-list InventoryItem fetch) — no per-product N+1. */
+export async function getGlobalCaseInventorySummary(limit = GLOBAL_CASE_TOP_PRODUCTS_LIMIT): Promise<GlobalCaseSummary> {
+  const products = await prisma.product.findMany({
+    where: { isActive: true },
+    select: { id: true, name: true, nameAr: true, category: { select: { name: true, nameAr: true } } },
+  });
+
+  const caseCoverProductIds = products
+    .filter((product) => classifyProductScope({ name: product.name, nameAr: product.nameAr, categoryName: product.category?.name, categoryNameAr: product.category?.nameAr }) === "CASE_COVER")
+    .map((product) => product.id);
+
+  if (caseCoverProductIds.length === 0) {
+    return { totalQuantity: 0, warehouseQuantity: 0, repCarQuantity: 0, distinctProductCount: 0, topProducts: [] };
+  }
+
+  const items = await prisma.inventoryItem.findMany({
+    where: { productId: { in: caseCoverProductIds }, quantity: { gt: 0 }, location: { type: { in: [STOCK_LOCATION_TYPES.WAREHOUSE, STOCK_LOCATION_TYPES.REP_CAR] } } },
+    select: { productId: true, quantity: true, location: { select: { type: true } } },
+  });
+
+  let warehouseQuantity = 0;
+  let repCarQuantity = 0;
+  const byProduct = new Map<string, number>();
+  for (const item of items) {
+    if (item.location.type === STOCK_LOCATION_TYPES.WAREHOUSE) warehouseQuantity += item.quantity;
+    else repCarQuantity += item.quantity;
+    byProduct.set(item.productId, (byProduct.get(item.productId) ?? 0) + item.quantity);
+  }
+
+  const labelById = new Map(products.map((product) => [product.id, product.nameAr ?? product.name]));
+  const topProducts = [...byProduct.entries()]
+    .map(([productId, quantity]) => ({ productId, label: labelById.get(productId) ?? "صنف", quantity }))
+    .sort((a, b) => b.quantity - a.quantity)
+    .slice(0, limit);
+
+  return {
+    totalQuantity: warehouseQuantity + repCarQuantity,
+    warehouseQuantity,
+    repCarQuantity,
+    distinctProductCount: byProduct.size,
+    topProducts,
+  };
 }

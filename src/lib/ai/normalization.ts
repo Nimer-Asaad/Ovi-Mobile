@@ -59,16 +59,38 @@ export function compactAlphaNumeric(input: string): string {
  * searching (e.g. "جفرات A26" -> "A26"); (2) the whole glossary is embedded
  * in the system prompt so the model itself recognizes these terms without
  * the server needing to special-case every sentence shape. */
-const CASE_COVER_TERMS = ["جفرة", "جفرات", "كفر", "كفرات", "غطاء", "أغطية", "cover", "case"];
+/** Real Ovi production catalog data names case/cover products with the bare
+ * stem "جفر" (no تاء مربوطة), not only "جفرة"/"جفرات" — added after a real
+ * production test showed persisted product names like "جفر شفاف"/"جفر دفتر"/
+ * "كفر جلد" that the original term list (with the ة suffix only) missed. */
+const CASE_COVER_TERMS = ["جفر", "جفرة", "جفرات", "كفر", "كفرات", "غطاء", "أغطية", "cover", "case"];
+
+/** SCREEN_PROTECTOR is a distinct accessory category from CASE_COVER — never
+ * conflated with it, and never conflated with "شفاف" either (see
+ * classifyProductScope's own doc comment in local/product-scope.ts): "شفاف"
+ * is a material/color word (a CLEAR case can be "شفاف", but so could a
+ * screen protector's own finish) — category classification is decided by
+ * product/category NAME text, never by a material word alone. */
+const SCREEN_PROTECTOR_TERMS = ["لزقة", "لزقات", "لزقه", "حماية شاشة", "screen protector", "glass", "privacy"];
 
 export const DOMAIN_GLOSSARY: Record<string, string[]> = {
   CASE_COVER: CASE_COVER_TERMS,
+  SCREEN_PROTECTOR: SCREEN_PROTECTOR_TERMS,
   RANGE: ["رنج", "range"],
   LEATHER: ["جلد"],
   CLEAR: ["شفاف"],
   MAGSAFE: ["ماغ سيف", "ماغسيف", "magsafe", "mag safe"],
   ULTRA: ["الترا", "ultra"],
-  REP_CAR: ["سيارة", "سيارات", "المندوب", "المندوبين"],
+  // Bare stems (no attached "ال") — every OTHER glossary group already
+  // stores its terms bare; REP_CAR used to store "المندوب"/"المندوبين" WITH
+  // the definite article baked in, which silently broke local/router.ts's
+  // clitic-aware stopword/wording checks (they clitic-STRIP a message token
+  // before comparing it against this list, so a stored "المندوب" could
+  // never match a stripped "مندوب" — found auditing real production
+  // failures on "دفعات المندوبين"). Fixed to the same bare convention as
+  // every other group; router.ts's own clitic-stripping already handles the
+  // attached forms correctly from here.
+  REP_CAR: ["سيارة", "سيارات", "مندوب", "مندوبين"],
   WAREHOUSE: ["المستودع", "المخزن"],
   MERCHANT: ["تاجر", "تجار", "زبون", "عميل"],
   PAYMENT: ["دفعة", "دفعات", "سند قبض"],

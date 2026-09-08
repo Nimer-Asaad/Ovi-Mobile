@@ -4,7 +4,7 @@ import { isLowStock } from "@/lib/inventory";
 import { getBusinessDateIso } from "@/lib/reporting";
 import { buildSearchVariants } from "@/lib/ai/normalization";
 import { scoreCandidateLabel, classifyCandidates, type ConfidenceAction, type MatchType } from "@/lib/ai/fuzzy";
-import { resolvePeriod, type SalesPeriodInput } from "@/lib/ai/tools/sales";
+import { resolvePeriod, type SalesPeriodInput, type ResolvedPeriod } from "@/lib/ai/tools/sales";
 import { isTerminalOrderStatus } from "@/lib/order-lifecycle-rules";
 
 export interface RepCandidate {
@@ -132,6 +132,71 @@ export async function getRepSummary(repId: string, period: SalesPeriodInput = { 
     sales: { period: resolved.label, count: activeOrders.length, totalCents: activeOrders.reduce((sum, order) => sum + order.totalCents, 0) },
     paymentsCollected: { period: resolved.label, count: activePayments.length, totalCents: activePayments.reduce((sum, payment) => sum + payment.amountCents, 0) },
   };
+}
+
+export interface RepPaymentsSummaryRow {
+  repId: string;
+  repName: string;
+  amountCents: number;
+  paymentsCount: number;
+}
+
+export interface RepPaymentsSummaryResult {
+  period: ResolvedPeriod;
+  totalAmountCents: number;
+  totalPaymentsCount: number;
+  reps: RepPaymentsSummaryRow[];
+}
+
+/** "دفعات المندوبين مبارح؟" — company-wide payments collected BY reps for a
+ * period, grouped by rep. No existing report helper returns grouped-by-rep
+ * data (fetchPaymentActivityRows/computeActivityTotals, reporting.ts, only
+ * ever produce a flat company total), so this is the one small, dedicated,
+ * read-only capability the spec explicitly allows adding for that gap —
+ * still built on the exact same "representative ownership" semantics
+ * getRepSummary above already established (a payment belongs to the rep
+ * whose OWN linked User id is AccountPayment.createdById) and the same
+ * fixed, parameterized `AT TIME ZONE current_setting('TIMEZONE')` -> `AT
+ * TIME ZONE 'Asia/Hebron'` business-time technique reporting.ts documents,
+ * never a second competing time rule. Cancelled payments (LEFT JOIN
+ * account_payment_cancellations) are excluded, same as getRepSummary. Only
+ * reps with real activity this period appear in `reps` — by construction,
+ * never a padded zero row. */
+export async function getRepPaymentsSummary(period: SalesPeriodInput): Promise<RepPaymentsSummaryResult> {
+  const resolved = resolvePeriod(period);
+
+  const [reps, payments] = await Promise.all([
+    prisma.salesRepresentative.findMany({ where: { isActive: true }, select: { id: true, userId: true, user: { select: { name: true } } } }),
+    prisma.$queryRaw<{ createdById: string; amountCents: number; cancelled: boolean }[]>`
+      SELECT ap."createdById", ap."amountCents", (apc."id" IS NOT NULL) AS cancelled
+      FROM "account_payments" ap
+      LEFT JOIN "account_payment_cancellations" apc ON apc."paymentId" = ap."id"
+      WHERE ((ap."createdAt" AT TIME ZONE current_setting('TIMEZONE')) AT TIME ZONE 'Asia/Hebron')::date BETWEEN ${resolved.fromIso}::date AND ${resolved.toIso}::date
+    `,
+  ]);
+
+  const repByUserId = new Map(reps.map((rep) => [rep.userId, rep]));
+  const byRepId = new Map<string, { repName: string; amountCents: number; count: number }>();
+  let totalAmountCents = 0;
+  let totalPaymentsCount = 0;
+
+  for (const payment of payments) {
+    if (payment.cancelled) continue;
+    const rep = repByUserId.get(payment.createdById);
+    if (!rep) continue; // created by a non-rep (e.g. an admin) — out of scope for "دفعات المندوبين"
+    const entry = byRepId.get(rep.id) ?? { repName: rep.user.name, amountCents: 0, count: 0 };
+    entry.amountCents += payment.amountCents;
+    entry.count += 1;
+    byRepId.set(rep.id, entry);
+    totalAmountCents += payment.amountCents;
+    totalPaymentsCount += 1;
+  }
+
+  const rows: RepPaymentsSummaryRow[] = [...byRepId.entries()]
+    .map(([repId, entry]) => ({ repId, repName: entry.repName, amountCents: entry.amountCents, paymentsCount: entry.count }))
+    .sort((a, b) => b.amountCents - a.amountCents);
+
+  return { period: resolved, totalAmountCents, totalPaymentsCount, reps: rows };
 }
 
 // getBusinessDateIso re-exported purely so the orchestrator can label

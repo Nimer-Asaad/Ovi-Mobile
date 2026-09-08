@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { ORDER_STATUSES } from "@/lib/constants";
 import { isTerminalOrderStatus } from "@/lib/order-lifecycle-rules";
 import { getBusinessDateIso, fetchSaleActivityRows, fetchPaymentActivityRows, computeActivityTotals } from "@/lib/reporting";
+import { classifyProductScope, type ProductScope } from "@/lib/ai/local/product-scope";
 import type { CatalogTargetType } from "@/lib/ai/tools/catalog";
 
 /** Derived FROM the canonical isTerminalOrderStatus (order-lifecycle-rules.ts)
@@ -126,8 +127,16 @@ export interface ProductSalesResult {
  * getInventorySummary, never a second guess at which rows belong to this
  * target) and excludes CANCELLED/RETURNED orders (isTerminalOrderStatus's
  * own two statuses — the canonical terminal-order rule, never a private
- * reinterpretation). */
-export async function getProductSales(targetType: CatalogTargetType, targetId: string, period: SalesPeriodInput): Promise<ProductSalesResult | null> {
+ * reinterpretation).
+ *
+ * `productScope`, for a PHONE_MODEL target, narrows WHICH compatible
+ * products' variant/combo ids get included (see buildPhoneModelItemWhere)
+ * — a broad "كم بعنا iPhone 17 Pro Max؟" sums every compatible item's
+ * sales, while "كم بعنا جفرات iPhone 17 Pro Max؟" sums only the CASE_COVER
+ * ones — never a second, competing sales formula, just a scoped input id
+ * set fed into the exact same OrderItem aggregation below. Ignored for a
+ * PRODUCT target (already one specific, already-resolved item). */
+export async function getProductSales(targetType: CatalogTargetType, targetId: string, period: SalesPeriodInput, productScope?: ProductScope | null): Promise<ProductSalesResult | null> {
   const resolved = resolvePeriod(period);
   const orderIds = await getOrderIdsInPeriod(resolved.fromIso, resolved.toIso);
   if (orderIds.length === 0) {
@@ -139,7 +148,7 @@ export async function getProductSales(targetType: CatalogTargetType, targetId: s
   const itemWhere =
     targetType === "PRODUCT"
       ? { productId: targetId }
-      : await buildPhoneModelItemWhere(targetId);
+      : await buildPhoneModelItemWhere(targetId, productScope);
   if (!itemWhere) return null;
 
   const items = await prisma.orderItem.findMany({
@@ -173,16 +182,32 @@ async function resolveTargetLabel(targetType: CatalogTargetType, targetId: strin
   return model ? `${model.phoneBrand.nameAr ?? model.phoneBrand.name} ${model.nameAr ?? model.name}` : null;
 }
 
-async function buildPhoneModelItemWhere(phoneModelId: string): Promise<{ OR: object[] } | null> {
+/** Builds the OrderItem WHERE clause for every real variant/combo id
+ * compatible with a phone model — optionally narrowed to only the ids
+ * belonging to products matching `productScope` (classifyProductScope,
+ * name/category keyword-driven — see product-scope.ts), by pulling each
+ * variant/combo's own linked Product for classification before filtering.
+ * Never a hardcoded product id list, never a second sales formula — this
+ * only changes WHICH real ids feed the SAME OrderItem aggregation in
+ * getProductSales. */
+async function buildPhoneModelItemWhere(phoneModelId: string, productScope?: ProductScope | null): Promise<{ OR: object[] } | null> {
+  const productSelect = { select: { name: true, nameAr: true, category: { select: { name: true, nameAr: true } } } } as const;
   const [variants, combos] = await Promise.all([
-    prisma.productVariant.findMany({ where: { phoneModelId }, select: { id: true } }),
-    prisma.deviceColorVariant.findMany({ where: { phoneModelId }, select: { id: true } }),
+    prisma.productVariant.findMany({ where: { phoneModelId }, select: { id: true, product: productSelect } }),
+    prisma.deviceColorVariant.findMany({ where: { phoneModelId }, select: { id: true, product: productSelect } }),
   ]);
-  if (variants.length === 0 && combos.length === 0) return null;
+
+  const matchesScope = (product: { name: string; nameAr: string | null; category: { name: string; nameAr: string | null } | null }) =>
+    !productScope || classifyProductScope({ name: product.name, nameAr: product.nameAr, categoryName: product.category?.name, categoryNameAr: product.category?.nameAr }) === productScope;
+
+  const scopedVariants = variants.filter((variant) => matchesScope(variant.product));
+  const scopedCombos = combos.filter((combo) => matchesScope(combo.product));
+
+  if (scopedVariants.length === 0 && scopedCombos.length === 0) return null;
   return {
     OR: [
-      ...(variants.length > 0 ? [{ variantId: { in: variants.map((variant) => variant.id) } }] : []),
-      ...(combos.length > 0 ? [{ deviceColorVariantId: { in: combos.map((combo) => combo.id) } }] : []),
+      ...(scopedVariants.length > 0 ? [{ variantId: { in: scopedVariants.map((variant) => variant.id) } }] : []),
+      ...(scopedCombos.length > 0 ? [{ deviceColorVariantId: { in: scopedCombos.map((combo) => combo.id) } }] : []),
     ],
   };
 }

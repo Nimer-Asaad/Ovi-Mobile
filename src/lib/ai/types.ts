@@ -25,6 +25,14 @@ export interface OviAiContext {
    * follow-up; never used for server-side authorization. */
   lastIntent?: string | null;
   period?: { fromIso: string; toIso: string; label: string } | null;
+  /** "جفرات"/"لزقات" (case/cover vs. screen-protector) — a REQUEST FILTER,
+   * never a cached fact. Persists across a contextless follow-up ("طيب
+   * الجلد بس" after "شو عنا جفرات A26؟") exactly like the resolved entity
+   * id/label does, and resets to broad the moment a fresh entity is named
+   * with no scope word (see router.ts's own doc comment on this field).
+   * Every factual answer still re-queries live tools scoped by this filter
+   * — it never substitutes for a real number. */
+  productScope?: "CASE_COVER" | "SCREEN_PROTECTOR" | null;
 }
 
 export const EMPTY_OVI_AI_CONTEXT: OviAiContext = {};
@@ -68,7 +76,11 @@ export type StructuredResponseKind =
   | "MERCHANT_ACCOUNT"
   | "MERCHANT_ACTIVITY"
   | "REP_SUMMARY"
+  | "REP_PAYMENTS_SUMMARY"
   | "PRODUCT_PRICE"
+  | "MERCHANT_ACCOUNTS_OVERVIEW"
+  | "GLOBAL_CASE_INVENTORY"
+  | "GLOBAL_CASE_COUNT"
   | "CLARIFICATION"
   | "NO_MATCH"
   | "READ_ONLY"

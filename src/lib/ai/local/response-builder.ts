@@ -9,11 +9,14 @@ import "server-only";
 import { formatCurrencyFromCents } from "@/lib/utils";
 import { normalizeSearchText } from "@/lib/ai/normalization";
 import type { StructuredResponse, StructuredRow, StructuredSection } from "@/lib/ai/types";
-import type { InventoryGroupRow, InventoryLocationRow, InventoryTargetSummary, LowStockItem, RepInventoryRow, StockLocationsResult } from "@/lib/ai/tools/inventory";
+import type { GlobalCaseSummary, InventoryGroupRow, InventoryLocationRow, InventoryTargetSummary, LowStockItem, RepInventoryRow, StockLocationsResult } from "@/lib/ai/tools/inventory";
 import type { ProductSalesResult, ResolvedPeriod, SalesSummary, TopSellingProductRow } from "@/lib/ai/tools/sales";
-import type { MerchantAccountSummary, MerchantActivityRow } from "@/lib/ai/tools/merchants";
-import type { RepSummary } from "@/lib/ai/tools/reps";
+import type { MerchantAccountSummary, MerchantAccountsOverviewResult, MerchantActivityRow } from "@/lib/ai/tools/merchants";
+import type { RepPaymentsSummaryResult, RepSummary } from "@/lib/ai/tools/reps";
 import type { ProductDetails } from "@/lib/ai/tools/catalog";
+import type { RequestedProductScope } from "@/lib/ai/local/product-scope";
+
+const SCOPE_LABEL: Record<RequestedProductScope, string> = { CASE_COVER: "الجفرات/الكفرات", SCREEN_PROTECTOR: "لزقات الحماية" };
 
 const FRIENDLY_ERROR_MESSAGE = "صار خلل مؤقت بالمساعد، جرّب مرة ثانية.";
 const READ_ONLY_MESSAGE = "حالياً Ovi AI بقدر يفحص ويحلل البيانات فقط، تنفيذ العمليات مش مفعّل.";
@@ -51,7 +54,7 @@ function applyMaterialFilter(groups: InventoryGroupRow[], materialFilter: string
   return narrowed.length > 0 ? { groups: narrowed, filtered: true } : { groups, filtered: false };
 }
 
-export function buildInventoryResponse(summary: InventoryTargetSummary, materialFilter: string | null): StructuredResponse {
+export function buildInventoryResponse(summary: InventoryTargetSummary, materialFilter: string | null, productScope?: RequestedProductScope | null): StructuredResponse {
   const { groups, filtered } = applyMaterialFilter(summary.groups, materialFilter);
   const sections: StructuredSection[] = groups.map((group) => ({
     title: group.subLabel ? `${group.label} — ${group.subLabel}` : group.label,
@@ -59,8 +62,15 @@ export function buildInventoryResponse(summary: InventoryTargetSummary, material
   }));
   if (summary.byLocation.length > 0) sections.push(locationSection(summary.byLocation));
 
+  // The result passed in here is ALREADY scoped at the source (see
+  // getInventorySummary/resolvePhoneModelSummary in tools/inventory.ts) —
+  // this only decides the SUMMARY TEXT's own wording, never re-filters
+  // anything (unlike applyMaterialFilter above, a genuine client-side
+  // narrowing of an unscoped result).
   const total = filtered ? groups.reduce((sum, group) => sum + group.total, 0) : summary.totalQuantity;
-  const summaryLine = filtered ? `المتوفر (${materialFilter}): ${total}` : `المتوفر: ${total}`;
+  const scopeNote = productScope ? ` (${SCOPE_LABEL[productScope]})` : "";
+  const materialNote = filtered ? ` (${materialFilter})` : "";
+  const summaryLine = `المتوفر${scopeNote}${materialNote}: ${total}`;
 
   return {
     kind: "INVENTORY",
@@ -209,6 +219,62 @@ export function buildProductPriceResponse(details: ProductDetails): StructuredRe
       { label: "سعر الجملة", value: formatCurrencyFromCents(details.wholesalePriceCents) },
       { label: "سعر المفرق", value: formatCurrencyFromCents(details.retailPriceCents) },
     ],
+  };
+}
+
+export function buildGlobalCaseCountResponse(summary: GlobalCaseSummary): StructuredResponse {
+  return {
+    kind: "GLOBAL_CASE_COUNT",
+    title: "كل الجفرات/الكفرات",
+    summary: `إجمالي الجفرات بالشركة: ${summary.totalQuantity}`,
+    metrics: [
+      { label: "المستودع", value: String(summary.warehouseQuantity) },
+      { label: "سيارات المندوبين", value: String(summary.repCarQuantity) },
+      { label: "عدد الأصناف", value: String(summary.distinctProductCount) },
+    ],
+  };
+}
+
+export function buildGlobalCaseInventoryResponse(summary: GlobalCaseSummary): StructuredResponse {
+  return {
+    kind: "GLOBAL_CASE_INVENTORY",
+    title: "كل الجفرات/الكفرات",
+    summary: `إجمالي الجفرات بالشركة: ${summary.totalQuantity}`,
+    metrics: [
+      { label: "المستودع", value: String(summary.warehouseQuantity) },
+      { label: "سيارات المندوبين", value: String(summary.repCarQuantity) },
+      { label: "عدد الأصناف", value: String(summary.distinctProductCount) },
+    ],
+    table: summary.topProducts.length > 0 ? { columns: ["الصنف", "الكمية"], rows: summary.topProducts.map((product) => [product.label, product.quantity]) } : undefined,
+  };
+}
+
+export function buildRepPaymentsSummaryResponse(result: RepPaymentsSummaryResult): StructuredResponse {
+  if (result.reps.length === 0) {
+    return { kind: "REP_PAYMENTS_SUMMARY", title: `دفعات المندوبين — ${result.period.label}`, summary: `لا يوجد دفعات مسجّلة من المندوبين خلال ${result.period.label}` };
+  }
+  return {
+    kind: "REP_PAYMENTS_SUMMARY",
+    title: `دفعات المندوبين — ${result.period.label}`,
+    summary: `إجمالي المقبوض: ${formatCurrencyFromCents(result.totalAmountCents)} — ${result.totalPaymentsCount} دفعة`,
+    metrics: [
+      { label: "إجمالي المقبوض", value: formatCurrencyFromCents(result.totalAmountCents) },
+      { label: "عدد الدفعات", value: String(result.totalPaymentsCount) },
+    ],
+    table: { columns: ["المندوب", "المبلغ", "عدد الدفعات"], rows: result.reps.map((rep) => [rep.repName, formatCurrencyFromCents(rep.amountCents), rep.paymentsCount]) },
+  };
+}
+
+export function buildMerchantAccountsOverviewResponse(result: MerchantAccountsOverviewResult): StructuredResponse {
+  return {
+    kind: "MERCHANT_ACCOUNTS_OVERVIEW",
+    title: "حسابات التجار",
+    summary: `إجمالي الذمم: ${formatCurrencyFromCents(result.totalOutstandingCents)} — ${result.merchantsWithBalanceCount} تاجر عليهم رصيد`,
+    metrics: [
+      { label: "إجمالي الذمم", value: formatCurrencyFromCents(result.totalOutstandingCents) },
+      { label: "عدد التجار عليهم رصيد", value: String(result.merchantsWithBalanceCount) },
+    ],
+    table: result.topMerchants.length > 0 ? { columns: ["التاجر", "الذمة"], rows: result.topMerchants.map((merchant) => [merchant.label, formatCurrencyFromCents(merchant.balanceCents)]) } : undefined,
   };
 }
 

@@ -168,3 +168,63 @@ export async function getMerchantRecentActivity(merchantId: string, limit = ACTI
 
   return rows.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()).slice(0, boundedLimit);
 }
+
+export interface MerchantAccountsOverviewRow {
+  merchantId: string;
+  label: string;
+  balanceCents: number;
+}
+
+export interface MerchantAccountsOverviewResult {
+  totalOutstandingCents: number;
+  merchantsWithBalanceCount: number;
+  topMerchants: MerchantAccountsOverviewRow[];
+}
+
+const ACCOUNTS_OVERVIEW_TOP_LIMIT = 10;
+
+/** "حساب التجار"/"ذمم التجار"/"مين عليه أكثر؟" — a company-wide merchant-
+ * debt overview. Reuses getAccountBalanceCents (src/lib/accounts.ts, the
+ * ONE canonical balance formula) per merchant — never a duplicated/ad-hoc
+ * SUM. One batched query (every merchant + its account/orders/payments,
+ * same select shape getMerchantAccountSummary already uses for one
+ * merchant) rather than looping a per-merchant query — no N+1. The
+ * COMPANY-WIDE totals (totalOutstandingCents, merchantsWithBalanceCount)
+ * are always computed over the COMPLETE merchant set; only the displayed
+ * `topMerchants` ranking is bounded afterward, so the totals are never an
+ * artifact of a bounded search. */
+export async function getMerchantAccountsOverview(limit = ACCOUNTS_OVERVIEW_TOP_LIMIT): Promise<MerchantAccountsOverviewResult> {
+  const merchants = await prisma.merchant.findMany({
+    select: {
+      id: true,
+      businessName: true,
+      user: { select: { name: true } },
+      account: {
+        select: {
+          openingBalanceCents: true,
+          orders: { select: { status: true, totalCents: true } },
+          payments: { select: { amountCents: true, cancellation: { select: { id: true } } } },
+        },
+      },
+    },
+  });
+
+  let totalOutstandingCents = 0;
+  let merchantsWithBalanceCount = 0;
+  const rows: MerchantAccountsOverviewRow[] = [];
+
+  for (const merchant of merchants) {
+    if (!merchant.account) continue;
+    const balanceCents = getAccountBalanceCents(merchant.account);
+    if (balanceCents > 0) {
+      merchantsWithBalanceCount += 1;
+      totalOutstandingCents += balanceCents;
+    }
+    if (balanceCents !== 0) {
+      rows.push({ merchantId: merchant.id, label: merchant.user?.name ?? merchant.businessName, balanceCents });
+    }
+  }
+
+  const topMerchants = rows.sort((a, b) => b.balanceCents - a.balanceCents).slice(0, limit);
+  return { totalOutstandingCents, merchantsWithBalanceCount, topMerchants };
+}
