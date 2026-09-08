@@ -75,6 +75,7 @@ const AUDIT_ACTION_LABELS: Record<string, string> = {
   [ADMIN_AUDIT_ACTIONS.IMPERSONATED_REP_PAYMENT_CANCELLED]: "إلغاء دفعة أثناء الدخول كمندوب",
   [ADMIN_AUDIT_ACTIONS.IMPERSONATED_REP_PAYMENT_REPLACED]: "تسجيل دفعة تصحيحية أثناء الدخول كمندوب",
   [ADMIN_AUDIT_ACTIONS.IMPERSONATED_REP_STOCK_REQUEST_CREATED]: "إنشاء طلب تزويد أثناء الدخول كمندوب",
+  [ADMIN_AUDIT_ACTIONS.OVI_AI_QUERY]: "استخدام Ovi AI",
 };
 
 export function getAuditActionLabel(action: string): string {

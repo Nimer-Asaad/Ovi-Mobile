@@ -195,6 +195,12 @@ export const ADMIN_AUDIT_ACTIONS = {
   IMPERSONATED_REP_PAYMENT_CANCELLED: "IMPERSONATED_REP_PAYMENT_CANCELLED",
   IMPERSONATED_REP_PAYMENT_REPLACED: "IMPERSONATED_REP_PAYMENT_REPLACED",
   IMPERSONATED_REP_STOCK_REQUEST_CREATED: "IMPERSONATED_REP_STOCK_REQUEST_CREATED",
+  /// Lightweight Ovi AI usage event — see src/app/admin/ai/actions.ts. Logs
+  /// only the real user id, role, and a coarse intent category (e.g.
+  /// "INVENTORY", "SALES") per query turn — never the message text or the
+  /// assistant's reply. targetUserId is always the same user's own id (a
+  /// self-directed usage event, not an admin acting on another user).
+  OVI_AI_QUERY: "OVI_AI_QUERY",
 } as const;
 
 /** Derived from User.passwordHash: Google-authenticated accounts are always
@@ -258,6 +264,7 @@ export const MAX_CATALOG_PRICE_CENTS = 500_000_000;
 /** Admin dashboard sidebar navigation (skeleton — links are placeholders). */
 export const ADMIN_NAV_ITEMS = [
   { label: "Overview", labelAr: "نظرة عامة", href: "/admin" },
+  { label: "Ovi AI", labelAr: "Ovi AI", href: "/admin/ai" },
   { label: "Products", labelAr: "المنتجات", href: "/admin/products" },
   { label: "Categories", labelAr: "الأقسام", href: "/admin/categories" },
   { label: "Brands", labelAr: "العلامات التجارية", href: "/admin/brands" },
@@ -289,6 +296,7 @@ export const ADMIN_NAV_ITEMS = [
  * combined /admin/inventory/adjust screen, which is ADMIN-only (Correction,
  * an absolute-quantity operation, was never part of this role's scope). */
 export const ADMIN_ASSISTANT_NAV_ITEMS = [
+  { label: "Ovi AI", labelAr: "Ovi AI", href: "/admin/ai" },
   { label: "Orders", labelAr: "الطلبات", href: "/admin/orders" },
   { label: "Sales & Payments Reports", labelAr: "تقارير المبيعات والدفعات", href: "/admin/reports" },
   { label: "Inventory", labelAr: "المخزون", href: "/admin/inventory" },
