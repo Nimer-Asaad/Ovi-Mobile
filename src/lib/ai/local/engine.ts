@@ -31,6 +31,7 @@ import {
   buildGlobalCaseCountResponse,
   buildGlobalCaseInventoryResponse,
   buildRepPaymentsSummaryResponse,
+  buildRepSalesSummaryResponse,
   buildMerchantAccountsOverviewResponse,
   buildReadOnlyResponse,
   buildConversationalResponse,
@@ -42,7 +43,7 @@ import {
 import { getInventorySummary, getRepInventoryBreakdown, getLowStockItems, getStockLocationsForItem, getGlobalCaseInventorySummary } from "@/lib/ai/tools/inventory";
 import { getSalesSummary, getProductSales, getTopSellingProducts } from "@/lib/ai/tools/sales";
 import { getMerchantAccountSummary, getMerchantRecentActivity, getMerchantAccountsOverview } from "@/lib/ai/tools/merchants";
-import { getRepSummary, getRepPaymentsSummary } from "@/lib/ai/tools/reps";
+import { getRepSummary, getRepPaymentsSummary, getRepSalesSummary } from "@/lib/ai/tools/reps";
 import { getProductDetails } from "@/lib/ai/tools/catalog";
 import type { OviAiContext, OviAiTurnResult, StructuredResponse } from "@/lib/ai/types";
 import type { EntityResolutionResult, LearnedHintInput } from "@/lib/ai/local/types";
@@ -144,6 +145,11 @@ export async function runLocalOviTurn(input: LocalTurnInput): Promise<OviAiTurnR
         outcome = { response: buildRepPaymentsSummaryResponse(result), contextPatch: { lastIntent: CTX.REP, period: result.period } };
         break;
       }
+      case "REP_SALES_SUMMARY": {
+        const result = await getRepSalesSummary(plan.period ?? { type: "TODAY" });
+        outcome = { response: buildRepSalesSummaryResponse(result), contextPatch: { lastIntent: CTX.REP, period: result.period } };
+        break;
+      }
       case "MERCHANT_ACCOUNTS_OVERVIEW": {
         const result = await getMerchantAccountsOverview();
         outcome = { response: buildMerchantAccountsOverviewResponse(result), contextPatch: { lastIntent: CTX.MERCHANT } };
@@ -171,6 +177,15 @@ export async function runLocalOviTurn(input: LocalTurnInput): Promise<OviAiTurnR
       case "REP_SUMMARY": {
         const resolution = await resolveEntity({ entityKind: "REP", entityQuery: plan.entityQuery, rawMessage: input.message, context, learnedHint: input.learnedHint });
         outcome = await handleRepSummary(resolution, plan.period);
+        break;
+      }
+      case "REP_COLLECTION_ACTIVITY": {
+        // "احمد كم قبض اليوم؟" — REP_THEN_MERCHANT tries a rep candidate
+        // first (the far more common real meaning of "قبض"/"تحصيل" tied to
+        // a name), falling back to a merchant only when no real rep exists
+        // at all — see local/types.ts's own doc comment on the hint.
+        const resolution = await resolveEntity({ entityKind: "REP_THEN_MERCHANT", entityQuery: plan.entityQuery, rawMessage: input.message, context, learnedHint: input.learnedHint });
+        outcome = await handleRepCollectionActivity(resolution, plan.period);
         break;
       }
       default:
@@ -284,6 +299,23 @@ async function handleMerchantIntent(intent: "MERCHANT_BALANCE" | "MERCHANT_ACTIV
 
   const rows = await getMerchantRecentActivity(resolution.id);
   return { response: buildMerchantActivityResponse(resolution.label ?? "", rows), contextPatch: { ...entityContextPatch(resolution), lastIntent: CTX.MERCHANT } };
+}
+
+/** "احمد كم قبض اليوم؟" resolved via REP_THEN_MERCHANT: if a real REP
+ * candidate resolved, answer with that rep's own snapshot (RepSummary
+ * already includes paymentsCollected — never a second, duplicated payment
+ * calculation). If REP resolution instead landed on a MERCHANT (no real
+ * rep of that name existed), fall back to that merchant's own activity —
+ * a defensible, non-fabricating answer for a genuinely confused direction
+ * of question, never a guess at a nonexistent rep. */
+async function handleRepCollectionActivity(resolution: EntityResolutionResult, period: import("@/lib/ai/tools/sales").SalesPeriodInput | null): Promise<TurnOutcome> {
+  const unresolved = unresolvedOutcome(resolution);
+  if (unresolved) return unresolved;
+  if (resolution.status !== "RESOLVED" || !resolution.id) return { response: buildGeneralHelpResponse(), contextPatch: {} };
+
+  if (resolution.type === "MERCHANT") return handleMerchantIntent("MERCHANT_ACTIVITY", resolution);
+  if (resolution.type !== "REP") return { response: buildGeneralHelpResponse(), contextPatch: {} };
+  return handleRepSummary(resolution, period);
 }
 
 async function handleRepSummary(resolution: EntityResolutionResult, period: import("@/lib/ai/tools/sales").SalesPeriodInput | null): Promise<TurnOutcome> {

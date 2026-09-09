@@ -1,7 +1,7 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
 import { getAccountBalanceCents } from "@/lib/accounts";
-import { buildSearchVariants } from "@/lib/ai/normalization";
+import { buildEntityRetrievalVariants } from "@/lib/ai/language/search-variants";
 import { scoreCandidateLabel, classifyCandidates, type ConfidenceAction, type MatchType } from "@/lib/ai/fuzzy";
 
 export interface MerchantCandidate {
@@ -28,14 +28,20 @@ const POOL_FETCH_LIMIT = 40;
  * own name/phone for a login-based merchant) — the same field set
  * /admin/merchants' own search already uses, fetched as a bounded pool then
  * fuzzy-ranked (src/lib/ai/fuzzy.ts) so a typo in a trader's name still
- * resolves. Never fabricates a merchant. A phone/contactName-only DB match
+ * resolves. The DB filter itself is built from buildEntityRetrievalVariants
+ * (language/search-variants.ts), not the raw query alone — it also tries
+ * bounded alif/hamza spelling alternates ("احمد" also searches for
+ * "أحمد"/"إحمد"/"آحمد") so a real row persisted with a different hamza
+ * spelling than the query still enters the pool at all; see that file's
+ * doc comment for why fuzzy scoring alone can't fix this. Never fabricates
+ * a merchant. A phone/contactName-only DB match
  * (the searched field differs from the display label) still gets a
  * DB_MATCH floor score even if the fuzzy label score is 0, so a phone-number
  * query still surfaces its match — but that floor is deliberately below the
  * ASK threshold banding relies on for a name-based fuzzy score. */
 export async function searchMerchants(query: string, limit = MERCHANT_LIMIT_DEFAULT): Promise<MerchantSearchResult> {
   const boundedLimit = Math.max(1, Math.min(limit, MERCHANT_LIMIT_MAX));
-  const variants = buildSearchVariants(query);
+  const variants = buildEntityRetrievalVariants(query);
   if (variants.length === 0) return { candidates: [], recommendedAction: "NO_MATCH" };
 
   const orFilters = variants.flatMap((variant) => [

@@ -12,7 +12,7 @@ import type { StructuredResponse, StructuredRow, StructuredSection } from "@/lib
 import type { GlobalCaseSummary, InventoryGroupRow, InventoryLocationRow, InventoryTargetSummary, LowStockItem, RepInventoryRow, StockLocationsResult } from "@/lib/ai/tools/inventory";
 import type { ProductSalesResult, ResolvedPeriod, SalesSummary, TopSellingProductRow } from "@/lib/ai/tools/sales";
 import type { MerchantAccountSummary, MerchantAccountsOverviewResult, MerchantActivityRow } from "@/lib/ai/tools/merchants";
-import type { RepPaymentsSummaryResult, RepSummary } from "@/lib/ai/tools/reps";
+import type { RepPaymentsSummaryResult, RepSalesSummaryResult, RepSummary } from "@/lib/ai/tools/reps";
 import type { ProductDetails } from "@/lib/ai/tools/catalog";
 import type { RequestedProductScope } from "@/lib/ai/local/product-scope";
 
@@ -262,6 +262,29 @@ export function buildRepPaymentsSummaryResponse(result: RepPaymentsSummaryResult
       { label: "عدد الدفعات", value: String(result.totalPaymentsCount) },
     ],
     table: { columns: ["المندوب", "المبلغ", "عدد الدفعات"], rows: result.reps.map((rep) => [rep.repName, formatCurrencyFromCents(rep.amountCents), rep.paymentsCount]) },
+  };
+}
+
+/** "مين اكتر مندوب باع اليوم؟"/"مبيعات المندوبين هالشهر" — company-wide
+ * sales grouped/ranked by rep (see getRepSalesSummary, tools/reps.ts, for
+ * the exact bounded query plan and terminal-sale/business-time semantics).
+ * The numbered ranking table below reads directly off `result.reps`, which
+ * getRepSalesSummary already sorts by amountCents descending — never a
+ * second, separate sort here. */
+export function buildRepSalesSummaryResponse(result: RepSalesSummaryResult): StructuredResponse {
+  if (result.reps.length === 0) {
+    return { kind: "REP_SALES_SUMMARY", title: `مبيعات المندوبين — ${result.period.label}`, summary: `لا توجد مبيعات مسجّلة من المندوبين خلال ${result.period.label}` };
+  }
+  return {
+    kind: "REP_SALES_SUMMARY",
+    title: `مبيعات المندوبين — ${result.period.label}`,
+    summary: `إجمالي المبيعات: ${formatCurrencyFromCents(result.totalAmountCents)} — ${result.totalQuantitySold} قطعة — ${result.totalOrderCount} طلب`,
+    metrics: [
+      { label: "إجمالي المبيعات", value: formatCurrencyFromCents(result.totalAmountCents) },
+      { label: "إجمالي القطع", value: String(result.totalQuantitySold) },
+      { label: "عدد الطلبات", value: String(result.totalOrderCount) },
+    ],
+    table: { columns: ["المندوب", "المبلغ", "القطع", "الطلبات"], rows: result.reps.map((rep) => [rep.repName, formatCurrencyFromCents(rep.amountCents), rep.quantitySold, rep.orderCount]) },
   };
 }
 

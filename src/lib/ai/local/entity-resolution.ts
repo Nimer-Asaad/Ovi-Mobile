@@ -6,7 +6,7 @@
  * back to a real row the search tool's own DB query just read. */
 
 import "server-only";
-import { normalizeSearchText } from "@/lib/ai/normalization";
+import { toMatchable } from "@/lib/ai/language/dialect";
 import { classifyCandidates, CONFIDENCE_BANDS, type ConfidenceAction, type MatchType } from "@/lib/ai/fuzzy";
 import { searchCatalogCandidates } from "@/lib/ai/tools/catalog";
 import { searchMerchants } from "@/lib/ai/tools/merchants";
@@ -42,10 +42,18 @@ interface ScoredCandidate {
  * just returned from the database. A tampered/stale localStorage entry
  * whose id doesn't appear among the real results has zero effect — it can
  * never inject a fact the search didn't already surface (see Test 13: the
- * server "revalidates" simply by never trusting the hint's id in isolation). */
+ * server "revalidates" simply by never trusting the hint's id in isolation).
+ *
+ * The phrase comparison uses `toMatchable` (language/dialect.ts) rather
+ * than plain normalizeSearchText — a user who confirmed "a 26 altra" once
+ * gets the same learned boost from "A-26 ALTRA" or "أ 26 التراء" next time
+ * (hamza/alef-maksura + separator/case variance folded away), matching
+ * section 35's explicit "after normalization/dialect canonicalization"
+ * requirement. Still only ever an amplifier over a REAL candidate this
+ * search already found — never a shortcut around resolution itself. */
 function boostWithLearnedHint(candidates: ScoredCandidate[], hint: LearnedHintInput | null, rawMessage: string): ScoredCandidate[] {
   if (!hint) return candidates;
-  if (normalizeSearchText(hint.normalizedPhrase) !== normalizeSearchText(rawMessage)) return candidates;
+  if (toMatchable(hint.normalizedPhrase) !== toMatchable(rawMessage)) return candidates;
   let matched = false;
   const boosted = candidates.map((candidate) => {
     if (candidate.id === hint.entityId && candidate.type === hint.entityType) {
@@ -126,8 +134,11 @@ export async function resolveEntity(params: ResolveEntityParams): Promise<Entity
     if (entityKind === "MERCHANT" && context.resolvedMerchantId) {
       return { status: "RESOLVED", type: "MERCHANT", id: context.resolvedMerchantId, label: context.resolvedMerchantLabel ?? "" };
     }
-    if ((entityKind === "REP" || entityKind === "AMBIGUOUS_NAME") && context.resolvedRepId) {
+    if ((entityKind === "REP" || entityKind === "AMBIGUOUS_NAME" || entityKind === "REP_THEN_MERCHANT") && context.resolvedRepId) {
       return { status: "RESOLVED", type: "REP", id: context.resolvedRepId, label: context.resolvedRepLabel ?? "" };
+    }
+    if (entityKind === "REP_THEN_MERCHANT" && context.resolvedMerchantId) {
+      return { status: "RESOLVED", type: "MERCHANT", id: context.resolvedMerchantId, label: context.resolvedMerchantLabel ?? "" };
     }
     return { status: "NOT_FOUND" };
   }
@@ -135,6 +146,18 @@ export async function resolveEntity(params: ResolveEntityParams): Promise<Entity
   if (entityKind === "CATALOG") return resolveCatalog(entityQuery, learnedHint, rawMessage);
   if (entityKind === "MERCHANT") return resolveMerchant(entityQuery, learnedHint, rawMessage);
   if (entityKind === "REP") return resolveRep(entityQuery, learnedHint, rawMessage);
+
+  if (entityKind === "REP_THEN_MERCHANT") {
+    // "احمد كم قبض اليوم؟" — قبض/تحصيل tied to a name almost always means
+    // THAT rep's own collected payments in this business (a merchant never
+    // "قبض"s), so a real rep candidate always wins first; only fall back to
+    // a merchant search when no real rep of that name exists at all — see
+    // router.ts's own doc comment on why "قبض"/"تحصيل" and "دفع"/"سدد" are
+    // never treated as interchangeable directions.
+    const repAttempt = await resolveRep(entityQuery, learnedHint, rawMessage);
+    if (repAttempt.status === "RESOLVED" || repAttempt.status === "AMBIGUOUS") return repAttempt;
+    return resolveMerchant(entityQuery, learnedHint, rawMessage);
+  }
 
   const repAttempt = await resolveRep(entityQuery, learnedHint, rawMessage);
   if (repAttempt.status === "RESOLVED" || repAttempt.status === "AMBIGUOUS") return repAttempt;

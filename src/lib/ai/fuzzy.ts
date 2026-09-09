@@ -6,6 +6,8 @@
  * decides what to fetch, only how to rank what was already fetched. */
 
 import { normalizeSearchText, DOMAIN_GLOSSARY, stripFillerTerms } from "@/lib/ai/normalization";
+import { toMatchable } from "@/lib/ai/language/dialect";
+import { buildRetrievalVariants } from "@/lib/ai/language/search-variants";
 
 /** Every glossary group is a set of interchangeable terms for the SAME
  * concept (e.g. "الترا" / "ultra") — cross-script synonyms a Levenshtein
@@ -57,14 +59,22 @@ const FUZZY_TOKEN_THRESHOLD = 0.6;
 /** Best-match score in [0, 1] between one query token and one label token —
  * exact/synonym (1.0) > one-is-prefix-of-other (0.9) > substring (0.75) >
  * edit-distance fuzzy match above FUZZY_TOKEN_THRESHOLD, else 0 (no credit
- * for genuinely unrelated words). */
+ * for genuinely unrelated words). The edit-distance tier ALSO tries the
+ * dialect-folded form of both tokens (language/dialect.ts's `toMatchable` —
+ * hamza/alef-maksura unification + expressive-repeat collapsing, e.g.
+ * "أحمد" vs "احمد", "كمييييه" vs "كمية") and keeps whichever similarity is
+ * higher — a small, deliberately narrow additional signal (never replacing
+ * the raw-form comparison, only ever able to RAISE a score that edit
+ * distance alone judged too low), not a second typo-list to maintain. */
 function tokenScore(queryToken: string, labelToken: string): number {
   if (queryToken.length === 0 || labelToken.length === 0) return 0;
   if (queryToken === labelToken || synonymScore(queryToken, labelToken) === 1) return 1;
   if (labelToken.startsWith(queryToken) || queryToken.startsWith(labelToken)) return 0.9;
   if (labelToken.includes(queryToken) || queryToken.includes(labelToken)) return 0.75;
   const similarity = editSimilarity(queryToken, labelToken);
-  return similarity >= FUZZY_TOKEN_THRESHOLD ? similarity : 0;
+  const dialectSimilarity = editSimilarity(toMatchable(queryToken), toMatchable(labelToken));
+  const best = Math.max(similarity, dialectSimilarity);
+  return best >= FUZZY_TOKEN_THRESHOLD ? best : 0;
 }
 
 /** Extracts real "letter(s) + digits" model codes from a query — e.g. "A26",
@@ -194,12 +204,17 @@ export function scoreCandidateLabel(rawQuery: string, label: string): FuzzyScore
 /** Extracts DB-fetch anchor tokens from a raw query — the bounded-pool
  * strategy: model-code-like tokens (containing a digit — "26", or a merged
  * short-letter-prefix form like "a26" from "a 26") are the strongest, most
- * selective anchors and are preferred whenever present. A bare short letter
- * token immediately followed by a digit token is merged ("a" + "26" ->
- * "a26") so "A 26" and "A26" extract the same anchor. Falls back to
- * non-filler words (brand/category terms — "سامسونج" etc.) only when no
- * digit-bearing token exists at all, capped at 3 anchors either way, so a
- * single DB query is never used to fetch an unbounded pool. */
+ * selective anchors and are added FIRST whenever present, so they always
+ * survive the cap below regardless of what else gets added afterward. A
+ * bare short letter token immediately followed by a digit token is merged
+ * ("a" + "26" -> "a26") so "A 26" and "A26" extract the same anchor. Any
+ * other non-digit Arabic word alongside a digit anchor ("ابل ايفون 17 برو
+ * ماكس") also gets a bounded alif/hamza expansion appended (never
+ * replacing/outranking the digit anchors — see search-variants.ts). Falls
+ * back to non-filler words (brand/category terms — "سامسونج" etc.), same
+ * bounded expansion, only when no digit-bearing token exists at all.
+ * Capped at 8 anchors either way, so a single DB query is never used to
+ * fetch an unbounded pool. */
 export function extractAnchorTokens(rawQuery: string): string[] {
   const normalized = normalizeSearchText(rawQuery);
   const tokens = normalized.split(" ").filter(Boolean);
@@ -224,12 +239,48 @@ export function extractAnchorTokens(rawQuery: string): string[] {
     }
   });
 
-  if (anchors.size > 0) return [...anchors].slice(0, 5);
+  if (anchors.size > 0) {
+    // Digit anchors above remain the strongest, untouched signal (added
+    // FIRST, so they always survive the slice below regardless of how many
+    // brand-variant anchors get appended). ALSO widen the pool for any
+    // non-digit Arabic brand/category word sharing the query, bounded and
+    // capped — "ابل ايفون 17 برو ماكس" already finds the real PhoneModel
+    // row via "17" landing in its English `name` field, but a brand word
+    // persisted with a different hamza spelling than the query ("أبل" vs
+    // "ابل", "آيفون" vs "ايفون") should widen the pool too, not rely on
+    // that one lucky channel alone — same bounded alif/hamza expansion the
+    // no-digit fallback below already uses, never a replacement for the
+    // digit anchors' own priority.
+    for (const token of tokens) {
+      if (anchors.size >= 8) break;
+      if (/\d/.test(token) || token.length < 2) continue;
+      for (const variant of buildRetrievalVariants(token).slice(0, 3)) {
+        if (anchors.size >= 8) break;
+        anchors.add(variant);
+      }
+    }
+    return [...anchors].slice(0, 8);
+  }
 
-  const fallback = stripFillerTerms(normalized)
+  // No digit anchor at all — this is a pure brand/category-name lookup
+  // ("سامسونج", an Arabic category name, …), so the model-code strategy
+  // above never applies here regardless of what follows. Same orthography
+  // gap as merchant/rep search can bite an Arabic brand/category name too
+  // (a hamza variant of a real stored name), so each bare fallback token
+  // also gets a bounded alif/hamza expansion (search-variants.ts) — never
+  // applied to the digit-anchored branch above, which stays the untouched,
+  // strongest signal per its own doc comment.
+  const fallbackTokens = stripFillerTerms(normalized)
     .split(" ")
-    .filter((token) => token.length >= 2);
-  return fallback.slice(0, 3);
+    .filter((token) => token.length >= 2)
+    .slice(0, 3);
+  const fallback = new Set<string>(fallbackTokens);
+  for (const token of fallbackTokens) {
+    for (const variant of buildRetrievalVariants(token).slice(0, 3)) {
+      fallback.add(variant);
+    }
+  }
+  return [...fallback].slice(0, 8);
 }
 
 export type ConfidenceAction = "AUTO_RESOLVE" | "ASK_USER" | "NO_MATCH";

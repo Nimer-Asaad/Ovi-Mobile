@@ -16,7 +16,8 @@ import type { CatalogTargetType } from "@/lib/ai/tools/catalog";
 const TERMINAL_ORDER_STATUSES = Object.values(ORDER_STATUSES).filter(isTerminalOrderStatus);
 
 export type SalesPeriodInput =
-  | { type: "TODAY" | "YESTERDAY" | "THIS_WEEK" | "THIS_MONTH" }
+  | { type: "TODAY" | "YESTERDAY" | "DAY_BEFORE_YESTERDAY" | "THIS_WEEK" | "LAST_WEEK" | "THIS_MONTH" | "LAST_MONTH" }
+  | { type: "LAST_N_DAYS"; days: number }
   | { type: "CUSTOM"; fromIso: string; toIso: string };
 
 export interface ResolvedPeriod {
@@ -31,14 +32,32 @@ function isoAddDays(iso: string, days: number): string {
   return date.toISOString().slice(0, 10);
 }
 
+function previousMonthRange(todayIso: string): { fromIso: string; toIso: string } {
+  const [yearStr, monthStr] = todayIso.split("-");
+  const year = Number(yearStr);
+  const month = Number(monthStr); // 1-indexed
+  const previousMonth = month === 1 ? 12 : month - 1;
+  const previousYear = month === 1 ? year - 1 : year;
+  const fromIso = `${previousYear}-${String(previousMonth).padStart(2, "0")}-01`;
+  // Day 0 of the CURRENT month == the last real calendar day of the
+  // previous month — the standard, DST-safe way to get a month's length
+  // without a hardcoded days-per-month table.
+  const lastDay = new Date(Date.UTC(year, month - 1, 0)).getUTCDate();
+  const toIso = `${previousYear}-${String(previousMonth).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+  return { fromIso, toIso };
+}
+
 /** Resolves a natural period request into a concrete [fromIso, toIso]
  * Palestine-calendar-date range, anchored on getBusinessDateIso (the same
  * Asia/Hebron "today" src/lib/reporting.ts's own report range uses — never
  * a second, competing timezone calculation). "THIS_WEEK" is the trailing 7
  * Palestine calendar days including today (matches how a shop owner
  * actually thinks of "this week" day-to-day, not an ISO Monday-start week);
+ * "LAST_WEEK" is the 7 days immediately before that same trailing window.
  * "THIS_MONTH" is day 1 of the current Palestine calendar month through
- * today. */
+ * today; "LAST_MONTH" is the full previous calendar month. "LAST_N_DAYS" is
+ * inclusive of today (matches "آخر 3 أيام" meaning "today plus the 2
+ * before it", not "the 3 days strictly before today"). */
 export function resolvePeriod(period: SalesPeriodInput, now: Date = new Date()): ResolvedPeriod {
   const todayIso = getBusinessDateIso(now);
   switch (period.type) {
@@ -48,11 +67,25 @@ export function resolvePeriod(period: SalesPeriodInput, now: Date = new Date()):
       const yesterday = isoAddDays(todayIso, -1);
       return { fromIso: yesterday, toIso: yesterday, label: "أمس" };
     }
+    case "DAY_BEFORE_YESTERDAY": {
+      const dayBefore = isoAddDays(todayIso, -2);
+      return { fromIso: dayBefore, toIso: dayBefore, label: "أول أمس" };
+    }
     case "THIS_WEEK":
       return { fromIso: isoAddDays(todayIso, -6), toIso: todayIso, label: "هذا الأسبوع" };
+    case "LAST_WEEK":
+      return { fromIso: isoAddDays(todayIso, -13), toIso: isoAddDays(todayIso, -7), label: "الأسبوع الماضي" };
     case "THIS_MONTH": {
       const [year, month] = todayIso.split("-");
       return { fromIso: `${year}-${month}-01`, toIso: todayIso, label: "هذا الشهر" };
+    }
+    case "LAST_MONTH": {
+      const { fromIso, toIso } = previousMonthRange(todayIso);
+      return { fromIso, toIso, label: "الشهر الماضي" };
+    }
+    case "LAST_N_DAYS": {
+      const days = Math.max(1, Math.min(period.days, 90));
+      return { fromIso: isoAddDays(todayIso, -(days - 1)), toIso: todayIso, label: `آخر ${days} ${days === 1 ? "يوم" : "أيام"}` };
     }
     case "CUSTOM":
       return { fromIso: period.fromIso, toIso: period.toIso, label: "فترة مخصصة" };

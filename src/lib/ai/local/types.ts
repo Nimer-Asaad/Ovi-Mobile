@@ -23,6 +23,8 @@ export type LocalIntent =
   | "REP_INVENTORY"
   | "REP_SUMMARY"
   | "REP_PAYMENTS_SUMMARY"
+  | "REP_SALES_SUMMARY"
+  | "REP_COLLECTION_ACTIVITY"
   | "PRODUCT_PRICE"
   | "PRODUCT_SALES"
   | "SALES_SUMMARY"
@@ -41,7 +43,13 @@ export type LocalIntent =
  * a tool can run, and — for SALES/PAYMENTS-flavored questions where a bare
  * name could be either a product or a rep ("مبيعات أحمد اليوم؟") —
  * AMBIGUOUS_NAME tells entity-resolution.ts to try REP first, then CATALOG. */
-export type EntityKindHint = "CATALOG" | "MERCHANT" | "REP" | "AMBIGUOUS_NAME" | "NONE";
+/** REP_THEN_MERCHANT — for a collection/receipt-flavored question naming a
+ * person ("احمد كم قبض اليوم؟"): tries REP first (a rep's own collected-
+ * payments summary — the far more common real meaning of "قبض"/"تحصيل" tied
+ * to a name in this business), falling back to MERCHANT only when no real
+ * rep candidate exists at all. See router.ts's own doc comment on why
+ * "قبض"/"تحصيل" and "دفع"/"سدد" are never treated as interchangeable. */
+export type EntityKindHint = "CATALOG" | "MERCHANT" | "REP" | "AMBIGUOUS_NAME" | "REP_THEN_MERCHANT" | "NONE";
 
 /** The router's full, deterministic decision for one message — see
  * src/lib/ai/local/router.ts. Never includes anything not derivable from
@@ -69,6 +77,13 @@ export interface LocalQueryPlan {
    * broad (null). Applied to INVENTORY_SUMMARY/STOCK_LOCATIONS/
    * REP_INVENTORY/PRODUCT_SALES; irrelevant to intents with no entity. */
   productScope: RequestedProductScope | null;
+  /** How grounded this parse is — see language/features.ts's own doc
+   * comment. Diagnostic/advisory only: the actual safety guarantee against
+   * a wrong factual answer is entity-resolution's own AMBIGUOUS/NOT_FOUND
+   * handling (never fabricates regardless of confidence) — this field is
+   * for logging/smart-clarification decisions (router.ts's GENERAL_HELP
+   * suggestions), never a second, competing safety mechanism. */
+  confidence: "HIGH" | "MEDIUM" | "LOW";
 }
 
 export type ResolvedEntityType = "PRODUCT" | "PHONE_MODEL" | "MERCHANT" | "REP";

@@ -2,7 +2,7 @@ import "server-only";
 import { prisma } from "@/lib/prisma";
 import { isLowStock } from "@/lib/inventory";
 import { getBusinessDateIso } from "@/lib/reporting";
-import { buildSearchVariants } from "@/lib/ai/normalization";
+import { buildEntityRetrievalVariants } from "@/lib/ai/language/search-variants";
 import { scoreCandidateLabel, classifyCandidates, type ConfidenceAction, type MatchType } from "@/lib/ai/fuzzy";
 import { resolvePeriod, type SalesPeriodInput, type ResolvedPeriod } from "@/lib/ai/tools/sales";
 import { isTerminalOrderStatus } from "@/lib/order-lifecycle-rules";
@@ -29,9 +29,12 @@ const POOL_FETCH_LIMIT = 30;
  * (src/lib/ai/fuzzy.ts). Not one of the 13 originally enumerated tools, but
  * required by the "never invent an entity" rule: a rep referenced only by
  * first name has no other safe resolution path. See the feature report for
- * this addition. */
+ * this addition. The DB filter is built from buildEntityRetrievalVariants
+ * (language/search-variants.ts) rather than the raw query alone, so a rep
+ * persisted with a different hamza spelling than the query ("أحمد" vs
+ * "احمد") still enters the candidate pool — see that file's doc comment. */
 export async function searchReps(query: string, limit = REP_LIMIT_DEFAULT): Promise<RepSearchResult> {
-  const variants = buildSearchVariants(query);
+  const variants = buildEntityRetrievalVariants(query);
   if (variants.length === 0) return { candidates: [], recommendedAction: "NO_MATCH" };
 
   const reps = await prisma.salesRepresentative.findMany({
@@ -197,6 +200,90 @@ export async function getRepPaymentsSummary(period: SalesPeriodInput): Promise<R
     .sort((a, b) => b.amountCents - a.amountCents);
 
   return { period: resolved, totalAmountCents, totalPaymentsCount, reps: rows };
+}
+
+export interface RepSalesSummaryRow {
+  repId: string;
+  repName: string;
+  quantitySold: number;
+  amountCents: number;
+  orderCount: number;
+}
+
+export interface RepSalesSummaryResult {
+  period: ResolvedPeriod;
+  totalAmountCents: number;
+  totalQuantitySold: number;
+  totalOrderCount: number;
+  reps: RepSalesSummaryRow[];
+}
+
+/** "مين اكثر مندوب باع اليوم؟"/"مبيعات المندوبين هالشهر" — company-wide
+ * sales grouped by rep, ranked by amount. Exactly THREE bounded queries
+ * total, regardless of how many reps or orders exist — never one query per
+ * rep (see the feature report's own "no N+1" requirement):
+ *   1. every active rep (id/name) — the same small, bounded read
+ *      getRepPaymentsSummary already does.
+ *   2. every order created by ANY rep in the period (raw SQL, same fixed
+ *      `AT TIME ZONE current_setting('TIMEZONE')` -> `AT TIME ZONE
+ *      'Asia/Hebron'` Palestine business-time technique reporting.ts
+ *      documents — never a second, competing time rule), narrowed to
+ *      non-terminal orders via the canonical isTerminalOrderStatus.
+ *   3. one Prisma `groupBy` summing OrderItem.quantity per order id, scoped
+ *      to exactly the (bounded) surviving order id set from step 2 — never
+ *      a per-order or per-rep query.
+ * COMPLETE totals (totalAmountCents/totalQuantitySold/totalOrderCount) are
+ * always computed over every real matching order, before the per-rep list
+ * is ranked — the ranking never changes what the company-wide totals equal,
+ * matching the same invariant getMerchantAccountsOverview (tools/merchants.ts)
+ * already established for merchant balances. Only reps with real activity
+ * this period appear in `reps` — never a padded zero row, never fabricated. */
+export async function getRepSalesSummary(period: SalesPeriodInput): Promise<RepSalesSummaryResult> {
+  const resolved = resolvePeriod(period);
+
+  const [reps, orders] = await Promise.all([
+    prisma.salesRepresentative.findMany({ where: { isActive: true }, select: { id: true, user: { select: { name: true } } } }),
+    prisma.$queryRaw<{ id: string; createdByRepId: string; status: string; totalCents: number }[]>`
+      SELECT "id", "createdByRepId", "status", "totalCents" FROM "orders"
+      WHERE "createdByRepId" IS NOT NULL
+        AND (("createdAt" AT TIME ZONE current_setting('TIMEZONE')) AT TIME ZONE 'Asia/Hebron')::date BETWEEN ${resolved.fromIso}::date AND ${resolved.toIso}::date
+    `,
+  ]);
+
+  const activeOrders = orders.filter((order) => !isTerminalOrderStatus(order.status));
+  const activeOrderIds = activeOrders.map((order) => order.id);
+
+  const quantityByOrderId = new Map<string, number>();
+  if (activeOrderIds.length > 0) {
+    const itemSums = await prisma.orderItem.groupBy({ by: ["orderId"], where: { orderId: { in: activeOrderIds } }, _sum: { quantity: true } });
+    for (const row of itemSums) quantityByOrderId.set(row.orderId, row._sum.quantity ?? 0);
+  }
+
+  const repById = new Map(reps.map((rep) => [rep.id, rep]));
+  const byRepId = new Map<string, { repName: string; amountCents: number; quantitySold: number; orderCount: number }>();
+  let totalAmountCents = 0;
+  let totalQuantitySold = 0;
+  let totalOrderCount = 0;
+
+  for (const order of activeOrders) {
+    const rep = repById.get(order.createdByRepId);
+    if (!rep) continue; // an inactive/removed rep's historical order — out of scope for a company-wide CURRENT-reps ranking
+    const quantity = quantityByOrderId.get(order.id) ?? 0;
+    const entry = byRepId.get(rep.id) ?? { repName: rep.user.name, amountCents: 0, quantitySold: 0, orderCount: 0 };
+    entry.amountCents += order.totalCents;
+    entry.quantitySold += quantity;
+    entry.orderCount += 1;
+    byRepId.set(rep.id, entry);
+    totalAmountCents += order.totalCents;
+    totalQuantitySold += quantity;
+    totalOrderCount += 1;
+  }
+
+  const rows: RepSalesSummaryRow[] = [...byRepId.entries()]
+    .map(([repId, entry]) => ({ repId, repName: entry.repName, quantitySold: entry.quantitySold, amountCents: entry.amountCents, orderCount: entry.orderCount }))
+    .sort((a, b) => b.amountCents - a.amountCents);
+
+  return { period: resolved, totalAmountCents, totalQuantitySold, totalOrderCount, reps: rows };
 }
 
 // getBusinessDateIso re-exported purely so the orchestrator can label

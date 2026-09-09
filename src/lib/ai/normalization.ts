@@ -19,6 +19,19 @@ const ARABIC_INDIC_DIGITS: Record<string, string> = {
   "٧": "7",
   "٨": "8",
   "٩": "9",
+  // Persian/Extended Arabic-Indic digits (U+06F0-06F9) — distinct codepoints
+  // from the standard Arabic-Indic block above; folded the same lossless
+  // way (a digit is a digit, never ambiguous with a real product name).
+  "۰": "0",
+  "۱": "1",
+  "۲": "2",
+  "۳": "3",
+  "۴": "4",
+  "۵": "5",
+  "۶": "6",
+  "۷": "7",
+  "۸": "8",
+  "۹": "9",
 };
 
 /** Arabic diacritics (tashkeel) + tatweel — purely decorative marks that
@@ -34,10 +47,10 @@ const DIACRITICS_PATTERN = /[ً-ٰٟـ]/g;
  * argument) should pass through before being used in a `contains` filter. */
 export function normalizeSearchText(input: string): string {
   let text = input.toLowerCase();
-  text = text.replace(/[٠-٩]/g, (digit) => ARABIC_INDIC_DIGITS[digit] ?? digit);
+  text = text.replace(/[٠-٩۰-۹]/g, (digit) => ARABIC_INDIC_DIGITS[digit] ?? digit);
   text = text.replace(DIACRITICS_PATTERN, "");
   text = text.replace(/[-_/]+/g, " ");
-  text = text.replace(/[.,،؛;!؟?"'`]+/g, " ");
+  text = text.replace(/[.,،؛;:!؟?"'`]+/g, " ");
   text = text.replace(/\s+/g, " ").trim();
   return text;
 }
@@ -62,25 +75,38 @@ export function compactAlphaNumeric(input: string): string {
 /** Real Ovi production catalog data names case/cover products with the bare
  * stem "جفر" (no تاء مربوطة), not only "جفرة"/"جفرات" — added after a real
  * production test showed persisted product names like "جفر شفاف"/"جفر دفتر"/
- * "كفر جلد" that the original term list (with the ة suffix only) missed. */
-const CASE_COVER_TERMS = ["جفر", "جفرة", "جفرات", "كفر", "كفرات", "غطاء", "أغطية", "cover", "case"];
+ * "كفر جلد" that the original term list (with the ة suffix only) missed.
+ * "جراب"/"جرابات" added for the Palestinian-dialect upgrade (a common
+ * synonym for a phone case in northern West Bank speech). */
+const CASE_COVER_TERMS = ["جفر", "جفرة", "جفره", "جفرات", "كفر", "كفره", "كفرة", "كفرات", "جراب", "جرابات", "غطا", "غطاء", "أغطية", "اغطية", "cover", "covers", "case", "cases"];
 
 /** SCREEN_PROTECTOR is a distinct accessory category from CASE_COVER — never
  * conflated with it, and never conflated with "شفاف" either (see
  * classifyProductScope's own doc comment in local/product-scope.ts): "شفاف"
  * is a material/color word (a CLEAR case can be "شفاف", but so could a
  * screen protector's own finish) — category classification is decided by
- * product/category NAME text, never by a material word alone. */
-const SCREEN_PROTECTOR_TERMS = ["لزقة", "لزقات", "لزقه", "حماية شاشة", "screen protector", "glass", "privacy"];
+ * product/category NAME text, never by a material word alone. "قزاز"/"زجاج"
+ * (glass) and "برايفسي" (privacy) added for the Palestinian-dialect upgrade
+ * — common shorthand for a tempered-glass screen protector. */
+const SCREEN_PROTECTOR_TERMS = [
+  "لزقة", "لزقات", "لزقه", "قزاز", "قزازة", "قزازات", "زجاج", "حماية", "حماية شاشة", "حماية الشاشة",
+  "برايفسي", "خصوصية", "screen protector", "tempered glass", "screen", "glass", "privacy",
+];
 
 export const DOMAIN_GLOSSARY: Record<string, string[]> = {
   CASE_COVER: CASE_COVER_TERMS,
   SCREEN_PROTECTOR: SCREEN_PROTECTOR_TERMS,
   RANGE: ["رنج", "range"],
-  LEATHER: ["جلد"],
-  CLEAR: ["شفاف"],
-  MAGSAFE: ["ماغ سيف", "ماغسيف", "magsafe", "mag safe"],
+  LEATHER: ["جلد", "جلدي", "جلدية", "leather"],
+  CLEAR: ["شفاف", "شفافة", "شفافه", "clear", "transparent"],
+  MATTE: ["مط", "مات", "matte"],
+  MAGSAFE: ["ماج سيف", "ماجسيف", "ماغ سيف", "ماغسيف", "مك سيف", "magsafe", "mag safe"],
   ULTRA: ["الترا", "ultra"],
+  BOOK: ["دفتر", "دفترية", "بوك", "book"],
+  SILICONE: ["سيليكون", "سليكون", "silicone"],
+  HARD: ["عظم", "قاسي", "hard"],
+  PRIVACY: ["برايفسي", "خصوصية", "privacy"],
+  COLOR_MIXED: ["مشكل", "مشكل الوان", "مشكل ألوان", "الوان", "ألوان", "mixed"],
   // Bare stems (no attached "ال") — every OTHER glossary group already
   // stores its terms bare; REP_CAR used to store "المندوب"/"المندوبين" WITH
   // the definite article baked in, which silently broke local/router.ts's
@@ -89,13 +115,33 @@ export const DOMAIN_GLOSSARY: Record<string, string[]> = {
   // never match a stripped "مندوب" — found auditing real production
   // failures on "دفعات المندوبين"). Fixed to the same bare convention as
   // every other group; router.ts's own clitic-stripping already handles the
-  // attached forms correctly from here.
-  REP_CAR: ["سيارة", "سيارات", "مندوب", "مندوبين"],
+  // attached forms correctly from here. "عربة"/"محمل"/"تحميلة"/"حمولة" added
+  // for the Palestinian-dialect upgrade (common REP_CAR shorthand).
+  REP_CAR: ["سيارة", "سيارات", "مندوب", "مندوبين", "عربة", "محمل", "تحميلة", "حمولة"],
   WAREHOUSE: ["المستودع", "المخزن"],
-  MERCHANT: ["تاجر", "تجار", "زبون", "عميل"],
-  PAYMENT: ["دفعة", "دفعات", "سند قبض"],
-  DEBT: ["ذمة", "دين", "عليه", "له"],
-  SALE: ["باع", "بعنا", "بيع", "مبيعات"],
+  // "صاحب محل"/"صاحب المحل" (shop owner) and "زبون جملة" (wholesale
+  // customer) added for the Palestinian-dialect upgrade — common ways Ovi
+  // staff refer to a merchant besides the bare "تاجر"/"محل".
+  MERCHANT: ["تاجر", "تجار", "زبون", "عميل", "محل", "صاحب محل", "صاحب المحل", "زبون جملة"],
+  // "قبضنا"/"تحصيلات"/"وصل"/"وصلنا"/"حوالة" added for the Palestinian-
+  // dialect upgrade — further common payment/collection wording.
+  // "تحصيلا" — the MSA accusative "تحصيلاً" survives normalizeSearchText's
+  // diacritic-stripping (which removes the tanween MARK but not the ا it
+  // sits on) as "تحصيلا", one letter short of the already-listed
+  // "تحصيل"/"تحصيلات" — added as its own literal entry rather than a
+  // general MSA case-ending stripper (out of scope this round).
+  PAYMENT: ["دفعة", "دفعات", "سند قبض", "دفع", "دافع", "سدد", "تسديد", "تحصيل", "تحصيلا", "تحصيلات", "محصلة", "استلم", "استلمنا", "تحويل", "حوالة", "قبض", "قبضوا", "قبضنا", "حصلوا", "حصلوها", "مقبوض", "وصل", "وصلنا"],
+  // "ديون" (plural of دين)، "باقي عليه"/"ضل عليه" (colloquial "still owes"),
+  // and "مستحق" (MSA "owed/due") added for the Palestinian-dialect upgrade.
+  // "مديونية"/"المديونية" (MSA abstract noun "indebtedness") and
+  // "مستحقات"/"المستحقات" (plural of "مستحق", "amounts owed") added for the
+  // intelligence-completion round's MSA debt-language gap.
+  DEBT: ["ذمة", "ذمم", "دين", "ديون", "عليه", "عليها", "باقي عليه", "ضل عليه", "له", "حساب", "حسابه", "حسابها", "مديون", "مديونية", "مطالب", "رصيد", "أرصدة", "ارصدة", "مستحق", "مستحقة", "مستحقات"],
+  // "باعوا" (MSA 3rd-person-plural past "they sold" — "المندوبين الذين
+  // باعوا") added for the intelligence-completion round.
+  // "دخل"/"دخلنا" ("income" — "قديش دخلنا اليوم؟") added for the
+  // intelligence-completion round's global-sales-language gap.
+  SALE: ["باع", "باعت", "باعوا", "بعنا", "بيع", "مبيعات", "مبيعا", "انباع", "انبعن", "انباعت", "مباع", "مباعة", "بيعة", "بيعات", "طلع", "مشي", "ماشي", "صرف", "صرفنا", "بعت", "بعتنا", "دخل", "sold", "sales", "selling"],
   RETURN: ["رجع", "مرتجع", "إرجاع"],
 };
 
