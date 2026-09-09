@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { isStorefrontProductAvailable } from "@/lib/storefront-products";
 import { requireCartEligibleUser } from "@/lib/auth/guards";
 import { getCurrentUserCart, getCartTotalCents, getAvailableStock } from "@/lib/cart";
 import { isWholesalePriced, readCatalogPriceCents } from "@/lib/catalog-queries";
@@ -107,7 +108,9 @@ export default async function CartPage() {
                 </div>
               </div>
 
-              <CartQuantityForm cartItemId={item.id} quantity={item.quantity} maxQuantity={availableStock} />
+              {isStorefrontProductAvailable(item.product) ? (
+                <CartQuantityForm cartItemId={item.id} quantity={item.quantity} maxQuantity={availableStock} />
+              ) : <Badge variant="warning">المنتج لم يعد متوفراً — يرجى حذفه من السلة</Badge>}
 
               <p className="w-24 text-end font-semibold text-neutral-bg">
                 {formatCurrencyFromCents(unitPriceCents * item.quantity)}

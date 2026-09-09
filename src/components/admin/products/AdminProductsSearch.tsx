@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import { SubmitButton } from "@/components/ui/SubmitButton";
 import { Badge } from "@/components/ui/Badge";
 import { Input } from "@/components/ui/Input";
 import { AdminTable, AdminTableHead, AdminTableBody, AdminEmptyRow } from "@/components/admin/AdminTable";
@@ -21,6 +22,8 @@ export interface AdminProductRow {
   nameAr: string | null;
   isFeatured: boolean;
   isActive: boolean;
+  isStorefrontVisible: boolean;
+  storefrontAction: () => Promise<void>;
   categoryName: string | null;
   brandName: string | null;
   supplierName: string | null;
@@ -129,6 +132,16 @@ export function AdminProductsSearch({ products }: AdminProductsSearchProps) {
               <td className="px-4 py-3 text-neutral-bg/70">{product.stock}</td>
               <td className="px-4 py-3">
                 <AdminStatusBadge isActive={product.isActive} />
+                <div className="mt-2 flex flex-col items-start gap-2" dir="rtl">
+                  <Badge variant={product.isStorefrontVisible ? "gold" : "neutral"}>
+                    {product.isStorefrontVisible ? "ظاهر بالمتجر" : "مخفي عن المتجر"}
+                  </Badge>
+                  <form action={product.storefrontAction}>
+                    <SubmitButton variant="outline" size="sm">
+                      {product.isStorefrontVisible ? "إخفاء من المتجر" : "إظهار في المتجر"}
+                    </SubmitButton>
+                  </form>
+                </div>
               </td>
               <td className="px-4 py-3">
                 <div className="flex items-center justify-end gap-3">

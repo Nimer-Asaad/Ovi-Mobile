@@ -395,6 +395,8 @@ model Product {
   /// Smallest currency unit. Internal cost, admin-only.
   costCents           Int?
 
+  /// Customer/merchant storefront visibility; independent of activity and stock.
+  isStorefrontVisible     Boolean  @default(true)
   isActive                Boolean  @default(true)
   isFeatured              Boolean  @default(false)
   /// NONE | PHONE_COMPATIBILITY. Existing products remain NONE until an

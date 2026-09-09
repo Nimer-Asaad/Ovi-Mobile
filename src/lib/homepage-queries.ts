@@ -1,3 +1,4 @@
+import { STOREFRONT_PRODUCT_WHERE } from "@/lib/storefront-products";
 import { prisma } from "@/lib/prisma";
 import { buildProductsUrl } from "@/lib/product-filter-url";
 
@@ -33,7 +34,7 @@ export async function getHomepageCollections(): Promise<HomepageCollection[]> {
         slug: true,
         name: true,
         nameAr: true,
-        _count: { select: { products: { where: { isActive: true } } } },
+        _count: { select: { products: { where: STOREFRONT_PRODUCT_WHERE } } },
       },
     }),
     prisma.brand.findMany({
@@ -41,7 +42,7 @@ export async function getHomepageCollections(): Promise<HomepageCollection[]> {
       select: {
         slug: true,
         name: true,
-        _count: { select: { products: { where: { isActive: true } } } },
+        _count: { select: { products: { where: STOREFRONT_PRODUCT_WHERE } } },
       },
     }),
   ]);

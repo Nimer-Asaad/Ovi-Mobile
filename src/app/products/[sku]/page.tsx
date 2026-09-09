@@ -1,3 +1,4 @@
+import { STOREFRONT_PRODUCT_WHERE } from "@/lib/storefront-products";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { Header } from "@/components/layout/Header";
@@ -44,11 +45,11 @@ export default async function ProductDetailPage({ params }: ProductDetailPagePro
     product =
       priceMode === "wholesale"
         ? await prisma.product.findFirst({
-            where: { sku: sku.toUpperCase(), isActive: true },
+            where: { sku: sku.toUpperCase(), ...STOREFRONT_PRODUCT_WHERE },
             select: MERCHANT_PRODUCT_DETAIL_SELECT,
           })
         : await prisma.product.findFirst({
-            where: { sku: sku.toUpperCase(), isActive: true },
+            where: { sku: sku.toUpperCase(), ...STOREFRONT_PRODUCT_WHERE },
             select: PUBLIC_PRODUCT_DETAIL_SELECT,
           });
   } catch (err) {
@@ -116,13 +117,13 @@ export default async function ProductDetailPage({ params }: ProductDetailPagePro
   const relatedProductsQuery = product.categoryId
     ? priceMode === "wholesale"
       ? prisma.product.findMany({
-          where: { isActive: true, categoryId: product.categoryId, id: { not: product.id } },
+          where: { ...STOREFRONT_PRODUCT_WHERE, categoryId: product.categoryId, id: { not: product.id } },
           select: MERCHANT_PRODUCT_CARD_SELECT,
           orderBy: { createdAt: "desc" },
           take: 4,
         })
       : prisma.product.findMany({
-          where: { isActive: true, categoryId: product.categoryId, id: { not: product.id } },
+          where: { ...STOREFRONT_PRODUCT_WHERE, categoryId: product.categoryId, id: { not: product.id } },
           select: PUBLIC_PRODUCT_CARD_SELECT,
           orderBy: { createdAt: "desc" },
           take: 4,

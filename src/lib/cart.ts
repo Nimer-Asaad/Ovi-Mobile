@@ -25,6 +25,7 @@ export const STOCK_CHECK_PRODUCT_SELECT = {
   id: true,
   name: true,
   isActive: true,
+  isStorefrontVisible: true,
   /* Only Main Warehouse stock counts toward cart/checkout availability —
    * stock assigned to a sales rep isn't purchasable through the cart. */
   inventoryItems: { where: { location: { isDefault: true } }, select: { quantity: true, variantId: true, deviceColorVariantId: true } },
@@ -71,6 +72,7 @@ const CART_PRODUCT_RETAIL_SELECT = {
   name: true,
   nameAr: true,
   isActive: true,
+  isStorefrontVisible: true,
   variantMode: true,
   variantAllocationStatus: true,
   inventoryTrackingMode: true,
@@ -91,6 +93,7 @@ const CART_PRODUCT_WHOLESALE_SELECT = {
   name: true,
   nameAr: true,
   isActive: true,
+  isStorefrontVisible: true,
   variantMode: true,
   variantAllocationStatus: true,
   inventoryTrackingMode: true,

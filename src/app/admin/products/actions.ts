@@ -12,7 +12,7 @@ import { deleteUnreferencedUploadedProductFiles, saveUploadedProductFile } from 
 import { productRemovalSchema } from "@/lib/validation/productRemoval";
 import { changeInventoryTrackingMode, InventoryTrackingModeConversionError } from "@/lib/inventory-tracking";
 import type { ProductInventoryTrackingMode } from "@/types";
-import type { z } from "zod";
+import { z } from "zod";
 
 export interface ProductFormState {
   error?: string;
@@ -386,6 +386,17 @@ export async function updateInventoryTrackingMode(
     redirect(`/admin/products/${productId}/device-inventory`);
   }
   return { success: "تم تحديث طريقة تتبع المخزون إلى مخزون إجمالي" };
+}
+
+export async function setProductStorefrontVisibility(id: string, visible: boolean): Promise<void> {
+  await requireRole([ROLES.ADMIN]);
+  const input = z.object({ id: z.string().trim().min(1).max(40), visible: z.boolean() }).parse({ id, visible });
+  const product = await prisma.product.findUniqueOrThrow({ where: { id: input.id }, select: { id: true } });
+  await prisma.product.update({ where: { id: product.id }, data: { isStorefrontVisible: input.visible } });
+  for (const path of ["/admin/products", "/products", "/", "/wishlist", "/cart", "/checkout", "/api/products/recent"]) {
+    revalidatePath(path);
+  }
+  revalidatePath("/products/[sku]", "page");
 }
 
 export async function toggleProductActive(id: string): Promise<void> {

@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { isStorefrontProductAvailable } from "@/lib/storefront-products";
 import { requireCartEligibleUser } from "@/lib/auth/guards";
 import { getCurrentUserCart, getCartTotalCents } from "@/lib/cart";
 import { isWholesalePriced, readCatalogPriceCents } from "@/lib/catalog-queries";
@@ -18,7 +19,7 @@ export default async function CheckoutPage() {
   const user = await requireCartEligibleUser();
   const cart = await getCurrentUserCart(user);
 
-  if (!cart || cart.items.length === 0) {
+  if (!cart || cart.items.length === 0 || cart.items.some((item) => !isStorefrontProductAvailable(item.product))) {
     redirect("/cart");
   }
 

@@ -1,3 +1,4 @@
+import { STOREFRONT_PRODUCT_WHERE } from "@/lib/storefront-products";
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/auth/session";
@@ -41,26 +42,26 @@ export default async function HomePage() {
     getActiveBrands(),
     priceMode === "wholesale"
       ? prisma.product.findMany({
-          where: { isActive: true, isFeatured: true },
+          where: { ...STOREFRONT_PRODUCT_WHERE, isFeatured: true },
           select: MERCHANT_PRODUCT_CARD_SELECT,
           orderBy: { createdAt: "desc" },
           take: 8,
         })
       : prisma.product.findMany({
-          where: { isActive: true, isFeatured: true },
+          where: { ...STOREFRONT_PRODUCT_WHERE, isFeatured: true },
           select: PUBLIC_PRODUCT_CARD_SELECT,
           orderBy: { createdAt: "desc" },
           take: 8,
         }),
     priceMode === "wholesale"
       ? prisma.product.findMany({
-          where: { isActive: true },
+          where: { ...STOREFRONT_PRODUCT_WHERE },
           select: MERCHANT_PRODUCT_CARD_SELECT,
           orderBy: { createdAt: "desc" },
           take: 8,
         })
       : prisma.product.findMany({
-          where: { isActive: true },
+          where: { ...STOREFRONT_PRODUCT_WHERE },
           select: PUBLIC_PRODUCT_CARD_SELECT,
           orderBy: { createdAt: "desc" },
           take: 8,

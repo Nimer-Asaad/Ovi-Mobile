@@ -1,3 +1,4 @@
+import { STOREFRONT_PRODUCT_WHERE } from "@/lib/storefront-products";
 import "server-only";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
@@ -22,7 +23,7 @@ export async function addToWishlist(
   productId: string,
 ): Promise<{ ok: true } | { ok: false; code: "PRODUCT_UNAVAILABLE"; message: string }> {
   const product = await prisma.product.findFirst({
-    where: { id: productId, isActive: true },
+    where: { id: productId, ...STOREFRONT_PRODUCT_WHERE },
     select: { id: true },
   });
   if (!product) {
@@ -52,7 +53,7 @@ export async function getWishlistPage(
   try {
     if (priceMode === "wholesale") {
       const items = await prisma.wishlistItem.findMany({
-        where: { userId, product: { isActive: true } },
+        where: { userId, product: { ...STOREFRONT_PRODUCT_WHERE } },
         select: { product: { select: MERCHANT_PRODUCT_CARD_SELECT } },
         orderBy: { createdAt: "desc" },
         take: 60,
@@ -61,7 +62,7 @@ export async function getWishlistPage(
     }
 
     const items = await prisma.wishlistItem.findMany({
-      where: { userId, product: { isActive: true } },
+      where: { userId, product: { ...STOREFRONT_PRODUCT_WHERE } },
       select: { product: { select: PUBLIC_PRODUCT_CARD_SELECT } },
       orderBy: { createdAt: "desc" },
       take: 60,
