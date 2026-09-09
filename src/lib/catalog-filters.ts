@@ -1,3 +1,4 @@
+import { STOREFRONT_PRODUCT_WHERE } from "@/lib/storefront-products";
 import type { Prisma } from "@prisma/client";
 import { MAX_CATALOG_PRICE_CENTS, NEW_PRODUCT_DAYS } from "@/lib/constants";
 import { normalizeProductSort, type ProductSort } from "@/lib/product-filter-url";
@@ -85,7 +86,7 @@ export function buildProductWhere(
   if (params.maxPriceCents !== undefined) priceRange.lte = params.maxPriceCents;
   const hasPriceRange = params.minPriceCents !== undefined || params.maxPriceCents !== undefined;
   return {
-    isActive: true,
+    ...STOREFRONT_PRODUCT_WHERE,
     ...(params.category ? { category: { slug: params.category } } : {}),
     ...(params.brand ? { brand: { slug: params.brand } } : {}),
     ...(params.q

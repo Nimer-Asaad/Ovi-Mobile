@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { isStorefrontProductAvailable } from "@/lib/storefront-products";
 import { requireCartEligibleUser } from "@/lib/auth/guards";
 import { STOCK_CHECK_PRODUCT_SELECT, getAvailableStock } from "@/lib/cart";
 import { quantitySchema } from "@/lib/validation/cart";
@@ -43,7 +44,7 @@ export async function addToCart(
     select: { ...STOCK_CHECK_PRODUCT_SELECT, colorOptions: { select: { colorId: true } }, variants: { where: { isActive: true }, select: { id: true } } },
   });
 
-  if (!product || !product.isActive) {
+  if (!product || !isStorefrontProductAvailable(product)) {
     return { error: OUT_OF_STOCK_MESSAGE };
   }
 
@@ -150,6 +151,8 @@ export async function updateCartItemQuantity(
   if (!item || item.cart.userId !== user.id) {
     return { error: CART_ITEM_NOT_FOUND_MESSAGE };
   }
+
+  if (!isStorefrontProductAvailable(item.product)) return { error: OUT_OF_STOCK_MESSAGE };
 
   const availableStock = getAvailableStock(item.product, item.variantId, item.deviceColorVariantId);
   if (parsedQuantity.quantity > availableStock) {

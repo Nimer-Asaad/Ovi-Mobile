@@ -1,3 +1,4 @@
+import { STOREFRONT_PRODUCT_WHERE } from "@/lib/storefront-products";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
@@ -35,11 +36,11 @@ export async function POST(request: Request) {
     const priceMode = getPriceModeForUser(user);
     const products = priceMode === "wholesale"
       ? await prisma.product.findMany({
-          where: { id: { in: ids }, isActive: true },
+          where: { id: { in: ids }, ...STOREFRONT_PRODUCT_WHERE },
           select: MERCHANT_PRODUCT_CARD_SELECT,
         })
       : await prisma.product.findMany({
-          where: { id: { in: ids }, isActive: true },
+          where: { id: { in: ids }, ...STOREFRONT_PRODUCT_WHERE },
           select: PUBLIC_PRODUCT_CARD_SELECT,
         });
     const productsById = new Map(products.map((product) => [product.id, product]));

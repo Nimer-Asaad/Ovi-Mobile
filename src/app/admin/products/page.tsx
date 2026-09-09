@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { Button } from "@/components/ui/Button";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { AdminProductsSearch, type AdminProductRow } from "@/components/admin/products/AdminProductsSearch";
-import { removeProduct, toggleProductActive } from "./actions";
+import { removeProduct, toggleProductActive, setProductStorefrontVisibility } from "./actions";
 
 export default async function AdminProductsPage() {
   const products = await prisma.product.findMany({
@@ -57,6 +57,8 @@ export default async function AdminProductsPage() {
       nameAr: product.nameAr,
       isFeatured: product.isFeatured,
       isActive: product.isActive,
+      isStorefrontVisible: product.isStorefrontVisible,
+      storefrontAction: setProductStorefrontVisibility.bind(null, product.id, !product.isStorefrontVisible),
       categoryName: product.category?.nameAr ?? product.category?.name ?? null,
       brandName: product.brand?.name ?? null,
       supplierName: product.supplier?.name ?? null,

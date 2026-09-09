@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { isStorefrontProductAvailable } from "@/lib/storefront-products";
 import { requireCartEligibleUser } from "@/lib/auth/guards";
 import { getCurrentUserCart, getAvailableStock } from "@/lib/cart";
 import { getPriceModeForUser, readCatalogPriceCents } from "@/lib/catalog-queries";
@@ -51,7 +52,7 @@ export async function placeOrder(_prevState: CheckoutState, formData: FormData):
   // Re-check stock/active-ness at submit time — never trust what the cart
   // page last rendered.
   for (const item of cart.items) {
-    if (!item.product.isActive) {
+    if (!isStorefrontProductAvailable(item.product)) {
       return { error: `المنتج "${item.product.name}" لم يعد متوفراً` };
     }
     if (item.product.variantMode === "PHONE_COMPATIBILITY" && (!item.variant || !item.variant.isActive || item.product.variantAllocationStatus !== "READY")) {
@@ -158,6 +159,15 @@ export async function placeOrder(_prevState: CheckoutState, formData: FormData):
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
       const order = await prisma.$transaction(async (tx) => {
+        // Serialize checkout against admin visibility updates, before any sale.
+        const productIds = [...new Set(cart.items.map((item) => item.product.id))].sort();
+        const currentProducts = await tx.$queryRaw<Array<{ isActive: boolean; isStorefrontVisible: boolean }>>`
+          SELECT "isActive", "isStorefrontVisible" FROM "products"
+          WHERE "id" IN (${Prisma.join(productIds)}) ORDER BY "id" FOR SHARE
+        `;
+        if (currentProducts.length !== productIds.length || currentProducts.some((product) => !isStorefrontProductAvailable(product))) {
+          throw new Error("STOREFRONT_PRODUCT_UNAVAILABLE");
+        }
         const requestedVariantIds = cart.items.flatMap((item) => item.variantId ? [item.variantId] : []);
         if (requestedVariantIds.length > 0) {
           const activeVariants = await tx.productVariant.count({
@@ -229,6 +239,9 @@ export async function placeOrder(_prevState: CheckoutState, formData: FormData):
       createdOrderId = order.id;
       break;
     } catch (err) {
+      if (err instanceof Error && err.message === "STOREFRONT_PRODUCT_UNAVAILABLE") {
+        return { error: "أحد المنتجات لم يعد متوفراً؛ يرجى تحديث السلة" };
+      }
       if (err instanceof Error && err.message === "INACTIVE_VARIANT") {
         return { error: "أحد خيارات المنتج لم يعد متوفراً؛ يرجى إعادة اختيار الموديل واللون" };
       }
