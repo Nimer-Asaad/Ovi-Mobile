@@ -49,8 +49,10 @@ export function PhoneModelGrid<T extends GroupableModel>({ models, selectedModel
                   width (which shrinks at the `lg` breakpoint when the page
                   switches to a 2-column layout) instead of the viewport —
                   viewport-keyed breakpoints would overcrowd the narrower
-                  column at lg/xl. */}
-              <div className="grid grid-cols-[repeat(auto-fill,minmax(84px,1fr))] gap-2">
+                  column at lg/xl. 110px (up from 84px) gives a long label
+                  like "iPhone 14 Pro Max" room to wrap onto two clean lines
+                  instead of a single cramped one. */}
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(110px,1fr))] gap-2">
                 {group.models.map((model) => {
                   const isSelected = model.id === selectedModelId;
                   const label = model.nameAr ?? model.name;
@@ -65,14 +67,14 @@ export function PhoneModelGrid<T extends GroupableModel>({ models, selectedModel
                       aria-pressed={isSelected}
                       onClick={() => onSelect(model.id)}
                       className={cn(
-                        "min-h-10 min-w-0 truncate rounded-card border px-2 py-2 text-sm transition-colors",
+                        "min-h-10 min-w-0 rounded-card border px-2 py-2 text-sm transition-colors",
                         isSelected
                           ? "border-gold-champagne bg-gold-champagne/15 text-gold-light"
                           : "border-navy-soft text-neutral-bg/70 hover:border-gold-champagne/40",
                       )}
                       title={label}
                     >
-                      <span dir={isLatinCode ? "ltr" : undefined} className="inline-block max-w-full truncate align-middle">
+                      <span dir={isLatinCode ? "ltr" : undefined} className="block w-full whitespace-normal break-words text-center leading-snug">
                         {label}
                       </span>
                     </button>
