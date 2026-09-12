@@ -6,6 +6,7 @@ import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { AddToCartButton } from "@/components/cart/AddToCartButton";
 import { ColorSwatchSelector, type ColorSwatchOption } from "@/components/catalog/ColorSwatchSelector";
+import { PhoneModelGrid } from "@/components/catalog/PhoneModelGrid";
 import { formatCurrencyFromCents } from "@/lib/utils";
 import type { CartEligibility } from "@/lib/cart";
 
@@ -125,7 +126,7 @@ export function ProductPurchasePanel({
         <div className="space-y-4">
           {!variantReady && <p className="rounded-card border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-300">هذا المنتج قيد مراجعة وتوزيع المخزون على الموديلات.</p>}
           <div><p className="mb-2 text-sm text-neutral-bg/70">ماركة الهاتف</p><div className="flex flex-wrap gap-2">{brands.map((brand) => <button key={brand.id} type="button" onClick={() => { setSelectedBrandId(brand.id); setSelectedModelId(null); }} className={`rounded-card border px-3 py-2 text-sm ${selectedBrandId === brand.id ? "border-gold-champagne text-gold-champagne" : "border-navy-soft text-neutral-bg/70"}`}>{brand.nameAr ?? brand.name}</button>)}</div></div>
-          {selectedBrandId && <div><p className="mb-2 text-sm text-neutral-bg/70">موديل الهاتف</p><div className="flex flex-wrap gap-2">{models.map((model) => <button key={model.id} type="button" onClick={() => setSelectedModelId(model.id)} className={`rounded-card border px-3 py-2 text-sm ${selectedModelId === model.id ? "border-gold-champagne text-gold-champagne" : "border-navy-soft text-neutral-bg/70"}`}>{model.nameAr ?? model.name}</button>)}</div></div>}
+          {selectedBrandId && <PhoneModelGrid models={models} selectedModelId={selectedModelId} onSelect={setSelectedModelId} />}
         </div>
       )}
 
@@ -147,21 +148,11 @@ export function ProductPurchasePanel({
             </div>
           </div>
           {selectedDcBrandId && (
-            <div>
-              <p className="mb-2 text-sm text-neutral-bg/70">الموديل</p>
-              <div className="flex flex-wrap gap-2">
-                {dcModels.map((model) => (
-                  <button
-                    key={model.id}
-                    type="button"
-                    onClick={() => { setSelectedDcModelId(model.id); setSelectedDcColorId(null); }}
-                    className={`rounded-card border px-3 py-2 text-sm ${selectedDcModelId === model.id ? "border-gold-champagne text-gold-champagne" : "border-navy-soft text-neutral-bg/70"}`}
-                  >
-                    {model.nameAr ?? model.name}
-                  </button>
-                ))}
-              </div>
-            </div>
+            <PhoneModelGrid
+              models={dcModels}
+              selectedModelId={selectedDcModelId}
+              onSelect={(modelId) => { setSelectedDcModelId(modelId); setSelectedDcColorId(null); }}
+            />
           )}
           {selectedDcModelId && (
             dcColorsForModel.length > 0 ? (
