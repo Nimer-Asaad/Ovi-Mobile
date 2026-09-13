@@ -11,6 +11,78 @@ import {
 
 type Tx = Prisma.TransactionClient;
 
+/** A fixed, arbitrary namespace for every advisory lock this function takes
+ * — see lockAccountForBalanceUpdate's own doc comment for why this needs no
+ * further collision-avoidance than that. */
+const ACCOUNT_BALANCE_LOCK_CLASSID = 913_402;
+
+/** Serializes every balance-sensitive operation against ONE CustomerAccount.
+ * MUST be the very first accountId-scoped thing a transaction does once
+ * accountId is known — before reading orders/payments to compute a live
+ * balance (getAccountBalanceCents) and before writing any new Order,
+ * AccountPayment, AccountPaymentCancellation, or openingBalanceCents change
+ * for that same account. Transaction-scoped (pg_advisory_xact_lock —
+ * automatically released at COMMIT or ROLLBACK, never needs a manual
+ * unlock, never leaks if the transaction throws), the exact same technique
+ * generateDailyOrderNumber/generateDailyPaymentReceiptNumber already use
+ * for their own counters (src/lib/order-number.ts, src/lib/payment-number.ts).
+ *
+ * WHY THIS IS NEEDED: getAccountBalanceCents is always computed live from
+ * an account's CURRENT orders/payments — never stored — so two concurrent
+ * transactions that both (a) read that live balance to decide whether a
+ * NEW withdrawal is allowed (see createRepSaleCore's own debt-aware cap)
+ * and (b) then write a new debt-reducing row based on that decision, could
+ * otherwise both read the SAME pre-write balance and both approve a
+ * withdrawal the account can only actually cover once — e.g. two
+ * concurrent operations against a merchant with 100 in existing debt could
+ * each independently see "100 owed" and each accept a 100 payment,
+ * overpaying the account by 100 the instant both commit. Ordinary
+ * read-committed transaction isolation does not prevent this on its own:
+ * it stops one transaction from seeing another's UNCOMMITTED writes, but
+ * two transactions started at nearly the same instant can both read the
+ * account's state before either has written anything.
+ *
+ * Every mutator that can change what getAccountBalanceCents(account)
+ * returns for a given account takes this SAME lock before its own write —
+ * createRepSaleCore, admin manual-order "paid now" (both via
+ * recordInitialAccountPayment, which takes it internally), every standalone
+ * payment (recordManualAccountPayment, which also takes it internally —
+ * covering ADMIN's recordAccountPayment, REP's recordMerchantPaymentAsRep,
+ * and both replacement-payment flows), payment cancellation
+ * (cancelManualPayment), order cancellation/return and its linked-payment
+ * reversal (transitionOrderStatusInTransaction), and an opening-balance
+ * correction (setAccountOpeningBalance). A single missed mutator would
+ * reopen exactly the race this exists to close — see each of those
+ * functions' own call to this one.
+ *
+ * LOCK ORDERING: every caller that also generates an order/receipt number
+ * takes this lock BEFORE calling generateDailyOrderNumber/
+ * generateDailyPaymentReceiptNumber — never after. Those two already commit
+ * to a fixed relative order between themselves (order-lock, then
+ * payment-lock — see payment-number.ts's own doc comment); this extends
+ * that same fixed global ordering (account-lock, then order-lock, then
+ * payment-lock, never reversed anywhere) so two transactions can never each
+ * hold one lock in this chain while waiting on another one the other
+ * holds — the classic precondition for a deadlock.
+ *
+
+ * Uses the pg_advisory_xact_lock(int, int) two-key overload — a completely
+ * SEPARATE lock keyspace from the single-bigint overload
+ * generateDailyOrderNumber/generateDailyPaymentReceiptNumber use (per
+ * Postgres semantics, the two overloads never contend with each other no
+ * matter what numbers are passed), so this can never deadlock or falsely
+ * serialize against either of those. `classid` is a fixed constant scoping
+ * every lock this function takes; `objid` is Postgres's own `hashtext()`
+ * of the account's id — deterministic (same account always maps to the
+ * same lock) and, being a 32-bit hash, could in principle collide between
+ * two DIFFERENT accounts. That would only ever cost harmless, unnecessary
+ * serialization between two unrelated accounts' operations (never
+ * incorrect data — it can only make the lock MORE conservative than
+ * needed), and is vanishingly unlikely at this app's account volumes. */
+export async function lockAccountForBalanceUpdate(tx: Tx, accountId: string): Promise<void> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(${ACCOUNT_BALANCE_LOCK_CLASSID}::int, hashtext(${accountId}::text))`;
+}
+
 /** Finds or lazily creates the ledger account for an approved merchant,
  * keyed on Merchant.id (CustomerAccount.merchantId is @unique). Must run
  * inside the caller's own transaction so a concurrent checkout/manual-order
@@ -135,6 +207,10 @@ export async function recordInitialAccountPayment(
   orderId: string,
   options?: { method?: string; note?: string },
 ): Promise<void> {
+  // Re-entrant-safe if the caller already holds this same lock (e.g.
+  // createRepSaleCore locks earlier, before its own debt-aware balance
+  // check) — see lockAccountForBalanceUpdate's own doc comment.
+  await lockAccountForBalanceUpdate(tx, accountId);
   const receiptNumber = await generateDailyPaymentReceiptNumber(tx);
   await tx.accountPayment.create({
     data: {
@@ -180,6 +256,10 @@ export async function recordManualAccountPayment(
     correctsPaymentId?: string;
   },
 ): Promise<{ id: string; receiptNumber: string | null }> {
+  // See lockAccountForBalanceUpdate's own doc comment — every standalone
+  // payment (ADMIN, REP, and both replacement-payment flows) funnels
+  // through this one function, so locking here covers all of them.
+  await lockAccountForBalanceUpdate(tx, accountId);
   const receiptNumber = await generateDailyPaymentReceiptNumber(tx);
   return tx.accountPayment.create({
     data: {

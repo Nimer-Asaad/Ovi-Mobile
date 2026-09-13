@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { ORDER_SOURCES, ORDER_STATUSES, PAYMENT_METHODS, PAYMENT_STATUSES, STOCK_MOVEMENT_TYPES, REP_CUSTOMER_ORDER_STATUSES, MERCHANT_STATUSES } from "@/lib/constants";
 import type { RepSaleInput } from "@/lib/validation/repSale";
 import { decrementInventoryAtomic, recordStockMovement, InsufficientInventoryError } from "@/lib/inventory-transactions";
-import { getOrCreateMerchantAccount, recordInitialAccountPayment } from "@/lib/accounts";
+import { getOrCreateMerchantAccount, getAccountBalanceCents, lockAccountForBalanceUpdate, recordInitialAccountPayment } from "@/lib/accounts";
 import { resolveOrCreateRepMerchant } from "@/lib/rep-merchants";
 import { generateDailyOrderNumber } from "@/lib/order-number";
 import type { SaleProductOption } from "@/components/reps/ProductSalePicker";
@@ -243,14 +243,11 @@ export async function createRepSaleCore(input: RepSaleInput, context: CreateRepS
 
   const totalCents = lines.reduce((sum, item) => sum + item.unitPriceCents * item.quantity, 0);
 
-  // repSaleSchema already re-derives this same total from these same items
-  // and rejects paidNowCents > total at parse time — this is a second,
-  // independent check against the actual authoritative totalCents computed
-  // right here (never a client-sent total), matching the admin manual-order
-  // flow's own belt-and-suspenders check in src/app/admin/orders/new/actions.ts.
-  if (paidNowCents > totalCents) {
-    return { ok: false, error: "المبلغ المدفوع الآن أكبر من إجمالي الفاتورة" };
-  }
+  // The real upper-bound check — merchant previous debt + this invoice's own
+  // total — needs the trader's live account balance, which only exists once
+  // the trader identity is resolved below (resolveOrCreateRepMerchant runs
+  // inside the transaction). See the PAYMENT_EXCEEDS_MERCHANT_BALANCE check
+  // further down for the actual, authoritative validation.
   const paymentStatus =
     totalCents > 0 && paidNowCents >= totalCents
       ? PAYMENT_STATUSES.PAID
@@ -316,6 +313,41 @@ export async function createRepSaleCore(input: RepSaleInput, context: CreateRepS
           throw new Error("MERCHANT_NOT_APPROVED");
         }
         const accountId = await getOrCreateMerchantAccount(tx, merchant.id);
+
+        // Serialize against every other operation that can change this same
+        // account's balance — MUST happen before the balance read just
+        // below, not just before the eventual write, since it's this READ
+        // (not only the write) that a concurrent payment/sale/cancellation
+        // could otherwise race — see lockAccountForBalanceUpdate's own doc
+        // comment for the full "why" and the complete list of every other
+        // mutator that takes this same lock.
+        await lockAccountForBalanceUpdate(tx, accountId);
+
+        // The authoritative payment ceiling — read fresh, inside this same
+        // transaction, from this trader's REAL account rows (never a
+        // client-sent balance). This is the account's live balance BEFORE
+        // this sale (the order below doesn't exist yet, so it can't already
+        // be counted in it) — exactly the "previous debt" getOrderAccountPosition
+        // later reconstructs for this same invoice. A trader may pay up to
+        // that previous debt PLUS this invoice's own total in one go (the
+        // excess pays down old debt, never just the invoice) — but never
+        // beyond it, so this quick "paid now" sale entry can never itself
+        // push the account into a credit balance (a credit can still be
+        // recorded deliberately through the standalone manual-payment flow,
+        // which has no such cap — see recordAccountPayment).
+        const account = await tx.customerAccount.findUniqueOrThrow({
+          where: { id: accountId },
+          select: {
+            openingBalanceCents: true,
+            orders: { select: { status: true, totalCents: true } },
+            payments: { select: { amountCents: true, cancellation: { select: { id: true } } } },
+          },
+        });
+        const previousDebtCents = getAccountBalanceCents(account);
+        const maxPayableCents = Math.max(previousDebtCents, 0) + totalCents;
+        if (paidNowCents > maxPayableCents) {
+          throw new Error("PAYMENT_EXCEEDS_MERCHANT_BALANCE");
+        }
 
         // Concurrency-safe daily sequence (OVI-YYYYMMDD-NNNN, resetting
         // every business day — see generateDailyOrderNumber) — generated
@@ -442,6 +474,7 @@ export async function createRepSaleCore(input: RepSaleInput, context: CreateRepS
       if (err instanceof Error && err.message === "INACTIVE_VARIANT") return { ok: false, error: "أحد خيارات المنتج لم يعد فعالاً؛ أعد اختيار الـVariant" };
       if (err instanceof Error && err.message === "CUSTOMER_ORDER_NOT_OPEN") return { ok: false, error: "لم تعد طلبية الزبون هذه نشطة — حدّث الصفحة وحاول مجدداً" };
       if (err instanceof Error && err.message === "MERCHANT_NOT_APPROVED") return { ok: false, error: "هذا التاجر موقوف حالياً ولا يمكن تسجيل بيع جديد له" };
+      if (err instanceof Error && err.message === "PAYMENT_EXCEEDS_MERCHANT_BALANCE") return { ok: false, error: "الدفعة أكبر من إجمالي المبلغ المستحق على التاجر." };
       if (err instanceof InsufficientInventoryError) {
         return { ok: false, error: "الكمية المطلوبة أكبر من مخزونك الحالي لأحد المنتجات، حاول مرة أخرى" };
       }

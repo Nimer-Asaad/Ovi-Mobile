@@ -6,7 +6,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth/guards";
 import { getMainWarehouse } from "@/lib/inventory";
-import { getOrCreateMerchantAccount, getOrCreateCustomerAccount, recordInitialAccountPayment } from "@/lib/accounts";
+import { getOrCreateMerchantAccount, getOrCreateCustomerAccount, lockAccountForBalanceUpdate, recordInitialAccountPayment } from "@/lib/accounts";
 import { generateDailyOrderNumber } from "@/lib/order-number";
 import {
   ROLES,
@@ -377,6 +377,16 @@ export async function createManualOrder(
             });
             accountId = createdAccount.id;
           }
+        }
+
+        // Serializes against every other operation touching this same
+        // account's balance (another manual order, a rep sale, a standalone
+        // payment, a cancellation, ...) — see lockAccountForBalanceUpdate's
+        // own doc comment. Taken before generateDailyOrderNumber below, to
+        // keep this app's one fixed lock-acquisition ordering (account,
+        // then order, then payment) consistent everywhere.
+        if (accountId) {
+          await lockAccountForBalanceUpdate(tx, accountId);
         }
 
         // Concurrency-safe daily sequence (OVI-YYYYMMDD-NNNN, resetting

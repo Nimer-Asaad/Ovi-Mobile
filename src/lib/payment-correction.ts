@@ -2,6 +2,7 @@ import "server-only";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { ACCOUNT_PAYMENT_ORIGINS } from "@/lib/constants";
+import { lockAccountForBalanceUpdate } from "@/lib/accounts";
 
 export type PaymentCorrectionErrorCode =
   | "PAYMENT_NOT_FOUND"
@@ -77,11 +78,18 @@ export async function cancelManualPayment(input: CancelManualPaymentInput): Prom
   return prisma.$transaction(async (tx) => {
     const payment = await tx.accountPayment.findUnique({
       where: { id: input.paymentId },
-      select: { id: true, createdById: true, origin: true, receiptNumber: true, cancellation: { select: { id: true } } },
+      select: { id: true, accountId: true, createdById: true, origin: true, receiptNumber: true, cancellation: { select: { id: true } } },
     });
     if (!payment) {
       return { ok: false, code: "PAYMENT_NOT_FOUND", message: "الدفعة غير موجودة" } as const;
     }
+
+    // Serializes against every other operation touching this same account's
+    // balance (a rep sale's debt-aware payment cap in particular) — see
+    // lockAccountForBalanceUpdate's own doc comment. Taken as soon as the
+    // account is known, before the cancellation write below.
+    await lockAccountForBalanceUpdate(tx, payment.accountId);
+
     if (input.requireCreatedById && payment.createdById !== input.requireCreatedById) {
       return { ok: false, code: "FORBIDDEN", message: "لا يمكنك إلغاء هذه الدفعة" } as const;
     }

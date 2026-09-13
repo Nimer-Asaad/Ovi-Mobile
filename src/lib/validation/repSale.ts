@@ -35,14 +35,21 @@ export const repSaleSchema = z
      * Null/omitted for a normal blank sale. */
     repCustomerOrderId: z.string().nullable().optional(),
     /** How much of this invoice the trader is paying right now — 0 is the
-     * normal "fully on account" case, up to the full invoice total for a
-     * fully-paid sale. Reuses manualOrder's exact zero-allowed money
-     * convention rather than a fourth near-duplicate schema. The upper bound
-     * (can't exceed the invoice total) is enforced just below, against the
-     * SAME `items` this object also carries — never against a separate
-     * client-sent total. createRepSaleCore re-derives and re-checks this
-     * once more from its own authoritative totalCents before ever writing
-     * anything, so this is defense-in-depth, not the only guard. */
+     * normal "fully on account" case. May exceed this invoice's own total
+     * when the trader also has previous debt on their account: the extra
+     * amount pays down that debt, never just the invoice. Reuses
+     * manualOrder's exact zero-allowed money convention rather than a fourth
+     * near-duplicate schema.
+     *
+     * Deliberately carries NO upper-bound check here (unlike before this
+     * trader-debt-aware allocation existed) — this schema only ever sees the
+     * submitted items/total, never the trader's live account balance, so it
+     * cannot tell a valid "paying off old debt too" amount from a genuine
+     * overpayment. createRepSaleCore is the ONE place with both: it resolves
+     * the real trader identity and re-derives totalCents from these exact
+     * items, then validates paidNowCents against
+     * (that trader's live balance) + totalCents — the actual authoritative,
+     * DB-backed check, never a client-sent total or balance. */
     paidNowCents: nonNegativeMoneyString,
     /** AccountPayment.method for the immediate payment above — only
      * meaningful (and only ever used) when paidNowCents > 0; ignored
@@ -50,12 +57,6 @@ export const repSaleSchema = z
      * (CASH/CASH_ON_DELIVERY, describing the delivery arrangement) and is
      * never touched by this field. */
     paidNowMethod: z.enum(Object.values(ACCOUNT_PAYMENT_METHODS) as [string, ...string[]]).optional(),
-  })
-  .superRefine((value, ctx) => {
-    const totalCents = value.items.reduce((sum, item) => sum + item.unitPriceCents * item.quantity, 0);
-    if (value.paidNowCents > totalCents) {
-      ctx.addIssue({ code: "custom", path: ["paidNowCents"], message: "المبلغ المدفوع الآن أكبر من إجمالي الفاتورة" });
-    }
   });
 
 export type RepSaleInput = z.infer<typeof repSaleSchema>;

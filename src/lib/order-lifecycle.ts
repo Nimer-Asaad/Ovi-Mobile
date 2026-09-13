@@ -8,6 +8,7 @@ import {
   transitionRestoresInventory,
 } from "@/lib/order-lifecycle-rules";
 import { incrementInventoryExisting, recordStockMovement, MissingInventoryError } from "@/lib/inventory-transactions";
+import { lockAccountForBalanceUpdate } from "@/lib/accounts";
 
 export {
   getValidNextOrderStatuses,
@@ -97,6 +98,7 @@ const ORDER_SELECT = {
   stockLocationId: true,
   inventoryRestoredAt: true,
   paidAmountCents: true,
+  accountId: true,
   items: { select: { productId: true, variantId: true, deviceColorVariantId: true, quantity: true } },
   inventoryCompensation: { select: { id: true, type: true } },
   initialPayment: { select: { id: true, cancellation: { select: { id: true } } } },
@@ -196,6 +198,21 @@ export async function transitionOrderStatusInTransaction(
   // reverse.
   if (restoresInventory && order.paidAmountCents > 0 && !order.initialPayment) {
     throw new LifecycleDomainError("LEGACY_UNLINKED_PAYMENT", LEGACY_UNLINKED_PAYMENT_ERROR);
+  }
+
+  // A restoring transition (CANCELLED/RETURNED) is the only kind that
+  // changes this order's contribution to its account's live balance
+  // (isTerminalOrderStatus excludes it from getAccountBalanceCents's sum
+  // going forward) and, below, may also reverse its linked SALE_INITIAL
+  // payment — both are account-ledger mutations, so this serializes
+  // against every other operation touching the same account (a rep sale's
+  // debt-aware payment cap in particular) — see lockAccountForBalanceUpdate's
+  // own doc comment. A non-restoring transition (e.g. PENDING -> CONFIRMED)
+  // never changes isTerminalOrderStatus and therefore never affects the
+  // balance, so no lock is needed for it. An untracked order (accountId
+  // null) has no balance to protect either.
+  if (restoresInventory && order.accountId) {
+    await lockAccountForBalanceUpdate(tx, order.accountId);
   }
 
   if (restoresInventory) {

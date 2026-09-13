@@ -7,7 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth/guards";
 import { ROLES } from "@/lib/constants";
 import { hashPassword } from "@/lib/auth/password";
-import { recordManualAccountPayment } from "@/lib/accounts";
+import { recordManualAccountPayment, lockAccountForBalanceUpdate } from "@/lib/accounts";
 import { createWalkInAccountSchema, recordAccountPaymentSchema, setOpeningBalanceSchema } from "@/lib/validation/accounts";
 
 export interface CreateWalkInAccountState {
@@ -210,13 +210,21 @@ export async function setAccountOpeningBalance(
     return { error: "يجب تأكيد أنك تريد تعديل الرصيد الافتتاحي — تعديله سيغيّر مديونية التاجر الحالية" };
   }
 
-  await prisma.customerAccount.update({
-    where: { id: accountId },
-    data: {
-      openingBalanceCents: parsed.data.openingBalanceCents,
-      openingBalanceSetAt: new Date(),
-      openingBalanceSetById: admin.id,
-    },
+  // openingBalanceCents is one of the terms getAccountBalanceCents sums —
+  // changing it is an account-ledger mutation exactly like recording a
+  // payment, so it takes the same lock first (see
+  // lockAccountForBalanceUpdate's own doc comment) to serialize against any
+  // concurrent rep sale/payment/cancellation for this same account.
+  await prisma.$transaction(async (tx) => {
+    await lockAccountForBalanceUpdate(tx, accountId);
+    await tx.customerAccount.update({
+      where: { id: accountId },
+      data: {
+        openingBalanceCents: parsed.data.openingBalanceCents,
+        openingBalanceSetAt: new Date(),
+        openingBalanceSetById: admin.id,
+      },
+    });
   });
 
   revalidateAccountPaths(accountId);

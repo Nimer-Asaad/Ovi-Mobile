@@ -238,10 +238,17 @@ export function NewSaleForm({ products, customers, customerOrders, action = crea
 
   const itemsJson = useMemo(() => JSON.stringify(buildSaleSubmitLines(groups, quantities, productPrices)), [groups, quantities, productPrices]);
 
+  // The trader's total obligation once this sale is added — previous debt
+  // (never a credit; a credit balance doesn't raise how much can be paid
+  // through this quick "paid now" field) plus this invoice's own total. A
+  // brand-new/not-yet-resolved trader (currentBalanceCents === null) is
+  // treated as having zero previous debt, same as the server: a merchant
+  // with no account yet genuinely owes nothing before this sale.
+  const totalOwedCents = Math.max(currentBalanceCents ?? 0, 0) + totalCents;
   // Display-only clamp for the preview below — the real upper-bound check
-  // happens server-side (repSaleSchema + createRepSaleCore), never trusted
-  // from here.
-  const paidNowCentsPreview = Math.min(Math.max(Math.round((Number(paidNowInput) || 0) * 100), 0), totalCents);
+  // happens server-side (createRepSaleCore, against the trader's live
+  // account balance), never trusted from here.
+  const paidNowCentsPreview = Math.min(Math.max(Math.round((Number(paidNowInput) || 0) * 100), 0), totalOwedCents);
   // Pure preview, never stored anywhere and never sent to the server — the
   // real post-sale balance is always openingBalanceCents + Orders - Payments
   // (getAccountBalanceCents), computed fresh from the real Order + real
@@ -309,7 +316,7 @@ export function NewSaleForm({ products, customers, customerOrders, action = crea
                     name="paidNowDisplay"
                     type="number"
                     min={0}
-                    max={totalCents / 100}
+                    max={totalOwedCents / 100}
                     step="0.01"
                     label="المبلغ المدفوع الآن (₪)"
                     value={paidNowInput}
@@ -356,6 +363,12 @@ export function NewSaleForm({ products, customers, customerOrders, action = crea
                             <span className="text-neutral-bg/70">قيمة الفاتورة</span>
                             <span className="text-neutral-bg">{formatCurrencyFromCents(totalCents)}</span>
                           </div>
+                          {currentBalanceCents > 0 && (
+                            <div className="flex items-center justify-between gap-3">
+                              <span className="text-neutral-bg/70">إجمالي المستحق على التاجر</span>
+                              <span className="text-neutral-bg">{formatCurrencyFromCents(totalOwedCents)}</span>
+                            </div>
+                          )}
                           <div className="flex items-center justify-between gap-3">
                             <span className="text-neutral-bg/70">الدفعة الآن</span>
                             <span className="text-neutral-bg">{formatCurrencyFromCents(paidNowCentsPreview)}</span>
