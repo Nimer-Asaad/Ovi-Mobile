@@ -3,6 +3,7 @@ import type {
   ADMIN_AUDIT_ACTIONS,
   ADMIN_NAV_ITEMS,
   MERCHANT_STATUSES,
+  ONLINE_SALE_CATEGORIES,
   ORDER_SOURCES,
   ORDER_STATUSES,
   PAYMENT_METHODS,
@@ -35,6 +36,7 @@ export type ProductInventoryTrackingMode = (typeof PRODUCT_INVENTORY_TRACKING_MO
 export type UserActivityEventType = (typeof USER_ACTIVITY_EVENT_TYPES)[keyof typeof USER_ACTIVITY_EVENT_TYPES];
 export type AdminAuditAction = (typeof ADMIN_AUDIT_ACTIONS)[keyof typeof ADMIN_AUDIT_ACTIONS];
 export type RegistrationMethod = (typeof REGISTRATION_METHODS)[keyof typeof REGISTRATION_METHODS];
+export type OnlineSaleCategory = (typeof ONLINE_SALE_CATEGORIES)[keyof typeof ONLINE_SALE_CATEGORIES];
 
 export type AdminNavItem = (typeof ADMIN_NAV_ITEMS)[number];
 

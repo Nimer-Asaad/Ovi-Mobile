@@ -76,6 +76,7 @@ model User {
   repStockTransferBatchesCreated RepStockTransferBatch[]         @relation("RepStockTransferBatchCreatedBy")
   repCustomerOrdersCreated       RepCustomerOrder[]              @relation("RepCustomerOrderCreatedBy")
   manualInventoryBatchesCreated  ManualInventoryBatch[]          @relation("ManualInventoryBatchCreatedBy")
+  onlineSalesRecorded            OnlineSale[]                    @relation("OnlineSaleCreatedBy")
 
   @@map("users")
 }
@@ -1311,4 +1312,57 @@ model StockReturnItem {
 
   @@index([variantId])
   @@map("stock_return_items")
+}
+
+/// OnlineSaleCategory values: "WHOLESALE" | "SUPER_WHOLESALE" | "RETAIL"
+/// See ONLINE_SALE_CATEGORIES in src/lib/constants.ts and the canonical
+/// commission rate (basis points) each carries today in
+/// ONLINE_SALE_CATEGORY_CONFIG, src/lib/online-sales.ts.
+///
+/// Independent online-sales commission ledger for the owner's own online
+/// sales (أون لاين) — entirely separate from Order/AccountPayment/
+/// Merchant/Inventory/RepStockTransferBatch. Nothing here is read by, or
+/// writes to, any of those: no Order row, no AccountPayment row, no
+/// merchant balance, no inventory movement, no REP_CAR effect, no invoice,
+/// no Ovi AI data source. A ledger, not a per-day snapshot: (saleDate,
+/// category) is deliberately NOT unique — the admin may record more than
+/// one entry for the same day/category (see saveOnlineSalesAction in
+/// src/app/admin/online/actions.ts), and the page lists every row rather
+/// than silently merging them.
+///
+/// saleDate is a native Postgres DATE (`@db.Date`), NOT the naive
+/// `timestamp without time zone` convention Order.createdAt/
+/// AccountPayment.createdAt use elsewhere in this schema (see the long
+/// rationale in src/lib/business-time.ts). A pure calendar date has no
+/// time-of-day/timezone component to reinterpret, so none of that `AT TIME
+/// ZONE` machinery applies here — always read/write saleDate via the
+/// UTC-anchored helpers in src/lib/online-sales.ts, never via
+/// formatBusinessDateTime/business-time.ts (those are for real timestamp
+/// instants, not date-only values).
+///
+/// commissionRateBps snapshots the rate actually applied at save time (in
+/// basis points — 500 = 5%) and commissionCents is likewise stored, not
+/// derived live, so a later change to ONLINE_SALE_CATEGORY_CONFIG's rates
+/// never silently rewrites an already-saved historical entry's meaning.
+/// Both are computed exactly once, server-side, from the canonical rate in
+/// effect at that moment — the client's own live preview is never trusted
+/// (see saveOnlineSalesAction).
+///
+/// No `updatedAt`: like AccountPayment, a row is never edited in place —
+/// only inserted or deleted (see deleteOnlineSaleAction) — so there is
+/// nothing for an update timestamp to track.
+model OnlineSale {
+  id                String   @id @default(cuid())
+  saleDate          DateTime @db.Date
+  category          String
+  amountCents       Int
+  commissionRateBps Int
+  commissionCents   Int
+  createdById       String
+  createdBy         User     @relation("OnlineSaleCreatedBy", fields: [createdById], references: [id])
+  createdAt         DateTime @default(now())
+
+  @@index([saleDate])
+  @@index([category])
+  @@map("online_sales")
 }

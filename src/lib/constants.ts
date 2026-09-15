@@ -251,6 +251,18 @@ export const ACCOUNT_PAYMENT_ORIGINS = {
   SALE_INITIAL: "SALE_INITIAL",
 } as const;
 
+/** OnlineSale.category — the three online-sale commission tiers on the
+ * ADMIN-only "أون لاين" ledger (/admin/online). See ONLINE_SALE_CATEGORY_CONFIG
+ * in src/lib/online-sales.ts for the canonical rate (basis points) and
+ * Arabic label each carries today; that ledger is fully independent from
+ * Order/AccountPayment/Merchant/Inventory — see OnlineSale's own schema doc
+ * comment. */
+export const ONLINE_SALE_CATEGORIES = {
+  WHOLESALE: "WHOLESALE",
+  SUPER_WHOLESALE: "SUPER_WHOLESALE",
+  RETAIL: "RETAIL",
+} as const;
+
 /** Active products with total on-hand quantity below this are "low stock"
  * on the admin dashboard. */
 export const LOW_STOCK_THRESHOLD = 5;
