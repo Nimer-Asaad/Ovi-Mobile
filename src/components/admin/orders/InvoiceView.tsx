@@ -97,9 +97,9 @@ export interface InvoiceData {
   items: InvoiceItem[];
 }
 
-/** Shared name/variant text for a single invoice item — kept in one place so
- * the desktop table row and the mobile card render the exact same detail
- * text instead of two copies that could drift. */
+/** Product name plus color/phone-variant detail text for a single invoice
+ * item's table cell — split out only to keep the table row markup below
+ * readable. */
 function ItemNameDetails({ item }: { item: InvoiceItem }) {
   return (
     <>
@@ -251,57 +251,33 @@ export function InvoiceView({ order }: { order: InvoiceData }) {
         </div>
       </div>
 
-      {/* Tablet/desktop and print: the classic table. Hidden on small mobile
-          screens (see the card layout below) but forced back on for print
-          via print:block, so printing from a phone still yields the same
-          clean tabular invoice as printing from a desktop. */}
-      <div className="mt-6 hidden overflow-x-auto sm:block print:block">
-        <table className="w-full min-w-[28rem] text-start text-sm">
-          <thead className="border-b border-neutral-200 text-xs font-semibold uppercase tracking-wide text-neutral-500">
+      {/* One traditional table across mobile/desktop/print — no SKU column,
+          no separate mobile card layout. Compact padding/font on small
+          screens keep it fitting without horizontal scrolling; the product
+          name column wraps naturally instead of being truncated. */}
+      <div className="mt-6 overflow-x-auto">
+        <table className="w-full text-start text-xs sm:text-sm">
+          <thead className="border-b border-neutral-200 text-[10px] font-semibold uppercase tracking-wide text-neutral-500 sm:text-xs">
             <tr>
-              <th className="py-2 text-start">المنتج</th>
-              <th className="py-2 text-start print:hidden">SKU</th>
-              <th className="py-2 text-start">الكمية</th>
-              <th className="py-2 text-start">سعر الوحدة</th>
-              <th className="py-2 text-start">الإجمالي</th>
+              <th className="py-2 pe-1 text-start sm:pe-2">المنتج</th>
+              <th className="px-1 py-2 text-start sm:px-2">الكمية</th>
+              <th className="px-1 py-2 text-start sm:px-2">سعر الوحدة</th>
+              <th className="ps-1 py-2 text-start sm:ps-2">الإجمالي</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-neutral-100">
             {order.items.map((item) => (
               <tr key={item.id}>
-                <td className="max-w-[14rem] whitespace-normal break-words py-2 text-neutral-900">
+                <td className="whitespace-normal break-words py-2 pe-1 text-neutral-900 sm:pe-2">
                   <ItemNameDetails item={item} />
                 </td>
-                <td className="py-2 text-neutral-500 print:hidden" dir="ltr">{item.product.sku}</td>
-                <td className="py-2 text-neutral-700" dir="ltr">{item.quantity}</td>
-                <td className="whitespace-nowrap py-2 text-neutral-700" dir="ltr">{formatCurrencyFromCents(item.unitPriceCents)}</td>
-                <td className="whitespace-nowrap py-2 font-medium text-neutral-900" dir="ltr">{formatCurrencyFromCents(item.totalCents)}</td>
+                <td className="whitespace-nowrap px-1 py-2 text-neutral-700 sm:px-2" dir="ltr">{item.quantity}</td>
+                <td className="whitespace-nowrap px-1 py-2 text-neutral-700 sm:px-2" dir="ltr">{formatCurrencyFromCents(item.unitPriceCents)}</td>
+                <td className="whitespace-nowrap ps-1 py-2 font-medium text-neutral-900 sm:ps-2" dir="ltr">{formatCurrencyFromCents(item.totalCents)}</td>
               </tr>
             ))}
           </tbody>
         </table>
-      </div>
-
-      {/* Small mobile only: a stacked card per item instead of squeezing the
-          table's five columns into a narrow screen. Same items array, same
-          per-item values as the table above — presentation-only duplication.
-          Hidden for print (the table above renders instead). */}
-      <div className="mt-6 flex flex-col gap-3 sm:hidden print:hidden">
-        {order.items.map((item) => (
-          <div key={item.id} className="rounded-card border border-neutral-200 p-3 text-sm">
-            <p className="break-words font-medium text-neutral-900">
-              <ItemNameDetails item={item} />
-            </p>
-            <div className="mt-2 grid grid-cols-2 gap-y-1.5">
-              <span className="text-neutral-500">الكمية</span>
-              <span className="text-end text-neutral-700" dir="ltr">{item.quantity}</span>
-              <span className="text-neutral-500">سعر الوحدة</span>
-              <span className="text-end text-neutral-700" dir="ltr">{formatCurrencyFromCents(item.unitPriceCents)}</span>
-              <span className="font-medium text-neutral-900">الإجمالي</span>
-              <span className="text-end font-semibold text-neutral-900" dir="ltr">{formatCurrencyFromCents(item.totalCents)}</span>
-            </div>
-          </div>
-        ))}
       </div>
 
       <div className="mt-6 flex flex-col items-end gap-1 border-t border-neutral-200 pt-4 text-sm">
