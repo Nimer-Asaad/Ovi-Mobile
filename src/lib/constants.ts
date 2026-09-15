@@ -282,6 +282,7 @@ export const ADMIN_NAV_ITEMS = [
   { label: "Sales Reps", labelAr: "المندوبون", href: "/admin/reps" },
   { label: "Car Stock Requests", labelAr: "طلبات السيارة", href: "/admin/rep-requests" },
   { label: "Accounts", labelAr: "الحسابات", href: "/admin/accounts" },
+  { label: "Online", labelAr: "أون لاين", href: "/admin/online" },
 ] as const;
 
 /** Restricted admin-shell navigation for ADMIN_ASSISTANT (مساعد الأدمن) —
