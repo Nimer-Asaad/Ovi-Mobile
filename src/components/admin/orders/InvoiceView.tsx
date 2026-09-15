@@ -97,6 +97,27 @@ export interface InvoiceData {
   items: InvoiceItem[];
 }
 
+/** Shared name/variant text for a single invoice item — kept in one place so
+ * the desktop table row and the mobile card render the exact same detail
+ * text instead of two copies that could drift. */
+function ItemNameDetails({ item }: { item: InvoiceItem }) {
+  return (
+    <>
+      {item.product.nameAr ?? item.product.name}
+      {(item.color || item.colorNameSnapshot) && (
+        <span className="text-neutral-500"> — {item.color ? (item.color.nameAr ?? item.color.name) : item.colorNameSnapshot}</span>
+      )}
+      {item.phoneModelSnapshot && (
+        <span className="text-neutral-500">
+          {" "}
+          — {item.phoneBrandSnapshot} / {item.phoneModelSnapshot}
+          {item.variantCodeSnapshot ? ` (${item.variantCodeSnapshot})` : ""}
+        </span>
+      )}
+    </>
+  );
+}
+
 /** Pure, server-renderable printable invoice. Deliberately styled as a
  * literal white paper document (not the app's dark navy admin/rep theme)
  * since it's meant to be printed, screenshotted, and shared over WhatsApp —
@@ -118,11 +139,11 @@ export function InvoiceView({ order }: { order: InvoiceData }) {
   const isCancelledOrReturned = isTerminalOrderStatus(order.status);
 
   return (
-    <div className="mx-auto max-w-3xl rounded-card border border-neutral-200 bg-white p-6 text-neutral-900 shadow-sm sm:p-8 print:m-0 print:max-w-none print:border-0 print:shadow-none">
+    <div className="mx-auto max-w-3xl rounded-card border border-neutral-200 bg-white p-4 text-neutral-900 shadow-sm sm:p-6 md:p-8 print:m-0 print:max-w-none print:border-0 print:p-8 print:shadow-none">
       <div className="flex flex-wrap items-start justify-between gap-4 border-b border-neutral-200 pb-6">
-        <div>
+        <div className="min-w-0">
           <h1 className="text-2xl font-bold text-neutral-900">Ovi Mobile</h1>
-          <p className="mt-1 flex items-center gap-2 text-sm text-neutral-500">
+          <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-neutral-500">
             فاتورة بيع
             {isCancelledOrReturned && (
               <span className="rounded-full border border-rose-300 bg-rose-50 px-2 py-0.5 text-xs font-semibold text-rose-700">
@@ -131,13 +152,13 @@ export function InvoiceView({ order }: { order: InvoiceData }) {
             )}
           </p>
         </div>
-        <div className="text-end text-sm text-neutral-600">
+        <div className="min-w-0 text-end text-sm text-neutral-600">
           <p>
-            رقم الفاتورة: <span className="font-semibold text-neutral-900">{order.orderNumber}</span>
+            رقم الفاتورة: <span className="font-semibold text-neutral-900" dir="ltr">{order.orderNumber}</span>
           </p>
           <p>التاريخ: {formatBusinessDateTime(order.businessCreatedAt)}</p>
           <p>نوع الطلب: {getOrderSourceLabel(order.source)}</p>
-          {order.repName && <p>المندوب: {order.repName}</p>}
+          {order.repName && <p className="break-words">المندوب: {order.repName}</p>}
         </div>
       </div>
 
@@ -169,12 +190,12 @@ export function InvoiceView({ order }: { order: InvoiceData }) {
               )}
               <div>
                 <dt className="inline text-neutral-500">الهاتف: </dt>
-                <dd className="inline">{order.merchant.contactPhone ?? order.contactPhone ?? "—"}</dd>
+                <dd className="inline break-words" dir="ltr">{order.merchant.contactPhone ?? order.contactPhone ?? "—"}</dd>
               </div>
               {order.merchant.whatsappPhone && (
                 <div>
                   <dt className="inline text-neutral-500">واتساب: </dt>
-                  <dd className="inline">{order.merchant.whatsappPhone}</dd>
+                  <dd className="inline break-words" dir="ltr">{order.merchant.whatsappPhone}</dd>
                 </div>
               )}
               {(order.merchant.city || order.merchant.region) && (
@@ -201,7 +222,7 @@ export function InvoiceView({ order }: { order: InvoiceData }) {
               )}
               <div>
                 <dt className="inline text-neutral-500">الهاتف: </dt>
-                <dd className="inline">{order.contactPhone ?? "—"}</dd>
+                <dd className="inline break-words" dir="ltr">{order.contactPhone ?? "—"}</dd>
               </div>
               <div>
                 <dt className="inline text-neutral-500">المدينة: </dt>
@@ -230,12 +251,16 @@ export function InvoiceView({ order }: { order: InvoiceData }) {
         </div>
       </div>
 
-      <div className="mt-6 overflow-x-auto">
+      {/* Tablet/desktop and print: the classic table. Hidden on small mobile
+          screens (see the card layout below) but forced back on for print
+          via print:block, so printing from a phone still yields the same
+          clean tabular invoice as printing from a desktop. */}
+      <div className="mt-6 hidden overflow-x-auto sm:block print:block">
         <table className="w-full min-w-[28rem] text-start text-sm">
           <thead className="border-b border-neutral-200 text-xs font-semibold uppercase tracking-wide text-neutral-500">
             <tr>
               <th className="py-2 text-start">المنتج</th>
-              <th className="py-2 text-start">SKU</th>
+              <th className="py-2 text-start print:hidden">SKU</th>
               <th className="py-2 text-start">الكمية</th>
               <th className="py-2 text-start">سعر الوحدة</th>
               <th className="py-2 text-start">الإجمالي</th>
@@ -245,44 +270,62 @@ export function InvoiceView({ order }: { order: InvoiceData }) {
             {order.items.map((item) => (
               <tr key={item.id}>
                 <td className="max-w-[14rem] whitespace-normal break-words py-2 text-neutral-900">
-                  {item.product.nameAr ?? item.product.name}
-                  {(item.color || item.colorNameSnapshot) && (
-                    <span className="text-neutral-500"> — {item.color ? (item.color.nameAr ?? item.color.name) : item.colorNameSnapshot}</span>
-                  )}
-                  {item.phoneModelSnapshot && <span className="text-neutral-500"> — {item.phoneBrandSnapshot} / {item.phoneModelSnapshot}{item.variantCodeSnapshot ? ` (${item.variantCodeSnapshot})` : ""}</span>}
+                  <ItemNameDetails item={item} />
                 </td>
-                <td className="py-2 text-neutral-500">{item.product.sku}</td>
-                <td className="py-2 text-neutral-700">{item.quantity}</td>
-                <td className="whitespace-nowrap py-2 text-neutral-700">{formatCurrencyFromCents(item.unitPriceCents)}</td>
-                <td className="whitespace-nowrap py-2 font-medium text-neutral-900">{formatCurrencyFromCents(item.totalCents)}</td>
+                <td className="py-2 text-neutral-500 print:hidden" dir="ltr">{item.product.sku}</td>
+                <td className="py-2 text-neutral-700" dir="ltr">{item.quantity}</td>
+                <td className="whitespace-nowrap py-2 text-neutral-700" dir="ltr">{formatCurrencyFromCents(item.unitPriceCents)}</td>
+                <td className="whitespace-nowrap py-2 font-medium text-neutral-900" dir="ltr">{formatCurrencyFromCents(item.totalCents)}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
 
+      {/* Small mobile only: a stacked card per item instead of squeezing the
+          table's five columns into a narrow screen. Same items array, same
+          per-item values as the table above — presentation-only duplication.
+          Hidden for print (the table above renders instead). */}
+      <div className="mt-6 flex flex-col gap-3 sm:hidden print:hidden">
+        {order.items.map((item) => (
+          <div key={item.id} className="rounded-card border border-neutral-200 p-3 text-sm">
+            <p className="break-words font-medium text-neutral-900">
+              <ItemNameDetails item={item} />
+            </p>
+            <div className="mt-2 grid grid-cols-2 gap-y-1.5">
+              <span className="text-neutral-500">الكمية</span>
+              <span className="text-end text-neutral-700" dir="ltr">{item.quantity}</span>
+              <span className="text-neutral-500">سعر الوحدة</span>
+              <span className="text-end text-neutral-700" dir="ltr">{formatCurrencyFromCents(item.unitPriceCents)}</span>
+              <span className="font-medium text-neutral-900">الإجمالي</span>
+              <span className="text-end font-semibold text-neutral-900" dir="ltr">{formatCurrencyFromCents(item.totalCents)}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+
       <div className="mt-6 flex flex-col items-end gap-1 border-t border-neutral-200 pt-4 text-sm">
-        <div className="flex w-full max-w-xs items-center justify-between sm:w-64">
+        <div className="flex w-full max-w-xs items-center justify-between gap-3 sm:w-64">
           <span className="text-neutral-500">المجموع الفرعي</span>
-          <span className="text-neutral-900">{formatCurrencyFromCents(order.subtotalCents)}</span>
+          <span className="text-neutral-900" dir="ltr">{formatCurrencyFromCents(order.subtotalCents)}</span>
         </div>
         {order.discountCents > 0 && (
-          <div className="flex w-full max-w-xs items-center justify-between sm:w-64">
+          <div className="flex w-full max-w-xs items-center justify-between gap-3 sm:w-64">
             <span className="text-neutral-500">الخصم</span>
-            <span className="text-neutral-900">-{formatCurrencyFromCents(order.discountCents)}</span>
+            <span className="text-neutral-900" dir="ltr">-{formatCurrencyFromCents(order.discountCents)}</span>
           </div>
         )}
-        <div className="flex w-full max-w-xs items-center justify-between text-base font-semibold sm:w-64">
+        <div className="flex w-full max-w-xs items-center justify-between gap-3 text-base font-semibold sm:w-64">
           <span className="text-neutral-900">إجمالي الفاتورة</span>
-          <span className="text-neutral-900">{formatCurrencyFromCents(order.totalCents)}</span>
+          <span className="text-neutral-900" dir="ltr">{formatCurrencyFromCents(order.totalCents)}</span>
         </div>
-        <div className="flex w-full max-w-xs items-center justify-between sm:w-64">
+        <div className="flex w-full max-w-xs items-center justify-between gap-3 sm:w-64">
           <span className="text-neutral-500">المبلغ المدفوع الآن</span>
-          <span className="text-neutral-900">{formatCurrencyFromCents(order.paidAmountCents)}</span>
+          <span className="text-neutral-900" dir="ltr">{formatCurrencyFromCents(order.paidAmountCents)}</span>
         </div>
-        <div className="flex w-full max-w-xs items-center justify-between font-semibold sm:w-64">
+        <div className="flex w-full max-w-xs items-center justify-between gap-3 font-semibold sm:w-64">
           <span className="text-neutral-500">المتبقي من هذه الفاتورة</span>
-          <span className={remainingOnInvoiceCents > 0 ? "text-rose-600" : "text-neutral-900"}>
+          <span className={remainingOnInvoiceCents > 0 ? "text-rose-600" : "text-neutral-900"} dir="ltr">
             {formatCurrencyFromCents(remainingOnInvoiceCents)}
           </span>
         </div>
@@ -293,13 +336,13 @@ export function InvoiceView({ order }: { order: InvoiceData }) {
             const after = formatDebtOrCredit(order.account.debtAfterSaleCents);
             return (
               <div className="mt-2 flex w-full max-w-xs flex-col gap-1 border-t border-dashed border-neutral-200 pt-2 sm:w-64">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-3">
                   <span className="text-neutral-500">{previous.label || "الذمة السابقة"}</span>
-                  <span className={previous.isCredit ? "text-emerald-600" : "text-neutral-900"}>{previous.amount}</span>
+                  <span className={previous.isCredit ? "text-emerald-600" : "text-neutral-900"} dir="ltr">{previous.amount}</span>
                 </div>
-                <div className="flex items-center justify-between text-base font-semibold">
+                <div className="flex items-center justify-between gap-3 text-base font-semibold">
                   <span className="text-neutral-900">{after.label || "الذمة بعد البيع"}</span>
-                  <span className={after.isCredit ? "text-emerald-600" : "text-rose-600"}>{after.amount}</span>
+                  <span className={after.isCredit ? "text-emerald-600" : "text-rose-600"} dir="ltr">{after.amount}</span>
                 </div>
               </div>
             );
