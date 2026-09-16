@@ -729,6 +729,7 @@ export async function createRepSaleForRep(repId: string, _prevState: RepSaleStat
     address: formData.get("address")?.toString().trim() || undefined,
     notes: formData.get("notes")?.toString().trim() || undefined,
     repCustomerOrderId: formData.get("repCustomerOrderId")?.toString().trim() || null,
+    discountCents: formData.get("discountCents")?.toString() || "0",
     paidNowCents: formData.get("paidNowCents")?.toString() ?? "0",
     paidNowMethod: formData.get("paidNowMethod")?.toString() || undefined,
   });

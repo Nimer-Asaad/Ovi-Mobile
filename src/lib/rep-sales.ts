@@ -2,11 +2,12 @@ import "server-only";
 import { revalidatePath } from "next/cache";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { ORDER_SOURCES, ORDER_STATUSES, PAYMENT_METHODS, PAYMENT_STATUSES, STOCK_MOVEMENT_TYPES, REP_CUSTOMER_ORDER_STATUSES, MERCHANT_STATUSES } from "@/lib/constants";
+import { ORDER_SOURCES, ORDER_STATUSES, PAYMENT_METHODS, STOCK_MOVEMENT_TYPES, REP_CUSTOMER_ORDER_STATUSES, MERCHANT_STATUSES } from "@/lib/constants";
 import type { RepSaleInput } from "@/lib/validation/repSale";
 import { decrementInventoryAtomic, recordStockMovement, InsufficientInventoryError } from "@/lib/inventory-transactions";
 import { getOrCreateMerchantAccount, getAccountBalanceCents, lockAccountForBalanceUpdate, recordInitialAccountPayment } from "@/lib/accounts";
 import { resolveOrCreateRepMerchant } from "@/lib/rep-merchants";
+import { calculateLineChargeCents, calculateChargeableSubtotalCents, validateBonusQuantity, validateInvoiceDiscount, calculateInvoiceTotalCents, derivePaymentStatus } from "@/lib/sale-pricing";
 import { generateDailyOrderNumber } from "@/lib/order-number";
 import type { SaleProductOption } from "@/components/reps/ProductSalePicker";
 
@@ -139,7 +140,7 @@ export type CreateRepSaleResult = { ok: true; orderNumber: string } | { ok: fals
  * for-byte the same steps createRepSale always ran inline before this was
  * extracted. */
 export async function createRepSaleCore(input: RepSaleInput, context: CreateRepSaleContext): Promise<CreateRepSaleResult> {
-  const { items: saleItems, customerName, customerPhone, city, address, notes, repCustomerOrderId, paidNowCents, paidNowMethod } = input;
+  const { items: saleItems, customerName, customerPhone, city, address, notes, repCustomerOrderId, discountCents, paidNowCents, paidNowMethod } = input;
   const { salesRepId, carStockLocationId: locationId, actorUserId, onOrderCreated } = context;
 
   // A customer order is only ever a starting template (see the
@@ -239,21 +240,39 @@ export async function createRepSaleCore(input: RepSaleInput, context: CreateRepS
     if (requestedByLineKey.get(key)! > available) {
       return { ok: false, error: `الكمية المطلوبة لـ "${product.nameAr ?? product.name}" أكبر من مخزونك الحالي` };
     }
+    // بونص: quantity itself is never reduced for a bonus line — inventory
+    // still decrements the FULL quantity below (see decrementInventoryAtomic
+    // in the transaction) — only the charged amount is affected, via
+    // calculateLineChargeCents. This bound (0 <= bonusQuantity <= quantity)
+    // is the only bonus rule this app enforces (src/lib/sale-pricing.ts);
+    // the zod schema already shape-checks it, this is the authoritative
+    // server-side re-check.
+    const bonusError = validateBonusQuantity(item.quantity, item.bonusQuantity);
+    if (bonusError) {
+      return { ok: false, error: `${product.nameAr ?? product.name}: ${bonusError}` };
+    }
   }
 
-  const totalCents = lines.reduce((sum, item) => sum + item.unitPriceCents * item.quantity, 0);
+  // Chargeable subtotal — gross item value minus bonus value, computed once
+  // via the canonical calculateChargeableSubtotalCents (src/lib/sale-pricing.ts),
+  // never re-derived inline. خصم الفاتورة (discountCents) is then validated
+  // against THIS subtotal and subtracted to get the final invoice total —
+  // the exact same subtotal -> discount -> total shape createManualOrder
+  // already uses, now shared through one function instead of two copies.
+  const subtotalCents = calculateChargeableSubtotalCents(lines);
+  const discountError = validateInvoiceDiscount(discountCents, subtotalCents);
+  if (discountError) {
+    return { ok: false, error: discountError };
+  }
+  const totalCents = calculateInvoiceTotalCents(subtotalCents, discountCents);
 
   // The real upper-bound check — merchant previous debt + this invoice's own
-  // total — needs the trader's live account balance, which only exists once
-  // the trader identity is resolved below (resolveOrCreateRepMerchant runs
-  // inside the transaction). See the PAYMENT_EXCEEDS_MERCHANT_BALANCE check
-  // further down for the actual, authoritative validation.
-  const paymentStatus =
-    totalCents > 0 && paidNowCents >= totalCents
-      ? PAYMENT_STATUSES.PAID
-      : paidNowCents > 0
-        ? PAYMENT_STATUSES.PARTIAL
-        : PAYMENT_STATUSES.PENDING;
+  // FINAL (post-discount) total — needs the trader's live account balance,
+  // which only exists once the trader identity is resolved below
+  // (resolveOrCreateRepMerchant runs inside the transaction). See the
+  // PAYMENT_EXCEEDS_MERCHANT_BALANCE check further down for the actual,
+  // authoritative validation.
+  const paymentStatus = derivePaymentStatus(totalCents, paidNowCents);
 
   let orderNumber = "";
   let succeeded = false;
@@ -367,7 +386,8 @@ export async function createRepSaleCore(input: RepSaleInput, context: CreateRepS
             accountId,
             createdByRepId: salesRepId,
             repCustomerOrderId,
-            subtotalCents: totalCents,
+            subtotalCents,
+            discountCents,
             totalCents,
             contactName: customerName,
             contactPhone: customerPhone,
@@ -410,7 +430,8 @@ export async function createRepSaleCore(input: RepSaleInput, context: CreateRepS
                       : null,
                   quantity: item.quantity,
                   unitPriceCents: item.unitPriceCents,
-                  totalCents: item.unitPriceCents * item.quantity,
+                  bonusQuantity: item.bonusQuantity,
+                  totalCents: calculateLineChargeCents(item),
                 };
               }),
             },

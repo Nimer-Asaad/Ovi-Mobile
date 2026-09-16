@@ -14,11 +14,11 @@ import {
   ORDER_SOURCES,
   ORDER_STATUSES,
   PAYMENT_METHODS,
-  PAYMENT_STATUSES,
   STOCK_MOVEMENT_TYPES,
 } from "@/lib/constants";
 import { manualOrderSchema, MANUAL_ORDER_CUSTOMER_MODES } from "@/lib/validation/manualOrder";
 import { decrementInventoryAtomic, recordStockMovement, InsufficientInventoryError } from "@/lib/inventory-transactions";
+import { calculateLineChargeCents, calculateChargeableSubtotalCents, validateBonusQuantity, validateInvoiceDiscount, calculateInvoiceTotalCents, derivePaymentStatus } from "@/lib/sale-pricing";
 
 export interface ManualOrderState {
   error?: string;
@@ -223,6 +223,16 @@ export async function createManualOrder(
     }
     if (product.variantMode === "PHONE_COMPATIBILITY" && (!item.variantId || !product.variants.some((variant) => variant.id === item.variantId))) return { error: `اختر Variant صالحاً للمنتج "${product.nameAr ?? product.name}"` };
     if (product.variantMode !== "PHONE_COMPATIBILITY" && item.variantId) return { error: `Variant لا يتبع المنتج "${product.nameAr ?? product.name}"` };
+    // بونص: quantity itself is never reduced for a bonus line — inventory
+    // still decrements the FULL quantity below — only the charged amount is
+    // affected, via calculateLineChargeCents. This bound (0 <= bonusQuantity
+    // <= quantity) is the only bonus rule this app enforces
+    // (src/lib/sale-pricing.ts); the zod schema already shape-checks it,
+    // this is the authoritative server-side re-check.
+    const bonusError = validateBonusQuantity(item.quantity, item.bonusQuantity);
+    if (bonusError) {
+      return { error: `${product.nameAr ?? product.name}: ${bonusError}` };
+    }
   }
 
   // ADMIN_ASSISTANT never gets to set its own unit price — every line's
@@ -232,10 +242,18 @@ export async function createManualOrder(
   // ADMIN keeps full manual price-override capability, unchanged. This is
   // the real enforcement — the price input being disabled client-side is
   // only a UX hint, not a security boundary on its own.
+  //
+  // بونص is ALSO forced to 0 for this role, for the same reason discountCents
+  // is forced to 0 above: a bonus quantity is just another way to give away
+  // chargeable value for free, so leaving it open would let this
+  // no-discount-trusted role recreate a discount by another name (mark
+  // everything "بونص" instead of discounting it). ADMIN keeps full bonus
+  // capability, unchanged.
   if (isAssistant) {
     for (const item of lines) {
       const product = productById.get(item.productId)!;
       item.unitPriceCents = customerMode === MANUAL_ORDER_CUSTOMER_MODES.EXISTING_MERCHANT ? product.wholesalePriceCents : product.retailPriceCents;
+      item.bonusQuantity = 0;
     }
   }
 
@@ -308,17 +326,27 @@ export async function createManualOrder(
           : null,
       quantity: item.quantity,
       unitPriceCents: item.unitPriceCents,
-      totalCents: item.unitPriceCents * item.quantity,
+      bonusQuantity: item.bonusQuantity,
+      totalCents: calculateLineChargeCents(item),
     };
   });
-  const subtotalCents = orderItemsData.reduce((sum, item) => sum + item.totalCents, 0);
+  // Chargeable subtotal — gross item value minus bonus value, computed once
+  // via the canonical calculateChargeableSubtotalCents (src/lib/sale-pricing.ts),
+  // never re-derived inline — the exact same helper createRepSaleCore uses,
+  // so a bonus/discount rule can never quietly drift between the two flows.
+  const subtotalCents = calculateChargeableSubtotalCents(lines);
 
-  if (discountCents > subtotalCents) {
-    return { error: "الخصم أكبر من المجموع الفرعي" };
+  const discountError = validateInvoiceDiscount(discountCents, subtotalCents);
+  if (discountError) {
+    return { error: discountError };
   }
 
-  const totalCents = subtotalCents - discountCents;
+  const totalCents = calculateInvoiceTotalCents(subtotalCents, discountCents);
 
+  // Unlike createRepSaleCore, a manual order has no "previous debt" concept
+  // to pay down in the same step — trackAsAccountDebt/recordInitialAccountPayment
+  // below always applies paidAmountCents against THIS order alone, so the cap
+  // stays this order's own total, never a trader's live balance.
   if (paidAmountCents > totalCents) {
     return { error: "المبلغ المستلم أكبر من إجمالي الطلب" };
   }
@@ -333,12 +361,7 @@ export async function createManualOrder(
     return { error: "يجب استلام كامل مبلغ الطلب عند البيع المباشر من قبل مساعد الأدمن" };
   }
 
-  let paymentStatus: string = PAYMENT_STATUSES.PENDING;
-  if (paidAmountCents >= totalCents && totalCents > 0) {
-    paymentStatus = PAYMENT_STATUSES.PAID;
-  } else if (paidAmountCents > 0) {
-    paymentStatus = PAYMENT_STATUSES.PARTIAL;
-  }
+  const paymentStatus = derivePaymentStatus(totalCents, paidAmountCents);
 
   let orderNumber = "";
   let succeeded = false;

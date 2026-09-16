@@ -89,6 +89,7 @@ export default async function RepSaleDetailPage({ params }: RepSaleDetailPagePro
           id: true,
           quantity: true,
           unitPriceCents: true,
+          bonusQuantity: true,
           totalCents: true,
           color: { select: { name: true, nameAr: true } },
           phoneBrandSnapshot: true,

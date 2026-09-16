@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { ProductThumb, type PickableProduct } from "@/components/reps/ProductQuickPicker";
 import { formatCurrencyFromCents } from "@/lib/utils";
+import { calculateLineChargeCents } from "@/lib/sale-pricing";
 
 export interface SaleProductOption extends PickableProduct {
   /** This rep's car balance for the product — always ONE plain aggregate
@@ -51,7 +52,14 @@ export interface SaleProductSummary {
   productKey: string;
   productLabel: string;
   pieceCount: number;
+  /** Physical units within pieceCount given for free (بونص) — never reduces
+   * pieceCount itself (see OrderItem.bonusQuantity's schema doc comment). */
+  bonusQuantity: number;
   unitPriceCents: number;
+  /** The CHARGED subtotal — unitPriceCents × (pieceCount - bonusQuantity),
+   * via the same canonical calculateLineChargeCents the server uses, so this
+   * live preview can never drift from what createRepSaleCore will actually
+   * bill. Never trusted by the server — only ever a UI preview. */
   subtotalCents: number;
   /** True when this product has a selected quantity but no valid (> 0)
    * price yet — the one client-side validation this feature adds: never let
@@ -67,18 +75,25 @@ function parseProductPriceCents(value: string | undefined): number {
 /** Summaries for every product currently selected (quantity > 0) — used
  * both for the bottom order summary and for submit validation. Products
  * with nothing selected are omitted entirely. */
-export function summarizeSaleProducts(groups: SaleProductGroup[], quantities: Record<string, number>, productPrices: Record<string, string>): SaleProductSummary[] {
+export function summarizeSaleProducts(
+  groups: SaleProductGroup[],
+  quantities: Record<string, number>,
+  productPrices: Record<string, string>,
+  bonusQuantities: Record<string, number> = {},
+): SaleProductSummary[] {
   const summaries: SaleProductSummary[] = [];
   for (const group of groups) {
     const pieceCount = quantities[group.key] ?? 0;
     if (pieceCount === 0) continue;
     const unitPriceCents = parseProductPriceCents(productPrices[group.key]);
+    const bonusQuantity = Math.min(bonusQuantities[group.key] ?? 0, pieceCount);
     summaries.push({
       productKey: group.key,
       productLabel: group.label,
       pieceCount,
+      bonusQuantity,
       unitPriceCents,
-      subtotalCents: pieceCount * unitPriceCents,
+      subtotalCents: calculateLineChargeCents({ quantity: pieceCount, bonusQuantity, unitPriceCents }),
       priceMissing: unitPriceCents <= 0,
     });
   }
@@ -92,6 +107,7 @@ export interface SaleSubmitLine {
   deviceColorVariantId: string | null;
   quantity: number;
   unitPriceCents: number;
+  bonusQuantity: number;
 }
 
 /** The exact per-line payload createRepSale/createRepSaleForRep already
@@ -101,7 +117,12 @@ export interface SaleSubmitLine {
  * phone model (see the SaleProductOption doc comment) — colorId stays null
  * too, since a car-aggregate sale no longer distinguishes a specific
  * descriptive color either, the same simplification extended consistently. */
-export function buildSaleSubmitLines(groups: SaleProductGroup[], quantities: Record<string, number>, productPrices: Record<string, string>): SaleSubmitLine[] {
+export function buildSaleSubmitLines(
+  groups: SaleProductGroup[],
+  quantities: Record<string, number>,
+  productPrices: Record<string, string>,
+  bonusQuantities: Record<string, number> = {},
+): SaleSubmitLine[] {
   const lines: SaleSubmitLine[] = [];
   for (const group of groups) {
     const quantity = quantities[group.key] ?? 0;
@@ -113,6 +134,7 @@ export function buildSaleSubmitLines(groups: SaleProductGroup[], quantities: Rec
       deviceColorVariantId: null,
       quantity,
       unitPriceCents: parseProductPriceCents(productPrices[group.key]),
+      bonusQuantity: Math.min(bonusQuantities[group.key] ?? 0, quantity),
     });
   }
   return lines;
@@ -149,15 +171,19 @@ function ProductCard({
   onQuantityChange,
   priceValue,
   onPriceChange,
+  bonusQuantity,
+  onBonusQuantityChange,
 }: {
   group: SaleProductGroup;
   quantity: number;
   onQuantityChange: (quantity: number) => void;
   priceValue: string;
   onPriceChange: (value: string) => void;
+  bonusQuantity: number;
+  onBonusQuantityChange: (bonusQuantity: number) => void;
 }) {
   const unitPriceCents = parseProductPriceCents(priceValue);
-  const subtotalCents = quantity * unitPriceCents;
+  const subtotalCents = calculateLineChargeCents({ quantity, bonusQuantity, unitPriceCents });
   const priceMissing = quantity > 0 && unitPriceCents <= 0;
 
   return (
@@ -172,17 +198,36 @@ function ProductCard({
       </div>
 
       {quantity > 0 && (
-        <div className="flex flex-wrap items-end justify-between gap-2 border-t border-navy-soft pt-2">
-          <Input
-            label="سعر الحبة"
-            type="number"
-            min={0}
-            step={0.01}
-            value={priceValue}
-            onChange={(event) => onPriceChange(event.target.value)}
-            className="w-28"
-            error={priceMissing ? "أدخل سعر الحبة" : undefined}
-          />
+        <div className="flex flex-col gap-2 border-t border-navy-soft pt-2">
+          <div className="flex flex-wrap items-end justify-between gap-2">
+            <Input
+              label="سعر الحبة"
+              type="number"
+              min={0}
+              step={0.01}
+              value={priceValue}
+              onChange={(event) => onPriceChange(event.target.value)}
+              className="w-28"
+              error={priceMissing ? "أدخل سعر الحبة" : undefined}
+            />
+            <Input
+              label="بونص (كمية مجانية)"
+              type="number"
+              min={0}
+              max={quantity}
+              value={bonusQuantity}
+              onChange={(event) => {
+                const next = Math.floor(Number(event.target.value));
+                onBonusQuantityChange(Number.isFinite(next) ? Math.min(Math.max(next, 0), quantity) : 0);
+              }}
+              className="w-28"
+            />
+          </div>
+          {bonusQuantity > 0 && (
+            <p className="text-xs text-gold-champagne">
+              {bonusQuantity >= quantity ? "الصنف بالكامل بونص (مجاني)" : `منها ${bonusQuantity} بونص (مجاني)`}
+            </p>
+          )}
           <p className="text-sm font-semibold text-neutral-bg">الإجمالي: {formatCurrencyFromCents(subtotalCents)}</p>
         </div>
       )}
@@ -196,6 +241,8 @@ export interface ProductSalePickerProps {
   onQuantityChange: (productKey: string, quantity: number) => void;
   productPrices: Record<string, string>;
   onProductPriceChange: (productKey: string, value: string) => void;
+  bonusQuantities?: Record<string, number>;
+  onBonusQuantityChange?: (productKey: string, bonusQuantity: number) => void;
 }
 
 function groupHasSelection(group: SaleProductGroup, quantities: Record<string, number>): boolean {
@@ -217,7 +264,7 @@ function groupHasSelection(group: SaleProductGroup, quantities: Record<string, n
  * products on top of whatever is already selected, deduplicated — a
  * selected product never silently drops off screen just because it stopped
  * matching the current query. */
-export function ProductSalePicker({ groups, quantities, onQuantityChange, productPrices, onProductPriceChange }: ProductSalePickerProps) {
+export function ProductSalePicker({ groups, quantities, onQuantityChange, productPrices, onProductPriceChange, bonusQuantities = {}, onBonusQuantityChange }: ProductSalePickerProps) {
   const [search, setSearch] = useState("");
 
   const normalizedSearch = search.trim().toLowerCase();
@@ -253,6 +300,8 @@ export function ProductSalePicker({ groups, quantities, onQuantityChange, produc
               onQuantityChange={(quantity) => onQuantityChange(group.key, quantity)}
               priceValue={productPrices[group.key] ?? ""}
               onPriceChange={(value) => onProductPriceChange(group.key, value)}
+              bonusQuantity={bonusQuantities[group.key] ?? 0}
+              onBonusQuantityChange={(bonusQuantity) => onBonusQuantityChange?.(group.key, bonusQuantity)}
             />
           ))}
         </div>

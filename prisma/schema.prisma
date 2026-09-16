@@ -1032,6 +1032,22 @@ model OrderItem {
   phoneModelSnapshot   String?
   colorNameSnapshot    String?
   quantity             Int
+  /// Physical units within `quantity` given for free (بونص) — always
+  /// 0 <= bonusQuantity <= quantity, enforced in application code (see
+  /// src/lib/sale-pricing.ts). Defaults to 0 so every row created before
+  /// this column existed is unaffected. `quantity` keeps its exact original
+  /// meaning (the TOTAL physical count — inventory decrement/restock reads
+  /// this field alone, entirely unaware of bonusQuantity, both before and
+  /// after this column existed). `unitPriceCents` likewise keeps its
+  /// original meaning (the normal per-unit price snapshot, unaffected by
+  /// how many of this line are bonus). Only `totalCents` below is
+  /// authoritatively computed as unitPriceCents * (quantity -
+  /// bonusQuantity) at order-creation time — the CHARGED amount for this
+  /// line — so a bonusQuantity == quantity line always persists
+  /// totalCents = 0, and every consumer that already just reads totalCents
+  /// as "this line's revenue" (invoices, reports, statements) needs no
+  /// changes to correctly show/count zero revenue for a fully-bonus line.
+  bonusQuantity        Int                 @default(0)
   unitPriceCents       Int
   totalCents           Int
 

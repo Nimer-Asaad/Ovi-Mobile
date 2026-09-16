@@ -67,6 +67,7 @@ export default async function AdminOrderDetailPage({ params }: AdminOrderDetailP
           id: true,
           quantity: true,
           unitPriceCents: true,
+          bonusQuantity: true,
           totalCents: true,
           color: { select: { name: true, nameAr: true } },
           phoneBrandSnapshot: true,
@@ -160,6 +161,11 @@ export default async function AdminOrderDetailPage({ params }: AdminOrderDetailP
                       {formatCurrencyFromCents(item.unitPriceCents)}
                       {isWholesaleOrder && " (سعر الجملة)"} × {item.quantity}
                     </p>
+                    {item.bonusQuantity > 0 && (
+                      <p className="text-xs font-medium text-gold-champagne">
+                        {item.bonusQuantity >= item.quantity ? "الصنف بالكامل بونص (مجاني)" : `منها ${item.bonusQuantity} بونص (مجاني)`}
+                      </p>
+                    )}
                   </div>
                   <span className="font-semibold text-neutral-bg">
                     {formatCurrencyFromCents(item.totalCents)}

@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Spinner";
 import { formatCurrencyFromCents, cn } from "@/lib/utils";
 import { MANUAL_ORDER_CUSTOMER_MODES } from "@/lib/validation/manualOrder";
+import { calculateLineChargeCents, calculateChargeableSubtotalCents } from "@/lib/sale-pricing";
 import { ManualOrderProductPicker } from "./ManualOrderProductPicker";
 import { ManualOrderSummary } from "./ManualOrderSummary";
 
@@ -98,6 +99,9 @@ interface ManualOrderLine {
   label: string;
   unitPriceCents: number;
   quantity: number;
+  /** Physical units within `quantity` given for free (بونص) — never reduces
+   * quantity itself (see OrderItem.bonusQuantity's schema doc comment). */
+  bonusQuantity: number;
   stock: number;
 }
 
@@ -253,6 +257,7 @@ export function ManualOrderForm({
         label: product.nameAr ?? product.name,
         unitPriceCents,
         quantity: 1,
+        bonusQuantity: 0,
         stock: combo ? combo.stock : variant ? variant.stock : product.stock,
       },
     ]);
@@ -269,9 +274,22 @@ export function ManualOrderForm({
     setLines((prev) =>
       prev.map((line) =>
         lineKey(line.productId, line.colorId, line.variantId, line.deviceColorVariantId) === lineKey(productId, colorId, variantId, deviceColorVariantId)
-          ? { ...line, quantity }
+          ? { ...line, quantity, bonusQuantity: Math.min(line.bonusQuantity, quantity) }
           : line,
       ),
+    );
+  }
+
+  function handleBonusQuantityChange(productId: string, colorId: string | null, variantId: string | null, deviceColorVariantId: string | null, value: string) {
+    setLines((prev) =>
+      prev.map((line) => {
+        if (lineKey(line.productId, line.colorId, line.variantId, line.deviceColorVariantId) !== lineKey(productId, colorId, variantId, deviceColorVariantId)) {
+          return line;
+        }
+        const parsed = Math.floor(Number(value) || 0);
+        const bonusQuantity = Number.isFinite(parsed) ? Math.min(Math.max(parsed, 0), line.quantity) : 0;
+        return { ...line, bonusQuantity };
+      }),
     );
   }
 
@@ -286,10 +304,10 @@ export function ManualOrderForm({
     );
   }
 
-  const subtotalCents = useMemo(
-    () => lines.reduce((sum, line) => sum + line.unitPriceCents * line.quantity, 0),
-    [lines],
-  );
+  // Chargeable subtotal — gross item value minus bonus value, via the
+  // canonical calculateChargeableSubtotalCents (src/lib/sale-pricing.ts),
+  // the exact same helper createManualOrder itself uses server-side.
+  const subtotalCents = useMemo(() => calculateChargeableSubtotalCents(lines), [lines]);
 
   const itemsJson = useMemo(
     () =>
@@ -301,6 +319,7 @@ export function ManualOrderForm({
           deviceColorVariantId: line.deviceColorVariantId,
           quantity: line.quantity,
           unitPriceCents: line.unitPriceCents,
+          bonusQuantity: line.bonusQuantity,
         })),
       ),
     [lines],
@@ -480,6 +499,11 @@ export function ManualOrderForm({
                         {line.colorLabel && <span> — {line.colorLabel}</span>}
                       </p>
                       <p className="text-xs text-neutral-bg/50">{line.sku} · متوفر: {line.stock}</p>
+                      {line.bonusQuantity > 0 && (
+                        <p className="text-xs text-gold-champagne">
+                          {line.bonusQuantity >= line.quantity ? "الصنف بالكامل بونص (مجاني)" : `منها ${line.bonusQuantity} بونص (مجاني)`}
+                        </p>
+                      )}
                     </div>
                     <div className="w-20">
                       <Input
@@ -506,8 +530,24 @@ export function ManualOrderForm({
                         aria-label="سعر الوحدة"
                       />
                     </div>
+                    <div className="w-24">
+                      <Input
+                        type="number"
+                        min={0}
+                        max={line.quantity}
+                        value={line.bonusQuantity}
+                        onChange={
+                          isAssistant
+                            ? undefined
+                            : (event) => handleBonusQuantityChange(line.productId, line.colorId, line.variantId, line.deviceColorVariantId, event.target.value)
+                        }
+                        disabled={isAssistant}
+                        aria-label="كمية البونص"
+                        title="بونص (كمية مجانية)"
+                      />
+                    </div>
                     <div className="w-24 text-end text-sm font-semibold text-neutral-bg">
-                      {formatCurrencyFromCents(line.unitPriceCents * line.quantity)}
+                      {formatCurrencyFromCents(calculateLineChargeCents(line))}
                     </div>
                     <Button
                       type="button"

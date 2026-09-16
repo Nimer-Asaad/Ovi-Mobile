@@ -2,17 +2,26 @@ import { z } from "zod";
 import { ACCOUNT_PAYMENT_METHODS } from "@/lib/constants";
 import { nonNegativeMoneyString } from "@/lib/validation/manualOrder";
 
-const saleItemSchema = z.object({
-  productId: z.string().min(1, "المنتج مطلوب"),
-  /** Null for a colorless product/line. */
-  colorId: z.string().nullable().optional(),
-  variantId: z.string().nullable().optional(),
-  deviceColorVariantId: z.string().nullable().optional(),
-  quantity: z.number().int("الكمية يجب أن تكون رقماً صحيحاً").positive("الكمية يجب أن تكون أكبر من صفر"),
-  /** Already converted to integer agorot cents client-side, same convention
-   * as every other money field. */
-  unitPriceCents: z.number().int().positive("سعر البيع يجب أن يكون أكبر من صفر"),
-});
+const saleItemSchema = z
+  .object({
+    productId: z.string().min(1, "المنتج مطلوب"),
+    /** Null for a colorless product/line. */
+    colorId: z.string().nullable().optional(),
+    variantId: z.string().nullable().optional(),
+    deviceColorVariantId: z.string().nullable().optional(),
+    quantity: z.number().int("الكمية يجب أن تكون رقماً صحيحاً").positive("الكمية يجب أن تكون أكبر من صفر"),
+    /** Already converted to integer agorot cents client-side, same convention
+     * as every other money field. */
+    unitPriceCents: z.number().int().positive("سعر البيع يجب أن يكون أكبر من صفر"),
+    /** Physical units within `quantity` given for free (بونص) — see
+     * OrderItem.bonusQuantity's schema doc comment. 0 by default (the
+     * normal, non-bonus case). Bounds (0 <= bonusQuantity <= quantity) are
+     * re-validated authoritatively server-side via validateBonusQuantity
+     * (src/lib/sale-pricing.ts) — this shape check only rejects an
+     * obviously malformed number. */
+    bonusQuantity: z.number().int("كمية البونص يجب أن تكون رقماً صحيحاً").nonnegative("كمية البونص لا يمكن أن تكون سالبة").default(0),
+  })
+  .refine((item) => item.bonusQuantity <= item.quantity, { message: "كمية البونص أكبر من الكمية الفعلية للصنف", path: ["bonusQuantity"] });
 
 export const repSaleSchema = z
   .object({
@@ -34,6 +43,16 @@ export const repSaleSchema = z
      * freely first, `items` above always wins as the actual sale content.
      * Null/omitted for a normal blank sale. */
     repCustomerOrderId: z.string().nullable().optional(),
+    /** خصم الفاتورة — a single fixed-money (agorot) discount applied to the
+     * sale's chargeable subtotal (never a percentage, never per-line). 0 by
+     * default. Bounds (0 <= discountCents <= chargeable subtotal) are
+     * re-validated authoritatively server-side via validateInvoiceDiscount
+     * (src/lib/sale-pricing.ts) once the real chargeable subtotal is known
+     * from these exact items — this shape check only rejects a malformed
+     * string. Reuses manualOrder's existing nonNegativeMoneyString
+     * convention (the same one createManualOrder's own discountCents
+     * already uses) rather than a second money-string schema. */
+    discountCents: nonNegativeMoneyString,
     /** How much of this invoice the trader is paying right now — 0 is the
      * normal "fully on account" case. May exceed this invoice's own total
      * when the trader also has previous debt on their account: the extra

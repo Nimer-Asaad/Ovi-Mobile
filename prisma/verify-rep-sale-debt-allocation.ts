@@ -95,13 +95,14 @@ async function sell(phone: string, amountCents: number, paidNowCents: number) {
   try {
     return await createRepSaleCore(
       {
-        items: [{ productId: product.id, colorId: null, variantId: null, deviceColorVariantId: null, quantity: 1, unitPriceCents: amountCents }],
+        items: [{ productId: product.id, colorId: null, variantId: null, deviceColorVariantId: null, quantity: 1, unitPriceCents: amountCents, bonusQuantity: 0 }],
         customerName: `${runId}-${phone}`,
         customerPhone: phone,
         city: undefined,
         address: undefined,
         notes: undefined,
         repCustomerOrderId: null,
+        discountCents: 0,
         paidNowCents,
         paidNowMethod: ACCOUNT_PAYMENT_METHODS.CASH,
       },

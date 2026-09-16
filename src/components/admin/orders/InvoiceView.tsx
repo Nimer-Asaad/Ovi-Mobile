@@ -7,6 +7,12 @@ export interface InvoiceItem {
   id: string;
   quantity: number;
   unitPriceCents: number;
+  /** Physical units within `quantity` given for free (بونص) — never a
+   * reduced quantity (see OrderItem.bonusQuantity's schema doc comment):
+   * `quantity` above always stays the full physical count. `totalCents`
+   * already reflects the charged (bonus-excluded) value; this field is only
+   * used to render the distinguishing "منها N بونص" note below. */
+  bonusQuantity: number;
   totalCents: number;
   color: { name: string; nameAr: string | null } | null;
   phoneBrandSnapshot: string | null;
@@ -112,6 +118,11 @@ function ItemNameDetails({ item }: { item: InvoiceItem }) {
           {" "}
           — {item.phoneBrandSnapshot} / {item.phoneModelSnapshot}
           {item.variantCodeSnapshot ? ` (${item.variantCodeSnapshot})` : ""}
+        </span>
+      )}
+      {item.bonusQuantity > 0 && (
+        <span className="mt-0.5 block text-xs font-medium text-amber-600">
+          {item.bonusQuantity >= item.quantity ? "الصنف بالكامل بونص (مجاني)" : `منها ${item.bonusQuantity} بونص (مجاني)`}
         </span>
       )}
     </>
@@ -282,7 +293,7 @@ export function InvoiceView({ order }: { order: InvoiceData }) {
 
       <div className="mt-6 flex flex-col items-end gap-1 border-t border-neutral-200 pt-4 text-sm">
         <div className="flex w-full max-w-xs items-center justify-between gap-3 sm:w-64">
-          <span className="text-neutral-500">المجموع الفرعي</span>
+          <span className="text-neutral-500">المجموع قبل الخصم</span>
           <span className="text-neutral-900" dir="ltr">{formatCurrencyFromCents(order.subtotalCents)}</span>
         </div>
         {order.discountCents > 0 && (
@@ -292,7 +303,7 @@ export function InvoiceView({ order }: { order: InvoiceData }) {
           </div>
         )}
         <div className="flex w-full max-w-xs items-center justify-between gap-3 text-base font-semibold sm:w-64">
-          <span className="text-neutral-900">إجمالي الفاتورة</span>
+          <span className="text-neutral-900">إجمالي الفاتورة بعد الخصم</span>
           <span className="text-neutral-900" dir="ltr">{formatCurrencyFromCents(order.totalCents)}</span>
         </div>
         <div className="flex w-full max-w-xs items-center justify-between gap-3 sm:w-64">

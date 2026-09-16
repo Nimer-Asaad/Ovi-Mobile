@@ -19,18 +19,25 @@ export const nonNegativeMoneyString = z
   })
   .transform((v) => Math.round(Number(v) * 100));
 
-const manualOrderItemSchema = z.object({
-  productId: z.string().min(1, "المنتج مطلوب"),
-  /** Null for a colorless product/line. */
-  colorId: z.string().nullable().optional(),
-  variantId: z.string().nullable().optional(),
-  /** Set only for a DEVICE_MODEL_COLOR line — mutually exclusive with
-   * variantId (enforced server-side in actions.ts, mirroring the DB CHECK
-   * constraint every other inventory-mutating flow already respects). */
-  deviceColorVariantId: z.string().nullable().optional(),
-  quantity: z.number().int("الكمية يجب أن تكون رقماً صحيحاً").positive("الكمية يجب أن تكون أكبر من صفر"),
-  unitPriceCents: z.number().int("السعر يجب أن يكون رقماً صحيحاً").nonnegative("السعر لا يمكن أن يكون سالباً"),
-});
+const manualOrderItemSchema = z
+  .object({
+    productId: z.string().min(1, "المنتج مطلوب"),
+    /** Null for a colorless product/line. */
+    colorId: z.string().nullable().optional(),
+    variantId: z.string().nullable().optional(),
+    /** Set only for a DEVICE_MODEL_COLOR line — mutually exclusive with
+     * variantId (enforced server-side in actions.ts, mirroring the DB CHECK
+     * constraint every other inventory-mutating flow already respects). */
+    deviceColorVariantId: z.string().nullable().optional(),
+    quantity: z.number().int("الكمية يجب أن تكون رقماً صحيحاً").positive("الكمية يجب أن تكون أكبر من صفر"),
+    unitPriceCents: z.number().int("السعر يجب أن يكون رقماً صحيحاً").nonnegative("السعر لا يمكن أن يكون سالباً"),
+    /** Physical units within `quantity` given for free (بونص) — see
+     * OrderItem.bonusQuantity's schema doc comment. 0 by default. Bounds
+     * re-validated authoritatively server-side via validateBonusQuantity
+     * (src/lib/sale-pricing.ts). */
+    bonusQuantity: z.number().int("كمية البونص يجب أن تكون رقماً صحيحاً").nonnegative("كمية البونص لا يمكن أن تكون سالبة").default(0),
+  })
+  .refine((item) => item.bonusQuantity <= item.quantity, { message: "كمية البونص أكبر من الكمية الفعلية للصنف", path: ["bonusQuantity"] });
 
 export const manualOrderSchema = z.object({
   customerMode: z.enum(

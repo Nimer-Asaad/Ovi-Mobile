@@ -18,6 +18,7 @@ import {
   summarizeSaleProducts,
   type SaleProductOption,
 } from "@/components/reps/ProductSalePicker";
+import { calculateInvoiceTotalCents } from "@/lib/sale-pricing";
 import type { RepCustomerOrderOption } from "@/lib/rep-customer-orders";
 
 export type { SaleProductOption } from "@/components/reps/ProductSalePicker";
@@ -102,6 +103,13 @@ export function NewSaleForm({ products, customers, customerOrders, action = crea
   // read of `groups` + these two maps (see buildSaleSubmitLines).
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [productPrices, setProductPrices] = useState<Record<string, string>>({});
+  const [bonusQuantities, setBonusQuantities] = useState<Record<string, number>>({});
+
+  // خصم الفاتورة — a single fixed-money (NIS) discount applied to the
+  // chargeable (bonus-excluded) subtotal, same raw-typed-string convention
+  // as paidNowInput/productPrices. Server (createRepSaleCore, via
+  // validateInvoiceDiscount) is the real authority — this is only a preview.
+  const [discountInput, setDiscountInput] = useState("0");
 
   const [customerName, setCustomerName] = useState(initialCustomer?.name ?? "");
   const [customerPhone, setCustomerPhone] = useState(initialCustomer?.phone ?? "");
@@ -138,6 +146,10 @@ export function NewSaleForm({ products, customers, customerOrders, action = crea
 
   function handleProductPriceChange(productKey: string, value: string) {
     setProductPrices((prev) => ({ ...prev, [productKey]: value }));
+  }
+
+  function handleBonusQuantityChange(productKey: string, bonusQuantity: number) {
+    setBonusQuantities((prev) => ({ ...prev, [productKey]: bonusQuantity }));
   }
 
   function handleCustomerNameChange(event: ChangeEvent<HTMLInputElement>) {
@@ -205,6 +217,7 @@ export function NewSaleForm({ products, customers, customerOrders, action = crea
       }
     }
     setQuantities(nextQuantities);
+    setBonusQuantities({});
     setCustomerName(order.customerName);
     setCustomerPhone("");
     setCity("");
@@ -218,6 +231,8 @@ export function NewSaleForm({ products, customers, customerOrders, action = crea
   function handleStartBlankSale() {
     setQuantities({});
     setProductPrices({});
+    setBonusQuantities({});
+    setDiscountInput("0");
     setCustomerName("");
     setCustomerPhone("");
     setCity("");
@@ -231,12 +246,27 @@ export function NewSaleForm({ products, customers, customerOrders, action = crea
     setPaidNowMethod(ACCOUNT_PAYMENT_METHODS.CASH);
   }
 
-  const productSummaries = useMemo(() => summarizeSaleProducts(groups, quantities, productPrices), [groups, quantities, productPrices]);
+  const productSummaries = useMemo(
+    () => summarizeSaleProducts(groups, quantities, productPrices, bonusQuantities),
+    [groups, quantities, productPrices, bonusQuantities],
+  );
   const totalPieces = productSummaries.reduce((sum, product) => sum + product.pieceCount, 0);
-  const totalCents = productSummaries.reduce((sum, product) => sum + product.subtotalCents, 0);
+  // Chargeable subtotal — gross value minus bonus value, already netted per
+  // line by summarizeSaleProducts (calculateLineChargeCents). خصم الفاتورة
+  // below is then subtracted from THIS, never from a gross pre-bonus total.
+  const subtotalCents = productSummaries.reduce((sum, product) => sum + product.subtotalCents, 0);
   const hasMissingPrice = productSummaries.some((product) => product.priceMissing);
 
-  const itemsJson = useMemo(() => JSON.stringify(buildSaleSubmitLines(groups, quantities, productPrices)), [groups, quantities, productPrices]);
+  // Display-only clamp/preview — the real bound (0 <= discount <= chargeable
+  // subtotal) is re-validated authoritatively server-side via
+  // validateInvoiceDiscount, from the SAME items this form submits.
+  const discountCentsPreview = Math.min(Math.max(Math.round((Number(discountInput) || 0) * 100), 0), subtotalCents);
+  const totalCents = calculateInvoiceTotalCents(subtotalCents, discountCentsPreview);
+
+  const itemsJson = useMemo(
+    () => JSON.stringify(buildSaleSubmitLines(groups, quantities, productPrices, bonusQuantities)),
+    [groups, quantities, productPrices, bonusQuantities],
+  );
 
   // The trader's total obligation once this sale is added — previous debt
   // (never a credit; a credit balance doesn't raise how much can be paid
@@ -264,6 +294,7 @@ export function NewSaleForm({ products, customers, customerOrders, action = crea
       <form action={formAction} className="order-1 flex min-w-0 flex-1 flex-col gap-6 lg:order-2">
         <input type="hidden" name="items" value={itemsJson} />
         <input type="hidden" name="repCustomerOrderId" value={selectedOrderId ?? ""} />
+        <input type="hidden" name="discountCents" value={discountInput} />
         <input type="hidden" name="paidNowCents" value={paidNowInput} />
         <input type="hidden" name="paidNowMethod" value={paidNowMethod} />
 
@@ -285,6 +316,8 @@ export function NewSaleForm({ products, customers, customerOrders, action = crea
               onQuantityChange={handleQuantityChange}
               productPrices={productPrices}
               onProductPriceChange={handleProductPriceChange}
+              bonusQuantities={bonusQuantities}
+              onBonusQuantityChange={handleBonusQuantityChange}
             />
           </CardContent>
         </Card>
@@ -298,19 +331,46 @@ export function NewSaleForm({ products, customers, customerOrders, action = crea
               <div className="flex flex-col divide-y divide-navy-soft">
                 {productSummaries.map((product) => (
                   <div key={product.productKey} className="flex items-center justify-between gap-3 py-2 text-sm first:pt-0 last:pb-0">
-                    <span className="text-neutral-bg">{product.productLabel}</span>
+                    <span className="text-neutral-bg">
+                      {product.productLabel}
+                      {product.bonusQuantity > 0 && (
+                        <span className="ms-2 text-xs text-gold-champagne">
+                          {product.bonusQuantity >= product.pieceCount ? "(بونص بالكامل)" : `(منها ${product.bonusQuantity} بونص)`}
+                        </span>
+                      )}
+                    </span>
                     <span className="text-neutral-bg/70">
                       {product.pieceCount} × {formatCurrencyFromCents(product.unitPriceCents)} = {formatCurrencyFromCents(product.subtotalCents)}
                     </span>
                   </div>
                 ))}
-                <div className="flex items-center justify-between pt-3 text-sm font-semibold">
+                <div className="flex items-center justify-between pt-3 text-sm">
                   <span className="text-neutral-bg">إجمالي القطع: {totalPieces}</span>
-                  <span className="text-gold-champagne">إجمالي الفاتورة: {formatCurrencyFromCents(totalCents)}</span>
+                  <span className="text-neutral-bg/70">المجموع قبل الخصم: {formatCurrencyFromCents(subtotalCents)}</span>
+                </div>
+                {discountCentsPreview > 0 && (
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-neutral-bg/70">الخصم</span>
+                    <span className="text-rose-400">- {formatCurrencyFromCents(discountCentsPreview)}</span>
+                  </div>
+                )}
+                <div className="flex items-center justify-between pt-1 text-sm font-semibold">
+                  <span className="text-neutral-bg">إجمالي الفاتورة بعد الخصم</span>
+                  <span className="text-gold-champagne">{formatCurrencyFromCents(totalCents)}</span>
                 </div>
               </div>
 
               <div className="mt-4 flex flex-col gap-3 border-t border-navy-soft pt-4">
+                <Input
+                  name="discountDisplay"
+                  type="number"
+                  min={0}
+                  max={subtotalCents / 100}
+                  step="0.01"
+                  label="الخصم (₪)"
+                  value={discountInput}
+                  onChange={(event) => setDiscountInput(event.target.value)}
+                />
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <Input
                     name="paidNowDisplay"

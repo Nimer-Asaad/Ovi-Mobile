@@ -17,6 +17,7 @@
     "verify:rep-sale-debt-allocation": "node --conditions=react-server --import tsx prisma/verify-rep-sale-debt-allocation.ts",
     "verify:online-sales-commission": "node --conditions=react-server --import tsx prisma/verify-online-sales-commission.ts",
     "verify:merchant-merge": "node --conditions=react-server --import tsx prisma/verify-merchant-merge.ts",
+    "verify:sale-discount-bonus": "node --conditions=react-server --import tsx prisma/verify-sale-discount-bonus.ts",
     "postinstall": "prisma generate",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
