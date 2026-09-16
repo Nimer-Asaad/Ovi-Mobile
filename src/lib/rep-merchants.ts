@@ -95,10 +95,21 @@ export interface RepTraderContact {
  * by this rep during a past sale/customer-order (see createRepSale /
  * resolveOrCreateRepMerchant). Only traders with a known phone are included,
  * since phone is how that resolution later re-identifies the same trader
- * instead of creating a duplicate. */
+ * instead of creating a duplicate.
+ *
+ * status: APPROVED only — this feeds NEW-activity pickers (start a sale,
+ * load a customer order) exclusively, never a historical/reference view, so
+ * a merged-away/SUSPENDED duplicate (see mergeMerchants in
+ * src/lib/merchant-merge.ts) must never be suggested here. This does not
+ * change resolveOrCreateRepMerchant's own phone-matching query, which stays
+ * deliberately unfiltered by status — see that function's own doc comment
+ * for why filtering it would risk recreating the exact duplicate this
+ * exclusion exists to prevent. A rep who still has the old phone typed in
+ * will instead hit the existing MERCHANT_NOT_APPROVED rejection at the
+ * moment of sale, same as before this exclusion existed. */
 export async function getRepTraderContactsForSaleForm(repId: string): Promise<RepTraderContact[]> {
   const merchants = await prisma.merchant.findMany({
-    where: { assignedRepId: repId },
+    where: { assignedRepId: repId, status: MERCHANT_STATUSES.APPROVED },
     orderBy: { businessName: "asc" },
     select: {
       id: true,
@@ -147,7 +158,17 @@ export interface ResolveRepMerchantInput {
  * needs to attach a real trader identity to a rep's activity resolves the
  * SAME Merchant instead of a second, inconsistent one. Must run inside the
  * caller's own transaction, and never creates a duplicate: two calls with
- * the same rep+phone always return the same Merchant.id. */
+ * the same rep+phone always return the same Merchant.id.
+ *
+ * Deliberately NOT filtered by status (unlike
+ * getRepTraderContactsForSaleForm's APPROVED-only autocomplete) — if a phone
+ * only matches a now-SUSPENDED merchant (e.g. one merged away by
+ * mergeMerchants, src/lib/merchant-merge.ts), filtering it out here would
+ * find no match and CREATE A BRAND-NEW duplicate merchant for that same
+ * phone, recreating exactly the problem a merge exists to fix. Returning
+ * the suspended match instead lets the caller's own
+ * MERCHANT_NOT_APPROVED-style check (see createRepSaleCore) reject the sale
+ * with a clear message, without ever spawning a fresh duplicate. */
 export async function resolveOrCreateRepMerchant(tx: Tx, input: ResolveRepMerchantInput): Promise<{ id: string; userId: string | null; status: string }> {
   const existing = await tx.merchant.findFirst({
     where: {

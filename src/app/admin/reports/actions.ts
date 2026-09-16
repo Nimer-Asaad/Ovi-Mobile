@@ -153,6 +153,9 @@ export async function createReplacementPaymentAction(
     if (isCorrectsPaymentUniqueError(error)) {
       return { error: "تم بالفعل تسجيل دفعة تصحيحية لهذه الدفعة" };
     }
+    if (error instanceof Error && error.message === "ACCOUNT_INACTIVE") {
+      return { error: "هذا الحساب غير نشط (تم دمجه مع حساب آخر) ولا يمكن تسجيل دفعة تصحيحية عليه." };
+    }
     throw error;
   }
 

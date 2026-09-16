@@ -165,6 +165,17 @@ export const ADMIN_AUDIT_ACTIONS = {
   MERCHANT_REJECTED: "MERCHANT_REJECTED",
   MERCHANT_SUSPENDED: "MERCHANT_SUSPENDED",
   MERCHANT_STATUS_RESET: "MERCHANT_STATUS_RESET",
+  /// Written by mergeMerchants (src/lib/merchant-merge.ts) when an ADMIN
+  /// merges a duplicate merchant record into a canonical one. targetUserId
+  /// prefers the SURVIVING merchant's own linked User (if login-based),
+  /// falling back to the MERGED-AWAY merchant's User, matching
+  /// updateMerchantStatus's own "skip logging when neither side has a
+  /// linked User" precedent (see mergeMerchants — a purely login-less
+  /// merge still performs the data merge, it just has nothing meaningful
+  /// to log against a User account). newValue/oldValue carry both merchant
+  /// ids/names and the before/after account balances — never a password,
+  /// token, or session value.
+  MERCHANT_MERGED: "MERCHANT_MERGED",
   PASSWORD_RESET: "PASSWORD_RESET",
   /// "Act as Sales Representative" impersonation — see
   /// src/lib/auth/impersonation.ts. targetUserId on these two rows is

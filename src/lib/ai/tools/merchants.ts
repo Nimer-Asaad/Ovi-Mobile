@@ -1,5 +1,6 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
+import { MERCHANT_STATUSES } from "@/lib/constants";
 import { getAccountBalanceCents } from "@/lib/accounts";
 import { buildEntityRetrievalVariants } from "@/lib/ai/language/search-variants";
 import { scoreCandidateLabel, classifyCandidates, type ConfidenceAction, type MatchType } from "@/lib/ai/fuzzy";
@@ -53,8 +54,15 @@ export async function searchMerchants(query: string, limit = MERCHANT_LIMIT_DEFA
     { user: { phone: { contains: variant, mode: "insensitive" as const } } },
   ]);
 
+  // status != SUSPENDED — this is the "which live merchant is this"
+  // candidate search, so a duplicate archived by mergeMerchants
+  // (src/lib/merchant-merge.ts) must never surface as if it were still a
+  // live, selectable merchant. This does NOT hide any history: a query
+  // that already has the merchant's id in hand (getMerchantAccountSummary/
+  // getMerchantRecentActivity below) still works on a SUSPENDED merchant —
+  // only this name/phone candidate search is filtered.
   const merchants = await prisma.merchant.findMany({
-    where: { OR: orFilters },
+    where: { OR: orFilters, status: { not: MERCHANT_STATUSES.SUSPENDED } },
     select: { id: true, businessName: true, contactName: true, region: true, status: true, user: { select: { name: true } } },
     take: POOL_FETCH_LIMIT,
   });

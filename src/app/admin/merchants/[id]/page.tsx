@@ -120,6 +120,11 @@ export default async function AdminMerchantDetailPage({ params }: AdminMerchantD
                 تعديل بيانات التاجر
               </Button>
             </Link>
+            <Link href={`/admin/merchants/${merchant.id}/merge`}>
+              <Button variant="outline" size="sm">
+                دمج تاجر مكرر
+              </Button>
+            </Link>
             <DeleteMerchantControl
               merchantName={merchant.businessName}
               willArchiveInstead={willArchiveInstead}

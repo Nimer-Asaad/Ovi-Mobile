@@ -156,12 +156,20 @@ export async function recordAccountPayment(
     return { error: "الحساب غير موجود" };
   }
 
-  const payment = await prisma.$transaction((tx) =>
-    recordManualAccountPayment(tx, parsed.data.accountId, parsed.data.amountCents, admin.id, {
-      method: parsed.data.method,
-      note: parsed.data.note,
-    }),
-  );
+  let payment: { id: string };
+  try {
+    payment = await prisma.$transaction((tx) =>
+      recordManualAccountPayment(tx, parsed.data.accountId, parsed.data.amountCents, admin.id, {
+        method: parsed.data.method,
+        note: parsed.data.note,
+      }),
+    );
+  } catch (error) {
+    if (error instanceof Error && error.message === "ACCOUNT_INACTIVE") {
+      return { error: "هذا الحساب غير نشط (تم دمجه مع حساب آخر) ولا يمكن تسجيل دفعة جديدة عليه." };
+    }
+    throw error;
+  }
 
   revalidateAccountPaths(parsed.data.accountId);
   redirect(`/admin/accounts/${parsed.data.accountId}/payments/${payment.id}`);

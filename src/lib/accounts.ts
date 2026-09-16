@@ -193,6 +193,23 @@ export async function getExistingCustomerAccountId(tx: Tx, customerId: string): 
  * two modules stays consistently Order-lock-then-Payment-lock everywhere,
  * never reversed in one path — see payment-number.ts's own doc comment for
  * why that ordering consistency matters. */
+/** Rejects (ACCOUNT_INACTIVE) any attempt to post a new payment against an
+ * account with isActive === false — the SAME existing CustomerAccount field
+ * mergeMerchants (src/lib/merchant-merge.ts) sets on a merged-away SOURCE
+ * account, never a second/parallel status system. Called from inside both
+ * payment-creation functions below (never left to each of their many
+ * callers to remember individually) so a stale direct URL/id can never post
+ * money to an account whose ledger has already been drained into another
+ * one. Must be called AFTER lockAccountForBalanceUpdate — isActive can only
+ * ever change under that same lock (see mergeMerchants), so reading it
+ * post-lock is guaranteed consistent with any concurrent merge. */
+async function assertAccountActive(tx: Tx, accountId: string): Promise<void> {
+  const account = await tx.customerAccount.findUniqueOrThrow({ where: { id: accountId }, select: { isActive: true } });
+  if (!account.isActive) {
+    throw new Error("ACCOUNT_INACTIVE");
+  }
+}
+
 export async function recordInitialAccountPayment(
   tx: Tx,
   accountId: string,
@@ -211,6 +228,7 @@ export async function recordInitialAccountPayment(
   // createRepSaleCore locks earlier, before its own debt-aware balance
   // check) — see lockAccountForBalanceUpdate's own doc comment.
   await lockAccountForBalanceUpdate(tx, accountId);
+  await assertAccountActive(tx, accountId);
   const receiptNumber = await generateDailyPaymentReceiptNumber(tx);
   await tx.accountPayment.create({
     data: {
@@ -260,6 +278,7 @@ export async function recordManualAccountPayment(
   // payment (ADMIN, REP, and both replacement-payment flows) funnels
   // through this one function, so locking here covers all of them.
   await lockAccountForBalanceUpdate(tx, accountId);
+  await assertAccountActive(tx, accountId);
   const receiptNumber = await generateDailyPaymentReceiptNumber(tx);
   return tx.accountPayment.create({
     data: {

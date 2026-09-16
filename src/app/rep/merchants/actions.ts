@@ -84,28 +84,36 @@ export async function recordMerchantPaymentAsRep(
     return { error: parsed.error.issues[0]?.message ?? "بيانات الدفعة غير صالحة" };
   }
 
-  const payment = await prisma.$transaction(async (tx) => {
-    const created = await recordManualAccountPayment(tx, accountId, parsed.data.amountCents, effectiveRep.actingUserId, {
-      method: parsed.data.method,
-      note: parsed.data.note,
-    });
-
-    // Written INSIDE the same transaction as the payment itself — either
-    // both commit or both roll back. Never written for a genuine REP
-    // session (isImpersonating === false).
-    if (effectiveRep.isImpersonating) {
-      await tx.adminAuditLog.create({
-        data: {
-          adminUserId: effectiveRep.realUser.id,
-          targetUserId: effectiveRep.actingUserId,
-          action: ADMIN_AUDIT_ACTIONS.IMPERSONATED_REP_PAYMENT_CREATED,
-          newValue: { salesRepId: effectiveRep.repId, paymentId: created.id, receiptNumber: created.receiptNumber, accountId },
-        },
+  let payment: { id: string };
+  try {
+    payment = await prisma.$transaction(async (tx) => {
+      const created = await recordManualAccountPayment(tx, accountId, parsed.data.amountCents, effectiveRep.actingUserId, {
+        method: parsed.data.method,
+        note: parsed.data.note,
       });
-    }
 
-    return created;
-  });
+      // Written INSIDE the same transaction as the payment itself — either
+      // both commit or both roll back. Never written for a genuine REP
+      // session (isImpersonating === false).
+      if (effectiveRep.isImpersonating) {
+        await tx.adminAuditLog.create({
+          data: {
+            adminUserId: effectiveRep.realUser.id,
+            targetUserId: effectiveRep.actingUserId,
+            action: ADMIN_AUDIT_ACTIONS.IMPERSONATED_REP_PAYMENT_CREATED,
+            newValue: { salesRepId: effectiveRep.repId, paymentId: created.id, receiptNumber: created.receiptNumber, accountId },
+          },
+        });
+      }
+
+      return created;
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message === "ACCOUNT_INACTIVE") {
+      return { error: "هذا التاجر غير نشط (تم دمجه مع تاجر آخر) ولا يمكن تسجيل دفعة جديدة له." };
+    }
+    throw error;
+  }
 
   revalidatePath("/rep/merchants");
   revalidatePath(`/rep/merchants/${merchantId}`);
