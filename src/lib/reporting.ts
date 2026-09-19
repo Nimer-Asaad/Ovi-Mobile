@@ -57,7 +57,7 @@ interface BusinessDatedId {
  * reinterpretation the order/payment daily-sequence counters already use,
  * never a hardcoded offset and never `SET TIME ZONE`. The WHERE clause here
  * is unchanged from before; only the SELECT list gained businessCreatedAt. */
-async function getOrderIdsInRange(fromIso: string, toIso: string, salesRepId?: string): Promise<BusinessDatedId[]> {
+export async function getOrderIdsInRange(fromIso: string, toIso: string, salesRepId?: string): Promise<BusinessDatedId[]> {
   return salesRepId
     ? await prisma.$queryRaw<BusinessDatedId[]>`
         SELECT "id", ("createdAt" AT TIME ZONE current_setting('TIMEZONE')) AS "businessCreatedAt" FROM "orders"
@@ -74,7 +74,7 @@ async function getOrderIdsInRange(fromIso: string, toIso: string, salesRepId?: s
  * `createdById` scoping here is the ACTUAL persisted collector/creator of
  * the payment (never a merchant's assignedRepId) — see getRepActivityReport's
  * own doc comment for why that distinction matters. */
-async function getPaymentIdsInRange(fromIso: string, toIso: string, createdById?: string): Promise<BusinessDatedId[]> {
+export async function getPaymentIdsInRange(fromIso: string, toIso: string, createdById?: string): Promise<BusinessDatedId[]> {
   return createdById
     ? await prisma.$queryRaw<BusinessDatedId[]>`
         SELECT "id", ("createdAt" AT TIME ZONE current_setting('TIMEZONE')) AS "businessCreatedAt" FROM "account_payments"

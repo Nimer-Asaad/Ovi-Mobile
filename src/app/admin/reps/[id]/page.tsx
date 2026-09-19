@@ -7,6 +7,8 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { StatCard } from "@/components/ui/StatCard";
 import { AdminStatusBadge } from "@/components/admin/AdminStatusBadge";
 import { StartImpersonationButton } from "@/components/admin/reps/StartImpersonationButton";
+import { RepTransactionsPrintForm } from "@/components/admin/reps/RepTransactionsPrintForm";
+import { getBusinessDateIso } from "@/lib/reporting";
 import { getRepStockStats, getRepStockValueCents } from "@/lib/reps";
 import { RepCarHero } from "@/components/reps/RepCarHero";
 import { RepCarStockSummary } from "@/components/reps/RepCarStockSummary";
@@ -221,6 +223,7 @@ export default async function AdminRepDetailPage({ params }: AdminRepDetailPageP
             <Link href={`/admin/reps/${rep.id}/inventory-sheet`}>
               <Button variant="outline">طباعة كشف الجرد</Button>
             </Link>
+            <RepTransactionsPrintForm repId={rep.id} defaultDate={getBusinessDateIso()} />
           </>
         }
       />
