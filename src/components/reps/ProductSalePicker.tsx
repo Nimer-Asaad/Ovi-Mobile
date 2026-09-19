@@ -150,7 +150,7 @@ function QuantityStepper({ quantity, max, onChange }: { quantity: number; max: n
         type="number"
         min={0}
         max={max}
-        value={quantity}
+        value={quantity > 0 ? quantity : ""}
         onChange={(event) => {
           const next = Math.floor(Number(event.target.value));
           onChange(Number.isFinite(next) ? Math.min(Math.max(next, 0), max) : 0);
