@@ -70,7 +70,7 @@ const MERCHANT_SELECT = {
  * collector — never a merchant's assignedRepId). Both windows use the
  * existing inclusive Palestine business-date SQL helpers from reporting.ts,
  * and every row is rendered from the same data the standalone invoice/
- * receipt pages use. Newest first. */
+ * receipt pages use. Oldest first. */
 export async function loadRepTransactions(rep: { id: string; userId: string }, fromIso: string, toIso: string) {
   const [orderIdRows, paymentIdRows] = await Promise.all([
     getOrderIdsInRange(fromIso, toIso, rep.id),
@@ -223,6 +223,7 @@ export async function loadRepTransactions(rep: { id: string; userId: string }, f
     }
   }
 
-  transactions.sort((a, b) => b.at.getTime() - a.at.getTime());
+  // Oldest first; identical instants fall back to the stable document key (sale:<orderNumber> / payment:<id>).
+  transactions.sort((a, b) => a.at.getTime() - b.at.getTime() || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
   return { transactions, totals };
 }
