@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { Badge } from "@/components/ui/Badge";
@@ -13,6 +14,8 @@ export interface CompanyInventoryOverviewProps {
   locations: InventoryOverviewLocation[];
   categories: { id: string; label: string }[];
   products: InventoryOverviewProduct[];
+  /** ADMIN only — shows the "طباعة كشف المنتج" link in the product modal. */
+  canPrintProduct?: boolean;
 }
 
 type Scope = "COMPANY" | "WAREHOUSE" | "REP_CARS" | "REP";
@@ -72,7 +75,7 @@ function groupDimensions(groups: InventoryOverviewDimensionGroup[]): BrandGroup[
  * buildInventoryOverviewData (server-side, sourced from InventoryItem rows).
  * This component only selects/sums/sorts/filters those numbers for display;
  * it never recomputes stock itself and never calls a mutation. */
-export function CompanyInventoryOverview({ locations, categories, products }: CompanyInventoryOverviewProps) {
+export function CompanyInventoryOverview({ locations, categories, products, canPrintProduct = false }: CompanyInventoryOverviewProps) {
   const [scope, setScope] = useState<Scope>("COMPANY");
   const [selectedRepId, setSelectedRepId] = useState("");
   const [search, setSearch] = useState("");
@@ -274,6 +277,7 @@ export function CompanyInventoryOverview({ locations, categories, products }: Co
           repName={selectedRepLocation?.repName ?? null}
           warehouseLocations={warehouseLocations}
           repCarLocations={repCarLocations}
+          canPrintProduct={canPrintProduct}
         />
       )}
     </div>
@@ -288,6 +292,7 @@ interface ProductInventoryDetailModalProps {
   repName: string | null;
   warehouseLocations: InventoryOverviewLocation[];
   repCarLocations: InventoryOverviewLocation[];
+  canPrintProduct: boolean;
 }
 
 function ProductInventoryDetailModal({
@@ -298,6 +303,7 @@ function ProductInventoryDetailModal({
   repName,
   warehouseLocations,
   repCarLocations,
+  canPrintProduct,
 }: ProductInventoryDetailModalProps) {
   // "current" mirrors the page's top-level scope; "all" always shows the
   // complete breakdown regardless of scope. COMPANY scope IS already the
@@ -340,6 +346,15 @@ function ProductInventoryDetailModal({
               <Badge variant="neutral" className="mt-1">
                 غير نشط
               </Badge>
+            )}
+            {canPrintProduct && (
+              <Link
+                href={`/admin/inventory/overview/product/${product.id}/print`}
+                target="_blank"
+                className="mt-2 inline-block rounded-card border border-gold-champagne/40 px-3 py-1 text-xs text-gold-dark transition-colors hover:bg-gold-champagne/10"
+              >
+                طباعة كشف المنتج
+              </Link>
             )}
           </div>
           <button

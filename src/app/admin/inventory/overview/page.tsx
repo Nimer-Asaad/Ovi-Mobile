@@ -26,7 +26,7 @@ const BRAND_MODEL_ORDER = [
  * covers the whole company (warehouse + every rep car), not just the
  * warehouse. */
 export default async function AdminInventoryOverviewPage() {
-  await requireRole([ROLES.ADMIN, ROLES.ADMIN_ASSISTANT]);
+  const user = await requireRole([ROLES.ADMIN, ROLES.ADMIN_ASSISTANT]);
 
   // Four bounded, parallel queries — no per-product or per-location follow-up
   // query. locations/categories/products/inventoryItems are each fetched
@@ -128,7 +128,7 @@ export default async function AdminInventoryOverviewPage() {
           </Link>
         }
       />
-      <CompanyInventoryOverview locations={locations} categories={categoryOptions} products={overviewProducts} />
+      <CompanyInventoryOverview locations={locations} categories={categoryOptions} products={overviewProducts} canPrintProduct={user.role === ROLES.ADMIN} />
     </div>
   );
 }
