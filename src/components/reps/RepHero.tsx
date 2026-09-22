@@ -1,5 +1,4 @@
-import Link from "next/link";
-import { Button } from "@/components/ui/Button";
+import { LinkButton } from "@/components/ui/LinkButton";
 
 export interface RepHeroProps {
   repName: string;
@@ -32,18 +31,17 @@ export function RepHero({ repName }: RepHeroProps) {
         </div>
 
         <div className="flex flex-wrap justify-center gap-3 md:justify-end">
-          <Link href="/rep/sales/new">
-            <Button size="lg">بيع جديد</Button>
-          </Link>
-          <Link href="/products">
-            <Button
-              variant="outline"
-              size="lg"
-              className="border-white/35 text-white hover:border-white/60 hover:bg-white/10"
-            >
-              تصفح المنتجات
-            </Button>
-          </Link>
+          <LinkButton href="/rep/sales/new" size="lg">
+            بيع جديد
+          </LinkButton>
+          <LinkButton
+            href="/products"
+            variant="outline"
+            size="lg"
+            className="border-white/35 text-white hover:border-white/60 hover:bg-white/10"
+          >
+            تصفح المنتجات
+          </LinkButton>
         </div>
       </div>
     </div>

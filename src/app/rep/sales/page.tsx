@@ -2,6 +2,7 @@ import Link from "next/link";
 import { requireEffectiveRepresentative } from "@/lib/auth/impersonation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
+import { LinkButton } from "@/components/ui/LinkButton";
 import { Input } from "@/components/ui/Input";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { StatCard } from "@/components/ui/StatCard";
@@ -99,11 +100,7 @@ export default async function RepSalesPage({ searchParams }: RepSalesPageProps) 
       <PageHeader
         title="مبيعاتي ودفعاتي"
         subtitle="سجل المبيعات والدفعات التي قمت بتسجيلها"
-        actions={
-          <Link href="/rep/sales/new">
-            <Button>بيع جديد</Button>
-          </Link>
-        }
+        actions={<LinkButton href="/rep/sales/new">بيع جديد</LinkButton>}
       />
 
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">

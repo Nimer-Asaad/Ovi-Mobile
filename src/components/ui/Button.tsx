@@ -10,7 +10,11 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   children: ReactNode;
 }
 
-const VARIANT_STYLES: Record<ButtonVariant, string> = {
+// Exported so LinkButton (src/components/ui/LinkButton.tsx) can render the
+// exact same visual styles directly on a real `<a>` element, instead of
+// nesting a `<button>` inside a `<Link>` — see that file's doc comment for
+// why that nesting caused a real double-tap-to-navigate bug on mobile.
+export const BUTTON_VARIANT_STYLES: Record<ButtonVariant, string> = {
   primary:
     "bg-gold-champagne text-white shadow-sm hover:bg-gold-dark active:bg-gold-dark focus-visible:ring-gold-champagne",
   secondary:
@@ -21,7 +25,7 @@ const VARIANT_STYLES: Record<ButtonVariant, string> = {
     "text-neutral-bg hover:bg-navy-soft/60 focus-visible:ring-navy-soft",
 };
 
-const SIZE_STYLES: Record<ButtonSize, string> = {
+export const BUTTON_SIZE_STYLES: Record<ButtonSize, string> = {
   sm: "h-8 px-3 text-sm",
   md: "h-10 px-4 text-sm",
   lg: "h-12 px-6 text-base",
@@ -40,8 +44,8 @@ export function Button({
         "inline-flex items-center justify-center gap-2 rounded-card font-medium transition-all duration-150 active:scale-[0.98]",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-navy-deep",
         "disabled:pointer-events-none disabled:opacity-50",
-        VARIANT_STYLES[variant],
-        SIZE_STYLES[size],
+        BUTTON_VARIANT_STYLES[variant],
+        BUTTON_SIZE_STYLES[size],
         className,
       )}
       {...props}

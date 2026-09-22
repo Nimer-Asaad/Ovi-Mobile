@@ -1,10 +1,10 @@
 import { notFound } from "next/navigation";
 import { SALES_RETURN_STATEMENT_SELECT } from "@/lib/accounts";
-import Link from "next/link";
 import { requireEffectiveRepresentative } from "@/lib/auth/impersonation";
 import { prisma } from "@/lib/prisma";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";
+import { LinkButton } from "@/components/ui/LinkButton";
 import { StatCard } from "@/components/ui/StatCard";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card";
 import { formatCurrencyFromCents } from "@/lib/utils";
@@ -112,19 +112,17 @@ export default async function RepMerchantDetailPage({ params }: RepMerchantDetai
 
       <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap">
         {merchant.status === MERCHANT_STATUSES.APPROVED ? (
-          <Link href={`/rep/sales/new?merchantId=${merchant.id}`} className="w-full sm:w-auto">
-            <Button className="w-full">بيع جديد</Button>
-          </Link>
+          <LinkButton href={`/rep/sales/new?merchantId=${merchant.id}`} className="w-full sm:w-auto">
+            بيع جديد
+          </LinkButton>
         ) : (
           <Button className="w-full sm:w-auto" disabled title="التاجر موقوف حالياً ولا يمكن البيع له">
             بيع جديد
           </Button>
         )}
-        <Link href={`/rep/merchants/${merchant.id}/statement`} className="w-full sm:w-auto">
-          <Button variant="outline" className="w-full">
-            كشف الحساب الكامل
-          </Button>
-        </Link>
+        <LinkButton href={`/rep/merchants/${merchant.id}/statement`} variant="outline" className="w-full sm:w-auto">
+          كشف الحساب الكامل
+        </LinkButton>
       </div>
 
       <Card id="payment">

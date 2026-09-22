@@ -2,7 +2,7 @@ import Link from "next/link";
 import { requireEffectiveRepresentative } from "@/lib/auth/impersonation";
 import { prisma } from "@/lib/prisma";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
-import { Button } from "@/components/ui/Button";
+import { LinkButton } from "@/components/ui/LinkButton";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { RepStockRequestStatusBadge } from "@/components/reps/RepStockRequestStatusBadge";
 
@@ -26,11 +26,7 @@ export default async function RepStockRequestsPage() {
       <PageHeader
         title="طلباتي"
         subtitle="طلبات تزويد مخزون السيارة التي أرسلتها"
-        actions={
-          <Link href="/rep/requests/new">
-            <Button>طلب تزويد جديد</Button>
-          </Link>
-        }
+        actions={<LinkButton href="/rep/requests/new">طلب تزويد جديد</LinkButton>}
       />
 
       <Card>

@@ -10,7 +10,7 @@ import { getOrderBusinessCreatedAt, getOrderStatusHistoryBusinessCreatedAt } fro
 import { isTerminalOrderStatus } from "@/lib/order-lifecycle-rules";
 import { getOrderReturnHistory, getOrderReturnSummary } from "@/lib/sales-returns";
 import { SalesReturnHistoryCard } from "@/components/reps/SalesReturnHistoryCard";
-import { Button } from "@/components/ui/Button";
+import { LinkButton } from "@/components/ui/LinkButton";
 
 interface RepSaleDetailPageProps {
   params: Promise<{ orderNumber: string }>;
@@ -172,9 +172,9 @@ export default async function RepSaleDetailPage({ params }: RepSaleDetailPagePro
           actions={
             <>
               {canReturn && (
-                <Link href={`/rep/sales/${order.orderNumber}/return`}>
-                  <Button variant="outline">مردود مبيعات</Button>
-                </Link>
+                <LinkButton href={`/rep/sales/${order.orderNumber}/return`} variant="outline">
+                  مردود مبيعات
+                </LinkButton>
               )}
               <Link href="/rep/sales" className="text-sm text-gold-champagne hover:underline">
                 العودة إلى مبيعاتي

@@ -1,9 +1,9 @@
-import Link from "next/link";
 import { requireEffectiveRepresentative } from "@/lib/auth/impersonation";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { Button } from "@/components/ui/Button";
+import { LinkButton } from "@/components/ui/LinkButton";
 import { Badge } from "@/components/ui/Badge";
 import { formatCurrencyFromCents } from "@/lib/utils";
 import { MERCHANT_STATUSES } from "@/lib/constants";
@@ -89,31 +89,23 @@ export default async function RepMerchantsPage({ searchParams }: RepMerchantsPag
 
               <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
                 {merchant.status === MERCHANT_STATUSES.APPROVED ? (
-                  <Link href={`/rep/sales/new?merchantId=${merchant.id}`} className="w-full sm:w-auto">
-                    <Button size="sm" className="w-full">
-                      بيع للتاجر
-                    </Button>
-                  </Link>
+                  <LinkButton href={`/rep/sales/new?merchantId=${merchant.id}`} size="sm" className="w-full sm:w-auto">
+                    بيع للتاجر
+                  </LinkButton>
                 ) : (
                   <Button size="sm" className="w-full" disabled title="التاجر موقوف حالياً ولا يمكن البيع له">
                     بيع للتاجر
                   </Button>
                 )}
-                <Link href={`/rep/merchants/${merchant.id}#payment`} className="w-full sm:w-auto">
-                  <Button size="sm" variant="outline" className="w-full">
-                    تسجيل دفعة
-                  </Button>
-                </Link>
-                <Link href={`/rep/merchants/${merchant.id}/statement`} className="w-full sm:w-auto">
-                  <Button size="sm" variant="outline" className="w-full">
-                    كشف الحساب
-                  </Button>
-                </Link>
-                <Link href={`/rep/merchants/${merchant.id}`} className="w-full sm:w-auto">
-                  <Button size="sm" variant="ghost" className="w-full">
-                    تفاصيل التاجر
-                  </Button>
-                </Link>
+                <LinkButton href={`/rep/merchants/${merchant.id}#payment`} size="sm" variant="outline" className="w-full sm:w-auto">
+                  تسجيل دفعة
+                </LinkButton>
+                <LinkButton href={`/rep/merchants/${merchant.id}/statement`} size="sm" variant="outline" className="w-full sm:w-auto">
+                  كشف الحساب
+                </LinkButton>
+                <LinkButton href={`/rep/merchants/${merchant.id}`} size="sm" variant="ghost" className="w-full sm:w-auto">
+                  تفاصيل التاجر
+                </LinkButton>
               </div>
             </div>
           ))}
