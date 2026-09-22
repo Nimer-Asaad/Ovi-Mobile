@@ -60,25 +60,28 @@ export function AccountStatementView({ account }: { account: AccountStatementDat
       <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <div className="rounded-card border border-neutral-200 bg-neutral-50 p-3 text-center">
           <p className="text-xs text-neutral-500">الرصيد الافتتاحي</p>
-          <p className="mt-1 text-lg font-bold text-neutral-900">{formatCurrencyFromCents(account.openingBalanceCents)}</p>
+          <p className="mt-1 break-words text-base font-bold text-neutral-900 sm:text-lg">{formatCurrencyFromCents(account.openingBalanceCents)}</p>
         </div>
         <div className="rounded-card border border-neutral-200 bg-neutral-50 p-3 text-center">
           <p className="text-xs text-neutral-500">إجمالي المشتريات</p>
-          <p className="mt-1 text-lg font-bold text-neutral-900">{formatCurrencyFromCents(totalInvoicedCents)}</p>
+          <p className="mt-1 break-words text-base font-bold text-neutral-900 sm:text-lg">{formatCurrencyFromCents(totalInvoicedCents)}</p>
         </div>
         <div className="rounded-card border border-neutral-200 bg-neutral-50 p-3 text-center">
           <p className="text-xs text-neutral-500">إجمالي الدفعات</p>
-          <p className="mt-1 text-lg font-bold text-neutral-900">{formatCurrencyFromCents(totalPaidCents)}</p>
+          <p className="mt-1 break-words text-base font-bold text-neutral-900 sm:text-lg">{formatCurrencyFromCents(totalPaidCents)}</p>
         </div>
         <div className="rounded-card border border-neutral-200 bg-neutral-50 p-3 text-center">
           <p className="text-xs text-neutral-500">الرصيد الحالي</p>
-          <p className={`mt-1 text-lg font-bold ${balanceCents > 0 ? "text-rose-600" : "text-neutral-900"}`}>
+          <p className={`mt-1 break-words text-base font-bold sm:text-lg ${balanceCents > 0 ? "text-rose-600" : "text-neutral-900"}`}>
             {formatCurrencyFromCents(Math.max(balanceCents, 0))}
           </p>
         </div>
       </div>
 
-      <div className="mt-6 overflow-x-auto">
+      {/* Desktop/tablet — unchanged full table. Hidden below md, where 7
+       * columns would squeeze Arabic text/amounts into one-word-per-line
+       * wrapping (see the mobile card list right below for that range). */}
+      <div className="mt-6 hidden overflow-x-auto md:block">
         <table className="w-full border-collapse text-start text-sm">
           <thead className="border-b border-neutral-300 text-xs font-semibold uppercase tracking-wide text-neutral-500">
             <tr>
@@ -122,6 +125,67 @@ export function AccountStatementView({ account }: { account: AccountStatementDat
             )}
           </tbody>
         </table>
+      </div>
+
+      {/* Mobile — one card per row, reading the exact same `rows` (no second
+       * calculation). Date/amounts/balance stay single-line (whitespace-nowrap);
+       * only البيان/reference wrap, across the card's full width. */}
+      <div className="mt-6 flex flex-col gap-3 md:hidden">
+        {rows.length === 0 ? (
+          <p className="py-4 text-center text-sm text-neutral-400">لا توجد حركات على هذا الحساب بعد</p>
+        ) : (
+          rows.map((row) => {
+            const dimmed = row.isTerminalOrder || row.isCancelledPayment || row.type === "PAYMENT_REVERSAL";
+            return (
+              <div
+                key={row.key}
+                className={`rounded-card border border-neutral-200 p-3 text-sm ${dimmed ? "bg-neutral-50 text-neutral-400" : "bg-white text-neutral-900"}`}
+              >
+                <div className="flex flex-col gap-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-neutral-500">التاريخ:</span>
+                    <span className="whitespace-nowrap font-medium">{row.date ? new Date(row.date).toLocaleDateString("ar") : "—"}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-neutral-500">النوع:</span>
+                    <span className="flex items-center gap-1 whitespace-nowrap font-medium">
+                      {ROW_TYPE_LABELS[row.type]}
+                      {row.isCancelledPayment && (
+                        <span className="rounded-full border border-rose-300 bg-rose-50 px-1.5 py-0.5 text-[10px] font-semibold text-rose-700">
+                          ملغاة
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="shrink-0 text-neutral-500">المرجع:</span>
+                    <span className="break-words text-end font-medium">{row.reference}</span>
+                  </div>
+                </div>
+
+                <div className="mt-2 border-t border-neutral-100 pt-2">
+                  <p className="text-neutral-500">البيان:</p>
+                  <p className="mt-0.5 whitespace-normal break-words">{row.description}</p>
+                </div>
+
+                <div className="mt-2 grid grid-cols-3 gap-2 border-t border-neutral-100 pt-2 text-end">
+                  <div>
+                    <p className="text-neutral-500">مدين</p>
+                    <p className="whitespace-nowrap font-medium">{row.debitCents > 0 ? formatCurrencyFromCents(row.debitCents) : "—"}</p>
+                  </div>
+                  <div>
+                    <p className="text-neutral-500">دائن</p>
+                    <p className="whitespace-nowrap font-medium">{row.creditCents > 0 ? formatCurrencyFromCents(row.creditCents) : "—"}</p>
+                  </div>
+                  <div>
+                    <p className="text-neutral-500">الرصيد</p>
+                    <p className="whitespace-nowrap text-base font-bold">{formatCurrencyFromCents(row.balanceCents)}</p>
+                  </div>
+                </div>
+              </div>
+            );
+          })
+        )}
       </div>
 
       <p className="mt-8 text-center text-xs text-neutral-400">شكراً لتعاملكم مع Ovi Mobile</p>
