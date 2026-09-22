@@ -77,6 +77,8 @@ model User {
   repCustomerOrdersCreated       RepCustomerOrder[]              @relation("RepCustomerOrderCreatedBy")
   manualInventoryBatchesCreated  ManualInventoryBatch[]          @relation("ManualInventoryBatchCreatedBy")
   onlineSalesRecorded            OnlineSale[]                    @relation("OnlineSaleCreatedBy")
+  salesReturnsCreated SalesReturn[] @relation("SalesReturnCreatedBy")
+
 
   @@map("users")
 }
@@ -158,6 +160,8 @@ model SalesRepresentative {
   stockReturns         StockReturn[]
   stockTransferBatches RepStockTransferBatch[]
   customerOrders       RepCustomerOrder[]
+  salesReturns SalesReturn[]
+
 
   @@map("sales_representatives")
 }
@@ -649,6 +653,8 @@ model StockLocation {
   orderCompensations  OrderInventoryCompensation[]
   transferBatchesFrom RepStockTransferBatch[]      @relation("RepTransferBatchFromLocation")
   transferBatchesTo   RepStockTransferBatch[]      @relation("RepTransferBatchToLocation")
+  salesReturns SalesReturn[]
+
 
   @@map("stock_locations")
 }
@@ -997,6 +1003,8 @@ model Order {
 
   @@index([customerId])
   @@index([stockLocationId])
+  salesReturns SalesReturn[]
+
   @@map("orders")
 }
 
@@ -1053,6 +1061,8 @@ model OrderItem {
 
   @@index([variantId])
   @@index([deviceColorVariantId])
+  salesReturnItems SalesReturnItem[]
+
   @@map("order_items")
 }
 
@@ -1143,6 +1153,8 @@ model CustomerAccount {
   payments AccountPayment[]
 
   @@index([phone])
+  salesReturns SalesReturn[]
+
   @@map("customer_accounts")
 }
 
@@ -1381,4 +1393,87 @@ model OnlineSale {
   @@index([saleDate])
   @@index([category])
   @@map("online_sales")
+}
+
+/// An immutable, append-only record of ONE partial or full sales return
+/// (مردود مبيعات) against a single original Order — never edits or deletes
+/// the original Order/OrderItem/AccountPayment rows. The same invoice may
+/// accumulate any number of these over time; `sequence` numbers them
+/// 1..N per order (@@unique with orderId — also the DB-level backstop
+/// against two concurrent returns both claiming the same slot).
+///
+/// ACCOUNTING: totalCreditCents reduces what the merchant owes and is the
+/// ONLY new term in the canonical balance formula (getAccountBalanceCents in
+/// src/lib/accounts.ts: opening + orders - payments + reversals -
+/// SUM(salesReturns.totalCreditCents)). It is NOT a refund and never creates
+/// or edits an AccountPayment.
+///
+/// INVENTORY: every returned physical unit is added to `stockLocationId` —
+/// the returning rep's own REP_CAR — in the same transaction (see
+/// createSalesReturn in src/lib/sales-returns.ts).
+///
+/// createdAt uses the same naive `timestamp without time zone` column type
+/// as orders/account_payments, so it needs the same business-time
+/// correction on display (see src/lib/business-time.ts).
+model SalesReturn {
+  id               String              @id @default(cuid())
+  orderId          String
+  order            Order               @relation(fields: [orderId], references: [id])
+  /// 1-based per-order counter; the human-facing return reference is
+  /// "<orderNumber>-R<sequence>".
+  sequence         Int
+  accountId        String
+  account          CustomerAccount     @relation(fields: [accountId], references: [id])
+  salesRepId       String
+  salesRep         SalesRepresentative @relation(fields: [salesRepId], references: [id])
+  /// The real acting user (the rep, or an admin impersonating them).
+  createdById      String
+  createdBy        User                @relation("SalesReturnCreatedBy", fields: [createdById], references: [id])
+  /// The REP_CAR location the goods were returned INTO.
+  stockLocationId  String
+  stockLocation    StockLocation       @relation(fields: [stockLocationId], references: [id])
+  /// Sum of items[].creditCents. Integer agorot, >= 0 (0 is valid: e.g. a
+  /// return consisting only of bonus units).
+  totalCreditCents Int
+  note             String?
+  createdAt        DateTime            @default(now())
+
+  items SalesReturnItem[]
+
+  @@unique([orderId, sequence])
+  @@index([accountId])
+  @@index([salesRepId])
+  @@index([createdAt])
+  @@map("sales_returns")
+}
+
+/// One returned line of a SalesReturn, pointing at the ORIGINAL OrderItem.
+/// quantity is PHYSICAL units (bonus units included); creditCents is this
+/// return's monetary share for the line under the canonical allocation rule
+/// documented in src/lib/sales-return-math.ts.
+model SalesReturnItem {
+  id            String      @id @default(cuid())
+  salesReturnId String
+  salesReturn   SalesReturn @relation(fields: [salesReturnId], references: [id], onDelete: Cascade)
+  orderItemId   String
+  orderItem     OrderItem   @relation(fields: [orderItemId], references: [id])
+  /// PHYSICAL units returned in this operation (bonus units included) —
+  /// what actually goes back into REP_CAR. See bonusQuantity below for the
+  /// split that determines monetary credit.
+  quantity      Int
+  /// How many of `quantity` above are being returned AS bonus units — an
+  /// explicit rep declaration (never inferred/guessed), since a line can
+  /// mix bonus and paid units and the app must know exactly which physical
+  /// units came back as which. Always 0 <= bonusQuantity <= quantity; the
+  /// cumulative sum across every return of one OrderItem is bounded by that
+  /// item's own bonusQuantity (application-enforced in
+  /// src/lib/sales-returns.ts, DB CHECK constraint as a backstop). A
+  /// (quantity - bonusQuantity) paid portion is the only part that ever
+  /// contributes to creditCents below — see src/lib/sales-return-math.ts.
+  bonusQuantity Int         @default(0)
+  creditCents   Int
+
+  @@index([orderItemId])
+  @@index([salesReturnId])
+  @@map("sales_return_items")
 }

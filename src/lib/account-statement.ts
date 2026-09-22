@@ -43,7 +43,22 @@ export interface AccountStatementPaymentInput {
   cancellation?: { reason: string; cancelledAt: Date; cancelledBy?: { name: string } | null } | null;
 }
 
-export type AccountStatementRowType = "OPENING" | "SALE" | "PAYMENT" | "PAYMENT_REVERSAL";
+/** One REP sales return (SalesReturn) — a credit (دائن) that reduces what
+ * the account owes, exactly like a payment does, but never a payment: it
+ * has no receipt, no method, and is never cancellable. Shaped to match a
+ * Prisma `select` (nested `order`/`salesRep`) so a query result can be
+ * passed straight through. See SALES_RETURN_STATEMENT_SELECT in
+ * src/lib/accounts.ts. */
+export interface AccountStatementSalesReturnInput {
+  id: string;
+  createdAt: Date;
+  sequence: number;
+  totalCreditCents: number;
+  order: { orderNumber: string };
+  salesRep?: { user: { name: string } } | null;
+}
+
+export type AccountStatementRowType = "OPENING" | "SALE" | "PAYMENT" | "PAYMENT_REVERSAL" | "SALES_RETURN";
 
 export interface AccountStatementRow {
   key: string;
@@ -71,7 +86,7 @@ export interface AccountStatementRow {
    * OPENING row (always first, regardless of when it was actually entered)
    * starts the running total at openingBalanceCents; the final row's value
    * always equals getAccountBalanceCents(...) exactly, since both apply the
-   * identical formula (opening + non-terminal orders - payments). */
+   * identical formula (opening + non-terminal orders - payments - sales returns). */
   balanceCents: number;
   /** True only for a cancelled/returned SALE row — shown, never hidden (the
    * order still happened), but visually de-emphasized and contributing
@@ -96,6 +111,9 @@ export interface AccountStatementInput {
   openingBalanceSetAt: Date | null;
   orders: AccountStatementOrderInput[];
   payments: AccountStatementPaymentInput[];
+  /** Required (never optional) so a statement/position caller can never
+   * silently omit sales returns and show a wrong running balance. */
+  salesReturns: AccountStatementSalesReturnInput[];
 }
 
 /** Builds the unified, chronological ledger (سجل موحّد) a merchant statement
@@ -111,7 +129,7 @@ export interface AccountStatementInput {
 export function buildAccountStatementRows(input: AccountStatementInput): AccountStatementRow[] {
   interface RawRow {
     date: Date;
-    type: "SALE" | "PAYMENT" | "PAYMENT_REVERSAL";
+    type: "SALE" | "PAYMENT" | "PAYMENT_REVERSAL" | "SALES_RETURN";
     reference: string;
     description: string;
     debitCents: number;
@@ -190,6 +208,21 @@ export function buildAccountStatementRows(input: AccountStatementInput): Account
         sortTieBreak: `2:${payment.id}`,
       });
     }
+  }
+
+  for (const salesReturn of input.salesReturns) {
+    const reference = `${salesReturn.order.orderNumber}-R${salesReturn.sequence}`;
+    raw.push({
+      date: salesReturn.createdAt,
+      type: "SALES_RETURN",
+      reference,
+      description: [`مردود مبيعات ${reference}`, salesReturn.salesRep ? `— المندوب: ${salesReturn.salesRep.user.name}` : null].filter((part): part is string => Boolean(part)).join(" "),
+      debitCents: 0,
+      creditCents: salesReturn.totalCreditCents,
+      isTerminalOrder: false,
+      isCancelledPayment: false,
+      sortTieBreak: `3:${salesReturn.id}`,
+    });
   }
 
   raw.sort((a, b) => {

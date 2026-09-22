@@ -1,6 +1,6 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
-import { getOrderAccountPosition, getPaymentAccountPosition } from "@/lib/accounts";
+import { getOrderAccountPosition, getPaymentAccountPosition, SALES_RETURN_STATEMENT_SELECT } from "@/lib/accounts";
 import { getOrderStatusHistoryBusinessCreatedAt, getPaymentCancellationBusinessCancelledAt } from "@/lib/business-time";
 import { isTerminalOrderStatus } from "@/lib/order-lifecycle-rules";
 import { getOrderIdsInRange, getPaymentIdsInRange } from "@/lib/reporting";
@@ -44,6 +44,7 @@ const ACCOUNT_SELECT = {
   openingBalanceCents: true,
   openingBalanceSetAt: true,
   orders: { select: { orderNumber: true, createdAt: true, status: true, totalCents: true } },
+  salesReturns: SALES_RETURN_STATEMENT_SELECT,
   payments: {
     select: {
       id: true,

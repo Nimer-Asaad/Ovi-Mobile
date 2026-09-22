@@ -137,6 +137,7 @@ async function readAccount(phone: string): Promise<AccountSnapshot | null> {
           openingBalanceCents: true,
           orders: { select: { status: true, totalCents: true, paidAmountCents: true } },
           payments: { select: { amountCents: true, cancellation: { select: { id: true } } } },
+          salesReturns: { select: { totalCreditCents: true } },
         },
       },
     },

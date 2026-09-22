@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { SALES_RETURN_STATEMENT_SELECT } from "@/lib/accounts";
 import Link from "next/link";
 import { requireEffectiveRepresentative } from "@/lib/auth/impersonation";
 import { prisma } from "@/lib/prisma";
@@ -55,6 +56,7 @@ export default async function RepMerchantDetailPage({ params }: RepMerchantDetai
               createdByRep: { select: { user: { select: { name: true } } } },
             },
           },
+          salesReturns: SALES_RETURN_STATEMENT_SELECT,
           payments: {
             orderBy: { createdAt: "desc" },
             select: {
@@ -79,7 +81,7 @@ export default async function RepMerchantDetailPage({ params }: RepMerchantDetai
   const orders = (merchant.account?.orders ?? []).map((order) => ({ ...order, repName: order.createdByRep?.user.name ?? null }));
   const payments = (merchant.account?.payments ?? []).map((payment) => ({ ...payment, collectedByName: payment.createdBy.name }));
   const openingBalanceCents = merchant.account?.openingBalanceCents ?? 0;
-  const rows = buildAccountStatementRows({ openingBalanceCents, openingBalanceSetAt: merchant.account?.openingBalanceSetAt ?? null, orders, payments });
+  const rows = buildAccountStatementRows({ openingBalanceCents, openingBalanceSetAt: merchant.account?.openingBalanceSetAt ?? null, orders, payments, salesReturns: merchant.account?.salesReturns ?? [] });
   const totalPurchasesCents = rows.filter((row) => row.type === "SALE").reduce((sum, row) => sum + row.debitCents, 0);
   // Net of any reversal — see AccountStatementView's identical totalPaidCents
   // comment for why.

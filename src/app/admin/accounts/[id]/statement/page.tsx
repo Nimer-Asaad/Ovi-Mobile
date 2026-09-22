@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { SALES_RETURN_STATEMENT_SELECT } from "@/lib/accounts";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { AccountStatementView } from "@/components/admin/accounts/AccountStatementView";
@@ -32,6 +33,7 @@ export default async function AdminAccountStatementPage({ params }: AdminAccount
           createdByRep: { select: { user: { select: { name: true } } } },
         },
       },
+      salesReturns: SALES_RETURN_STATEMENT_SELECT,
       payments: {
         orderBy: { createdAt: "desc" },
         select: {
@@ -73,6 +75,7 @@ export default async function AdminAccountStatementPage({ params }: AdminAccount
           openingBalanceSetAt: account.openingBalanceSetAt,
           orders,
           payments,
+          salesReturns: account.salesReturns,
         }}
       />
     </div>

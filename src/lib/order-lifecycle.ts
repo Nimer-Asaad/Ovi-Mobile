@@ -30,6 +30,7 @@ export type OrderLifecycleErrorCode =
   | "MISSING_INVENTORY"
   | "COMPENSATION_CONFLICT"
   | "LEGACY_UNLINKED_PAYMENT"
+  | "ORDER_HAS_SALES_RETURNS"
   | "CONCURRENT_UPDATE";
 
 export type OrderLifecycleResult =
@@ -213,6 +214,20 @@ export async function transitionOrderStatusInTransaction(
   // null) has no balance to protect either.
   if (restoresInventory && order.accountId) {
     await lockAccountForBalanceUpdate(tx, order.accountId);
+  }
+
+  // A whole-order cancel/return restores the FULL original quantity of
+  // every line to the order's stock location — if part of it already came
+  // back through a REP sales return (src/lib/sales-returns.ts), doing both
+  // would duplicate that stock and double-credit the account. Checked AFTER
+  // the account lock (createSalesReturn takes the same lock first) so it
+  // always sees every committed return. The rep/admin keeps the existing
+  // partial-return tool for such an invoice.
+  if (restoresInventory && (await tx.salesReturn.count({ where: { orderId: order.id } })) > 0) {
+    throw new LifecycleDomainError(
+      "ORDER_HAS_SALES_RETURNS",
+      "لا يمكن إلغاء أو إرجاع هذه الفاتورة بالكامل لأنه تم تسجيل مردود مبيعات عليها",
+    );
   }
 
   if (restoresInventory) {

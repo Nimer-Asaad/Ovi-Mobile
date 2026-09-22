@@ -15,6 +15,7 @@ import {
   fetchPaymentActivityRows,
   mergeActivityRows,
   computeActivityTotals,
+  fetchSalesReturnTotals,
   getDefaultReportRange,
 } from "@/lib/reporting";
 import { correctSaleAction, cancelManualPaymentAction } from "@/app/admin/reports/actions";
@@ -68,7 +69,7 @@ export default async function AdminReportsPage({ searchParams }: AdminReportsPag
       : Promise.resolve(null),
   ]);
 
-  const [sales, payments] = await Promise.all([
+  const [sales, payments, returnTotals] = await Promise.all([
     fetchSaleActivityRows(
       { fromIso, toIso, search: q, salesRepId: selectedRepId, merchantId: selectedMerchantId },
       (orderNumber) => `/admin/orders/${orderNumber}/invoice`,
@@ -86,6 +87,7 @@ export default async function AdminReportsPage({ searchParams }: AdminReportsPag
       // ADMIN and ADMIN_ASSISTANT.
       (payment) => `/admin/reports/payments/new?replacementFor=${payment.id}`,
     ),
+    fetchSalesReturnTotals({ fromIso, toIso, salesRepId: selectedRepId, merchantId: selectedMerchantId }),
   ]);
 
   const totals = computeActivityTotals(sales, payments);
@@ -115,8 +117,10 @@ export default async function AdminReportsPage({ searchParams }: AdminReportsPag
     <div className="flex flex-col gap-6">
       <PageHeader title="تقارير المبيعات والدفعات" subtitle="مراجعة جميع المبيعات والدفعات عبر كل المندوبين" />
 
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
         <StatCard label="إجمالي المبيعات" value={formatCurrencyFromCents(totals.salesTotalCents)} />
+        <StatCard label="إجمالي المردودات" value={formatCurrencyFromCents(returnTotals.returnsTotalCents)} />
+        <StatCard label="صافي المبيعات" value={formatCurrencyFromCents(totals.salesTotalCents - returnTotals.returnsTotalCents)} />
         <StatCard label="إجمالي الدفعات" value={formatCurrencyFromCents(totals.paymentsTotalCents)} />
         <StatCard label="عدد المبيعات" value={String(totals.salesCount)} />
         <StatCard label="عدد الدفعات" value={String(totals.paymentsCount)} />

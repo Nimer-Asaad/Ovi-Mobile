@@ -264,6 +264,7 @@ async function main() {
             openingBalanceCents: true,
             orders: { select: { status: true, totalCents: true } },
             payments: { select: { amountCents: true, method: true, origin: true, cancellation: { select: { id: true } } } },
+            salesReturns: { select: { totalCreditCents: true } },
           },
         },
       },

@@ -5,9 +5,12 @@ import { prisma } from "@/lib/prisma";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { InvoiceActions } from "@/components/admin/orders/InvoiceActions";
 import type { InvoiceData } from "@/components/admin/orders/InvoiceView";
-import { getOrderAccountPosition } from "@/lib/accounts";
+import { getOrderAccountPosition, SALES_RETURN_STATEMENT_SELECT } from "@/lib/accounts";
 import { getOrderBusinessCreatedAt, getOrderStatusHistoryBusinessCreatedAt } from "@/lib/business-time";
 import { isTerminalOrderStatus } from "@/lib/order-lifecycle-rules";
+import { getOrderReturnHistory, getOrderReturnSummary } from "@/lib/sales-returns";
+import { SalesReturnHistoryCard } from "@/components/reps/SalesReturnHistoryCard";
+import { Button } from "@/components/ui/Button";
 
 interface RepSaleDetailPageProps {
   params: Promise<{ orderNumber: string }>;
@@ -31,6 +34,8 @@ export default async function RepSaleDetailPage({ params }: RepSaleDetailPagePro
   const order = await prisma.order.findUnique({
     where: { orderNumber },
     select: {
+      id: true,
+      accountId: true,
       orderNumber: true,
       source: true,
       status: true,
@@ -72,6 +77,7 @@ export default async function RepSaleDetailPage({ params }: RepSaleDetailPagePro
           // the exact chronological ordering buildAccountStatementRows uses
           // — never just the bare totals getAccountBalanceCents alone needs.
           orders: { select: { orderNumber: true, createdAt: true, status: true, totalCents: true } },
+          salesReturns: SALES_RETURN_STATEMENT_SELECT,
           payments: {
             select: {
               id: true,
@@ -152,6 +158,11 @@ export default async function RepSaleDetailPage({ params }: RepSaleDetailPagePro
 
   const whatsappNumber = order.merchant?.whatsappPhone ?? order.merchant?.contactPhone ?? null;
 
+  // Derived from the SalesReturn ledger only — the original order row (and
+  // its status) is never modified by a return.
+  const [returnSummary, returnHistory] = await Promise.all([getOrderReturnSummary(order.id), getOrderReturnHistory(order.id, order.orderNumber)]);
+  const canReturn = !isTerminalOrderStatus(order.status) && Boolean(order.accountId) && returnSummary.remainingUnits > 0;
+
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-6">
       <div className="print:hidden">
@@ -159,14 +170,23 @@ export default async function RepSaleDetailPage({ params }: RepSaleDetailPagePro
           title="فاتورة البيع"
           subtitle={`طلب ${order.orderNumber}`}
           actions={
-            <Link href="/rep/sales" className="text-sm text-gold-champagne hover:underline">
-              العودة إلى مبيعاتي
-            </Link>
+            <>
+              {canReturn && (
+                <Link href={`/rep/sales/${order.orderNumber}/return`}>
+                  <Button variant="outline">مردود مبيعات</Button>
+                </Link>
+              )}
+              <Link href="/rep/sales" className="text-sm text-gold-champagne hover:underline">
+                العودة إلى مبيعاتي
+              </Link>
+            </>
           }
         />
       </div>
 
       <InvoiceActions order={invoiceData} whatsappNumber={whatsappNumber} />
+
+      <SalesReturnHistoryCard orderNumber={order.orderNumber} summary={returnSummary} history={returnHistory} />
     </div>
   );
 }

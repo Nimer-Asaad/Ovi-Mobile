@@ -360,6 +360,7 @@ export async function createRepSaleCore(input: RepSaleInput, context: CreateRepS
             openingBalanceCents: true,
             orders: { select: { status: true, totalCents: true } },
             payments: { select: { amountCents: true, cancellation: { select: { id: true } } } },
+            salesReturns: { select: { totalCreditCents: true } },
           },
         });
         const previousDebtCents = getAccountBalanceCents(account);

@@ -6,7 +6,7 @@ import { ROLES } from "@/lib/constants";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { PaymentReceiptActions } from "@/components/shared/PaymentReceiptActions";
 import type { PaymentReceiptData } from "@/components/shared/PaymentReceiptView";
-import { getPaymentAccountPosition } from "@/lib/accounts";
+import { getPaymentAccountPosition, SALES_RETURN_STATEMENT_SELECT } from "@/lib/accounts";
 import { getPaymentBusinessCreatedAt, getPaymentCancellationBusinessCancelledAt } from "@/lib/business-time";
 
 interface AdminReportPaymentReceiptPageProps {
@@ -65,6 +65,7 @@ export default async function AdminReportPaymentReceiptPage({ params }: AdminRep
         },
       },
       orders: { select: { orderNumber: true, createdAt: true, status: true, totalCents: true } },
+      salesReturns: SALES_RETURN_STATEMENT_SELECT,
       payments: {
         select: {
           id: true,

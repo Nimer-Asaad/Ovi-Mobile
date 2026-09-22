@@ -50,6 +50,7 @@ export default async function AdminAccountDetailPage({ params }: AdminAccountDet
           cancellation: { select: { id: true } },
         },
       },
+      salesReturns: { select: { totalCreditCents: true } },
     },
   });
 

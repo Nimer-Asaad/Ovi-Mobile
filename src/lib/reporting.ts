@@ -405,3 +405,47 @@ export async function fetchPaymentActivityRows(
     replacementHref: buildReplacementHref({ id: payment.id, accountId: payment.accountId, merchantId: payment.account.merchantId }),
   }));
 }
+
+export interface SalesReturnTotals {
+  returnsCount: number;
+  /** Sum of SalesReturn.totalCreditCents for returns RECORDED inside the
+   * window (Palestine business date of the return itself, inclusive). */
+  returnsTotalCents: number;
+}
+
+/** REP sales returns (مردود مبيعات) recorded inside [fromIso, toIso], for
+ * the report KPI "إجمالي المردودات" / "صافي المبيعات".
+ *
+ * NET SALES = gross sales (the untouched original Orders, exactly what
+ * computeActivityTotals already sums) MINUS these returns — the report
+ * pages subtract; nothing here rewrites any historical invoice value, and
+ * collections (AccountPayments) are unaffected by a return. A return
+ * counts in the period it was RECORDED in (standard accounting treatment),
+ * never retroactively in the original invoice's period. A cancelled/
+ * returned-in-full order can never have a SalesReturn (createSalesReturn
+ * and transitionOrderStatusInTransaction forbid the combination), so the
+ * gross figure never double-counts with these.
+ *
+ * `salesRepId` scopes to the returning rep (SalesReturn.salesRepId — always
+ * the invoice's own rep, since only the owner may return); `merchantId`
+ * scopes via the return's account. Same inclusive Palestine business-date
+ * SQL technique as getOrderIdsInRange/getPaymentIdsInRange. */
+export async function fetchSalesReturnTotals(filters: { fromIso: string; toIso: string; salesRepId?: string; merchantId?: string }): Promise<SalesReturnTotals> {
+  const idRows = filters.salesRepId
+    ? await prisma.$queryRaw<{ id: string }[]>`
+        SELECT "id" FROM "sales_returns"
+        WHERE (("createdAt" AT TIME ZONE current_setting('TIMEZONE')) AT TIME ZONE 'Asia/Hebron')::date BETWEEN ${filters.fromIso}::date AND ${filters.toIso}::date
+          AND "salesRepId" = ${filters.salesRepId}
+      `
+    : await prisma.$queryRaw<{ id: string }[]>`
+        SELECT "id" FROM "sales_returns"
+        WHERE (("createdAt" AT TIME ZONE current_setting('TIMEZONE')) AT TIME ZONE 'Asia/Hebron')::date BETWEEN ${filters.fromIso}::date AND ${filters.toIso}::date
+      `;
+  if (idRows.length === 0) return { returnsCount: 0, returnsTotalCents: 0 };
+  const aggregate = await prisma.salesReturn.aggregate({
+    where: { id: { in: idRows.map((row) => row.id) }, ...(filters.merchantId ? { account: { merchantId: filters.merchantId } } : {}) },
+    _sum: { totalCreditCents: true },
+    _count: { _all: true },
+  });
+  return { returnsCount: aggregate._count._all, returnsTotalCents: aggregate._sum.totalCreditCents ?? 0 };
+}

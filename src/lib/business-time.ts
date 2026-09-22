@@ -85,3 +85,17 @@ export async function getOrderStatusHistoryBusinessCreatedAt(historyId: string):
   `;
   return rows[0]?.businessCreatedAt ?? null;
 }
+
+/** SalesReturn.createdAt is the same naive `timestamp without time zone`
+ * column type as orders/account_payments, so it needs the identical
+ * correction before display. Returns id -> true UTC instant for EVERY
+ * return of one order in a single query (an invoice page shows all of its
+ * returns at once). */
+export async function getSalesReturnsBusinessCreatedAtByOrder(orderId: string): Promise<Map<string, Date>> {
+  const rows = await prisma.$queryRaw<{ id: string; businessCreatedAt: Date }[]>`
+    SELECT "id", ("createdAt" AT TIME ZONE current_setting('TIMEZONE')) AS "businessCreatedAt"
+    FROM "sales_returns"
+    WHERE "orderId" = ${orderId}
+  `;
+  return new Map(rows.map((row) => [row.id, row.businessCreatedAt]));
+}

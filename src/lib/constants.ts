@@ -206,6 +206,7 @@ export const ADMIN_AUDIT_ACTIONS = {
   IMPERSONATED_REP_PAYMENT_CANCELLED: "IMPERSONATED_REP_PAYMENT_CANCELLED",
   IMPERSONATED_REP_PAYMENT_REPLACED: "IMPERSONATED_REP_PAYMENT_REPLACED",
   IMPERSONATED_REP_STOCK_REQUEST_CREATED: "IMPERSONATED_REP_STOCK_REQUEST_CREATED",
+  IMPERSONATED_REP_SALES_RETURN_CREATED: "IMPERSONATED_REP_SALES_RETURN_CREATED",
   /// Lightweight Ovi AI usage event — see src/app/admin/ai/actions.ts. Logs
   /// only the real user id, role, and a coarse intent category (e.g.
   /// "INVENTORY", "SALES") per query turn — never the message text or the

@@ -54,6 +54,7 @@ const ACCOUNT_SELECT = {
   openingBalanceCents: true,
   orders: { select: { status: true, totalCents: true } },
   payments: { select: { amountCents: true, cancellation: { select: { id: true } } } },
+  salesReturns: { select: { totalCreditCents: true } },
 } satisfies Prisma.CustomerAccountSelect;
 
 type AccountSnapshot = Prisma.CustomerAccountGetPayload<{ select: typeof ACCOUNT_SELECT }>;
@@ -81,7 +82,7 @@ const EMPTY_FIGURES: AccountLedgerFigures = {
 
 function computeLedgerFigures(account: AccountSnapshot | null): AccountLedgerFigures {
   if (!account) return EMPTY_FIGURES;
-  const balanceInput: AccountBalanceInput = { openingBalanceCents: account.openingBalanceCents, orders: account.orders, payments: account.payments };
+  const balanceInput: AccountBalanceInput = { openingBalanceCents: account.openingBalanceCents, orders: account.orders, payments: account.payments, salesReturns: account.salesReturns };
   return {
     balanceCents: getAccountBalanceCents(balanceInput),
     orderCount: account.orders.length,
@@ -295,6 +296,14 @@ export async function mergeMerchants(
     await tx.accountPayment.updateMany({ where: { accountId: sourceAccountId }, data: { accountId: targetAccountId } });
   }
 
+  // ---- MOVE: SalesReturn — accountId only, exactly like AccountPayment. A
+  // return's credit is part of the ledger balance, so it must travel with
+  // the orders/payments it belongs to. Every other column (order, items,
+  // amounts, createdAt, REP_CAR provenance) is untouched.
+  if (sourceAccountId && targetAccountId) {
+    await tx.salesReturn.updateMany({ where: { accountId: sourceAccountId }, data: { accountId: targetAccountId } });
+  }
+
   // ---- COMBINE opening balances. Both are always >= 0 by this system's
   // own existing invariant (see openingBalanceMoneyString in
   // src/lib/validation/accounts.ts — the ONLY place openingBalanceCents is
@@ -415,13 +424,14 @@ export async function mergeMerchants(
   // re-reads the ACTUAL post-write rows (never trusts an in-memory
   // assumption), so a bug in any MOVE/archive step above would be caught
   // right here and roll back the whole transaction.
-  const [sourceRepCustomerOrderCountAfter, targetRepCustomerOrderCountAfter, sourceOrderMerchantCountAfter, sourceOrderAccountCountAfter, sourcePaymentAccountCountAfter, sourceMerchantAfter, targetAccountAfter] =
+  const [sourceRepCustomerOrderCountAfter, targetRepCustomerOrderCountAfter, sourceOrderMerchantCountAfter, sourceOrderAccountCountAfter, sourcePaymentAccountCountAfter, sourceSalesReturnAccountCountAfter, sourceMerchantAfter, targetAccountAfter] =
     await Promise.all([
       tx.repCustomerOrder.count({ where: { merchantId: sourceMerchantId } }),
       tx.repCustomerOrder.count({ where: { merchantId: targetMerchantId } }),
       tx.order.count({ where: { merchantId: sourceMerchantId } }),
       sourceAccountId ? tx.order.count({ where: { accountId: sourceAccountId } }) : Promise.resolve(0),
       sourceAccountId ? tx.accountPayment.count({ where: { accountId: sourceAccountId } }) : Promise.resolve(0),
+      sourceAccountId ? tx.salesReturn.count({ where: { accountId: sourceAccountId } }) : Promise.resolve(0),
       tx.merchant.findUniqueOrThrow({ where: { id: sourceMerchantId }, select: { status: true, userId: true } }),
       targetAccountId ? tx.customerAccount.findUniqueOrThrow({ where: { id: targetAccountId }, select: { isActive: true } }) : Promise.resolve(null),
     ]);
@@ -444,6 +454,9 @@ export async function mergeMerchants(
   }
   if (sourcePaymentAccountCountAfter !== 0) {
     throw new MerchantMergeError(`SOURCE still has ${sourcePaymentAccountCountAfter} AccountPayment.accountId reference(s) after merge`, "INVARIANT_FAILED");
+  }
+  if (sourceSalesReturnAccountCountAfter !== 0) {
+    throw new MerchantMergeError(`SOURCE still has ${sourceSalesReturnAccountCountAfter} SalesReturn.accountId reference(s) after merge`, "INVARIANT_FAILED");
   }
   if (sourceMerchantAfter.status !== MERCHANT_STATUSES.SUSPENDED) {
     throw new MerchantMergeError(`SOURCE status is ${sourceMerchantAfter.status}, expected SUSPENDED`, "INVARIANT_FAILED");

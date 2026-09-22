@@ -14,6 +14,7 @@ const ROW_TYPE_LABELS: Record<AccountStatementRowType, string> = {
   SALE: "بيع",
   PAYMENT: "دفعة",
   PAYMENT_REVERSAL: "إلغاء دفعة",
+  SALES_RETURN: "مردود مبيعات",
 };
 
 /** Pure, server-renderable printable statement — mirrors InvoiceView's

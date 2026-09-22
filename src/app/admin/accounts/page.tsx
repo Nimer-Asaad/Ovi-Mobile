@@ -41,6 +41,7 @@ export default async function AdminAccountsPage({ searchParams }: AdminAccountsP
       customer: { select: { id: true, name: true } },
       orders: { select: { status: true, totalCents: true } },
       payments: { select: { amountCents: true, cancellation: { select: { id: true } } } },
+      salesReturns: { select: { totalCreditCents: true } },
     },
   });
 

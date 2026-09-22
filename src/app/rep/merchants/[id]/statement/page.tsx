@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { SALES_RETURN_STATEMENT_SELECT } from "@/lib/accounts";
 import Link from "next/link";
 import { requireEffectiveRepresentative } from "@/lib/auth/impersonation";
 import { prisma } from "@/lib/prisma";
@@ -38,6 +39,7 @@ export default async function RepMerchantStatementPage({ params }: RepMerchantSt
               createdByRep: { select: { user: { select: { name: true } } } },
             },
           },
+          salesReturns: SALES_RETURN_STATEMENT_SELECT,
           payments: {
             orderBy: { createdAt: "desc" },
             select: {
@@ -80,6 +82,7 @@ export default async function RepMerchantStatementPage({ params }: RepMerchantSt
           openingBalanceSetAt: merchant.account?.openingBalanceSetAt ?? null,
           orders,
           payments,
+          salesReturns: merchant.account?.salesReturns ?? [],
         }}
       />
     </div>

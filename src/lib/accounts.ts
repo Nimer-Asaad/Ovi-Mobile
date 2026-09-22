@@ -7,7 +7,27 @@ import {
   buildAccountStatementRows,
   type AccountStatementOrderInput,
   type AccountStatementPaymentInput,
+  type AccountStatementSalesReturnInput,
 } from "@/lib/account-statement";
+
+/** The Prisma `select` every statement/position caller uses for
+ * `account.salesReturns` — one shared shape so no caller hand-writes (or
+ * forgets a field of) it. Balance-only callers may use the smaller
+ * `{ select: { totalCreditCents: true } }`. */
+export const SALES_RETURN_STATEMENT_SELECT = {
+  select: {
+    id: true,
+    createdAt: true,
+    sequence: true,
+    totalCreditCents: true,
+    order: { select: { orderNumber: true } },
+    salesRep: { select: { user: { select: { name: true } } } },
+  },
+  orderBy: { createdAt: "asc" },
+} as const;
+
+/** Smaller sales-returns select for callers that only compute a balance. */
+export const SALES_RETURN_BALANCE_SELECT = { select: { totalCreditCents: true } } as const;
 
 type Tx = Prisma.TransactionClient;
 
@@ -330,6 +350,11 @@ export interface AccountBalanceInput {
    * never by silently excluding the payment from the sum, which would
    * produce the same number but not the same auditable formula. */
   payments: { amountCents: number; cancellation?: { id: string } | null }[];
+  /** REP sales returns (SalesReturn.totalCreditCents) — each one is a
+   * credit that reduces what the account owes, a separate accounting event
+   * from any payment. Required so no call site can silently keep computing
+   * debt without returns. */
+  salesReturns: { totalCreditCents: number }[];
 }
 
 /** The single source of truth for an account's balance due — never
@@ -340,7 +365,7 @@ export interface AccountBalanceInput {
  * subtracted, then added straight back — see AccountBalanceInput's own doc
  * comment) while its historical statement position stays untouched (see
  * buildAccountStatementRows). The result is always computed live from
- * openingBalanceCents + orders - payments + reversals, never stored,
+ * openingBalanceCents + orders - payments + reversals - sales returns, never stored,
  * matching Order.paidAmountCents's existing "never stored" convention.
  * openingBalanceCents represents pre-system debt entered once by an ADMIN
  * (see setAccountOpeningBalance in src/app/admin/accounts/actions.ts) —
@@ -353,7 +378,8 @@ export function getAccountBalanceCents(account: AccountBalanceInput): number {
   const totalReversedCents = account.payments
     .filter((payment) => payment.cancellation)
     .reduce((sum, payment) => sum + payment.amountCents, 0);
-  return account.openingBalanceCents + totalOwedCents - totalPaidCents + totalReversedCents;
+  const totalReturnedCents = account.salesReturns.reduce((sum, salesReturn) => sum + salesReturn.totalCreditCents, 0);
+  return account.openingBalanceCents + totalOwedCents - totalPaidCents + totalReversedCents - totalReturnedCents;
 }
 
 export interface OrderAccountPosition {
@@ -386,6 +412,9 @@ export interface AccountHistoryInput {
    * payment if it has one — it's excluded from "previous" automatically by
    * chronology (see below), never by guessing which row it is. */
   payments: AccountStatementPaymentInput[];
+  /** The account's FULL sales-return list — a return of an EARLIER invoice
+   * lowers a later invoice's "الذمة السابقة", so positions must see them. */
+  salesReturns: AccountStatementSalesReturnInput[];
 }
 
 /** Derives an invoice's "الذمة السابقة"/"الذمة بعد البيع" position for one

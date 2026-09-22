@@ -5,7 +5,7 @@ import { requireRole } from "@/lib/auth/guards";
 import { ROLES } from "@/lib/constants";
 import { InvoiceActions } from "@/components/admin/orders/InvoiceActions";
 import type { InvoiceData } from "@/components/admin/orders/InvoiceView";
-import { getOrderAccountPosition } from "@/lib/accounts";
+import { getOrderAccountPosition, SALES_RETURN_STATEMENT_SELECT } from "@/lib/accounts";
 import { getOrderBusinessCreatedAt, getOrderStatusHistoryBusinessCreatedAt } from "@/lib/business-time";
 import { isTerminalOrderStatus } from "@/lib/order-lifecycle-rules";
 
@@ -80,6 +80,7 @@ export default async function AdminInvoicePage({ params }: AdminInvoicePageProps
           // the exact chronological ordering buildAccountStatementRows uses
           // — never just the bare totals getAccountBalanceCents alone needs.
           orders: { select: { orderNumber: true, createdAt: true, status: true, totalCents: true } },
+          salesReturns: SALES_RETURN_STATEMENT_SELECT,
           payments: {
             select: {
               id: true,
