@@ -99,3 +99,16 @@ export async function getSalesReturnsBusinessCreatedAtByOrder(orderId: string): 
   `;
   return new Map(rows.map((row) => [row.id, row.businessCreatedAt]));
 }
+
+/** SalesReturnReversal.createdAt — same naive-column correction, keyed by
+ * SalesReturnReversal.id. Same "every reversal of one order in one query"
+ * shape as getSalesReturnsBusinessCreatedAtByOrder above. */
+export async function getSalesReturnReversalsBusinessCreatedAtByOrder(orderId: string): Promise<Map<string, Date>> {
+  const rows = await prisma.$queryRaw<{ id: string; businessCreatedAt: Date }[]>`
+    SELECT "sales_return_reversals"."id", ("sales_return_reversals"."createdAt" AT TIME ZONE current_setting('TIMEZONE')) AS "businessCreatedAt"
+    FROM "sales_return_reversals"
+    INNER JOIN "sales_returns" ON "sales_returns"."id" = "sales_return_reversals"."salesReturnId"
+    WHERE "sales_returns"."orderId" = ${orderId}
+  `;
+  return new Map(rows.map((row) => [row.id, row.businessCreatedAt]));
+}

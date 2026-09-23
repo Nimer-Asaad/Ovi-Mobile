@@ -9,6 +9,7 @@ const MOVEMENT_TYPE_LABELS: Record<string, string> = {
   [STOCK_MOVEMENT_TYPES.TRANSFER]: "نقل",
   [STOCK_MOVEMENT_TYPES.SALE_OUT]: "بيع صادر",
   [STOCK_MOVEMENT_TYPES.RETURN_IN]: "إرجاع وارد",
+  [STOCK_MOVEMENT_TYPES.SALES_RETURN_REVERSAL_OUT]: "إلغاء مردود مبيعات",
   [STOCK_MOVEMENT_TYPES.REP_ASSIGNMENT]: "تحميل إلى السيارة",
   [STOCK_MOVEMENT_TYPES.REP_RETURN]: "إرجاع إلى المستودع",
   [STOCK_MOVEMENT_TYPES.ORDER_RESERVED]: "محجوز لطلب",
@@ -30,6 +31,7 @@ export function getMovementTypeBadgeVariant(type: string): BadgeVariant {
       return "success";
     case STOCK_MOVEMENT_TYPES.STOCK_OUT:
     case STOCK_MOVEMENT_TYPES.SALE_OUT:
+    case STOCK_MOVEMENT_TYPES.SALES_RETURN_REVERSAL_OUT:
       return "danger";
     case STOCK_MOVEMENT_TYPES.ADJUSTMENT:
     case STOCK_MOVEMENT_TYPES.REP_RETURN:

@@ -37,6 +37,13 @@ export const STOCK_MOVEMENT_TYPES = {
   TRANSFER: "TRANSFER",
   SALE_OUT: "SALE_OUT",
   RETURN_IN: "RETURN_IN",
+  /// Physical units leaving a REP_CAR because an ADMIN reversed/cancelled a
+  /// previously-created REP sales return (src/lib/sales-return-reversal.ts)
+  /// — the exact opposite of RETURN_IN, and the only movement type that
+  /// removes stock the return added. Never used for anything else, and
+  /// never allowed to drive REP_CAR quantity negative (see
+  /// decrementInventoryAtomic in inventory-transactions.ts).
+  SALES_RETURN_REVERSAL_OUT: "SALES_RETURN_REVERSAL_OUT",
   ADJUSTMENT: "ADJUSTMENT",
   REP_ASSIGNMENT: "REP_ASSIGNMENT",
   REP_RETURN: "REP_RETURN",

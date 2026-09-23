@@ -186,7 +186,12 @@ export default async function RepSaleDetailPage({ params }: RepSaleDetailPagePro
 
       <InvoiceActions order={invoiceData} whatsappNumber={whatsappNumber} />
 
-      <SalesReturnHistoryCard orderNumber={order.orderNumber} summary={returnSummary} history={returnHistory} />
+      <SalesReturnHistoryCard
+        orderNumber={order.orderNumber}
+        summary={returnSummary}
+        history={returnHistory}
+        receiptHrefBase={`/rep/sales/${order.orderNumber}/returns`}
+      />
     </div>
   );
 }

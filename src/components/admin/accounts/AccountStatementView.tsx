@@ -15,6 +15,7 @@ const ROW_TYPE_LABELS: Record<AccountStatementRowType, string> = {
   PAYMENT: "دفعة",
   PAYMENT_REVERSAL: "إلغاء دفعة",
   SALES_RETURN: "مردود مبيعات",
+  SALES_RETURN_REVERSAL: "إلغاء مردود مبيعات",
 };
 
 /** Pure, server-renderable printable statement — mirrors InvoiceView's
@@ -98,7 +99,7 @@ export function AccountStatementView({ account }: { account: AccountStatementDat
             {rows.map((row) => (
               <tr
                 key={row.key}
-                className={row.isTerminalOrder || row.isCancelledPayment || row.type === "PAYMENT_REVERSAL" ? "text-neutral-400" : "text-neutral-900"}
+                className={row.isTerminalOrder || row.isCancelledPayment || row.isReversedReturn || row.type === "PAYMENT_REVERSAL" || row.type === "SALES_RETURN_REVERSAL" ? "text-neutral-400" : "text-neutral-900"}
               >
                 <td className="py-2 pe-2 align-top whitespace-nowrap">{row.date ? new Date(row.date).toLocaleDateString("ar") : "—"}</td>
                 <td className="py-2 pe-2 align-top whitespace-nowrap">
@@ -106,6 +107,11 @@ export function AccountStatementView({ account }: { account: AccountStatementDat
                   {row.isCancelledPayment && (
                     <span className="ms-1 rounded-full border border-rose-300 bg-rose-50 px-1.5 py-0.5 text-[10px] font-semibold text-rose-700">
                       ملغاة
+                    </span>
+                  )}
+                  {row.isReversedReturn && (
+                    <span className="ms-1 rounded-full border border-rose-300 bg-rose-50 px-1.5 py-0.5 text-[10px] font-semibold text-rose-700">
+                      ملغي / معكوس
                     </span>
                   )}
                 </td>
@@ -135,7 +141,7 @@ export function AccountStatementView({ account }: { account: AccountStatementDat
           <p className="py-4 text-center text-sm text-neutral-400">لا توجد حركات على هذا الحساب بعد</p>
         ) : (
           rows.map((row) => {
-            const dimmed = row.isTerminalOrder || row.isCancelledPayment || row.type === "PAYMENT_REVERSAL";
+            const dimmed = row.isTerminalOrder || row.isCancelledPayment || row.isReversedReturn || row.type === "PAYMENT_REVERSAL" || row.type === "SALES_RETURN_REVERSAL";
             return (
               <div
                 key={row.key}
@@ -153,6 +159,11 @@ export function AccountStatementView({ account }: { account: AccountStatementDat
                       {row.isCancelledPayment && (
                         <span className="rounded-full border border-rose-300 bg-rose-50 px-1.5 py-0.5 text-[10px] font-semibold text-rose-700">
                           ملغاة
+                        </span>
+                      )}
+                      {row.isReversedReturn && (
+                        <span className="rounded-full border border-rose-300 bg-rose-50 px-1.5 py-0.5 text-[10px] font-semibold text-rose-700">
+                          ملغي / معكوس
                         </span>
                       )}
                     </span>

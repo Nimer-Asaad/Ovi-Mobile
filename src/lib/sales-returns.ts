@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { STOCK_LOCATION_TYPES, STOCK_MOVEMENT_TYPES } from "@/lib/constants";
 import { isTerminalOrderStatus } from "@/lib/order-lifecycle-rules";
 import { getAccountBalanceCents, lockAccountForBalanceUpdate } from "@/lib/accounts";
-import { getSalesReturnsBusinessCreatedAtByOrder } from "@/lib/business-time";
+import { getSalesReturnsBusinessCreatedAtByOrder, getSalesReturnReversalsBusinessCreatedAtByOrder } from "@/lib/business-time";
 import { incrementInventoryUpsert, recordStockMovement } from "@/lib/inventory-transactions";
 import { computeNetLineCents, deriveReturnStatus, incrementalPaidCreditCents, type SalesReturnStatus } from "@/lib/sales-return-math";
 
@@ -177,9 +177,14 @@ export async function createSalesReturn(input: CreateSalesReturnInput): Promise<
         if (!itemsById.has(orderItemId)) throw new SalesReturnDomainError("INVALID_LINE", "أحد الأصناف لا ينتمي لهذه الفاتورة");
       }
 
+      // EFFECTIVE returns only — a reversed return's quantities/credit no
+      // longer count toward the cumulative bounds a NEW return is checked
+      // against (Part 5: reversed returns free up their quantity for a
+      // future return, exactly like the reversal's own inventory/balance
+      // effect already restores it).
       const previous = await tx.salesReturnItem.groupBy({
         by: ["orderItemId"],
-        where: { orderItem: { orderId: fresh.id } },
+        where: { orderItem: { orderId: fresh.id }, salesReturn: { reversal: null } },
         _sum: { quantity: true, bonusQuantity: true, creditCents: true },
       });
       const returnedByItem = new Map(previous.map((row) => [row.orderItemId, { quantity: row._sum.quantity ?? 0, bonusQuantity: row._sum.bonusQuantity ?? 0 }]));
@@ -225,7 +230,7 @@ export async function createSalesReturn(input: CreateSalesReturnInput): Promise<
         openingBalanceCents: true,
         orders: { select: { status: true, totalCents: true } },
         payments: { select: { amountCents: true, cancellation: { select: { id: true } } } },
-        salesReturns: { select: { totalCreditCents: true } },
+        salesReturns: { select: { totalCreditCents: true, reversal: { select: { id: true } } } },
       } as const;
       const balanceBefore = getAccountBalanceCents(await tx.customerAccount.findUniqueOrThrow({ where: { id: accountId }, select: balanceSelect }));
 
@@ -282,9 +287,11 @@ export async function createSalesReturn(input: CreateSalesReturnInput): Promise<
       if (balanceBefore - balanceAfter !== totalCreditCents) {
         throw new SalesReturnDomainError("INVARIANT_VIOLATION", "خطأ في احتساب رصيد التاجر");
       }
+      // Same EFFECTIVE-only filter as `previous` above — a reversed sibling
+      // return's stale quantity must never count against this invariant.
       const after = await tx.salesReturnItem.groupBy({
         by: ["orderItemId"],
-        where: { orderItem: { orderId: fresh.id } },
+        where: { orderItem: { orderId: fresh.id }, salesReturn: { reversal: null } },
         _sum: { quantity: true, bonusQuantity: true, creditCents: true },
       });
       for (const row of after) {
@@ -341,7 +348,15 @@ export interface OrderReturnSummary {
 export async function getOrderReturnSummary(orderId: string): Promise<OrderReturnSummary> {
   const [items, returned] = await Promise.all([
     prisma.orderItem.findMany({ where: { orderId }, select: { id: true, quantity: true, bonusQuantity: true } }),
-    prisma.salesReturnItem.groupBy({ by: ["orderItemId"], where: { orderItem: { orderId } }, _sum: { quantity: true, bonusQuantity: true, creditCents: true } }),
+    // EFFECTIVE (non-reversed) returns only — a reversed return's quantity/
+    // credit no longer counts as "returned" (Part 5/4): the physical units
+    // are gone again from REP_CAR (removed by the reversal) and the credit
+    // is added back to the balance, so this summary must agree.
+    prisma.salesReturnItem.groupBy({
+      by: ["orderItemId"],
+      where: { orderItem: { orderId }, salesReturn: { reversal: null } },
+      _sum: { quantity: true, bonusQuantity: true, creditCents: true },
+    }),
   ]);
   const returnedByItem = new Map(
     returned.map((row) => [row.orderItemId, { quantity: row._sum.quantity ?? 0, bonusQuantity: row._sum.bonusQuantity ?? 0, credit: row._sum.creditCents ?? 0 }]),
@@ -385,6 +400,13 @@ export function describeOrderItem(item: {
   return parts.join(" — ");
 }
 
+export interface SalesReturnReversalInfo {
+  reason: string;
+  createdByName: string;
+  /** True absolute instant — feed to formatBusinessDateTime only. */
+  businessCreatedAt: Date;
+}
+
 export interface SalesReturnHistoryEntry {
   id: string;
   sequence: number;
@@ -395,13 +417,18 @@ export interface SalesReturnHistoryEntry {
   /** True absolute instant — feed to formatBusinessDateTime only. */
   businessCreatedAt: Date;
   items: { orderItemId: string; label: string; quantity: number; bonusQuantity: number; creditCents: number }[];
+  /** Present only once an ADMIN has reversed this return (see
+   * src/lib/sales-return-reversal.ts) — the ORIGINAL return row/fields
+   * above are never rewritten; this is purely additive display info for
+   * the "ملغي / معكوس" badge, reversal date/actor/reason. */
+  reversal: SalesReturnReversalInfo | null;
 }
 
 /** Every return recorded against one invoice, oldest first — the
  * "مردودات الفاتورة" section and the printable return receipt both read
  * from this. Read-only. */
 export async function getOrderReturnHistory(orderId: string, orderNumber: string): Promise<SalesReturnHistoryEntry[]> {
-  const [returns, businessDates] = await Promise.all([
+  const [returns, businessDates, reversalBusinessDates] = await Promise.all([
     prisma.salesReturn.findMany({
       where: { orderId },
       orderBy: { sequence: "asc" },
@@ -412,6 +439,7 @@ export async function getOrderReturnHistory(orderId: string, orderNumber: string
         note: true,
         createdAt: true,
         salesRep: { select: { user: { select: { name: true } } } },
+        reversal: { select: { id: true, reason: true, createdAt: true, createdBy: { select: { name: true } } } },
         items: {
           orderBy: { id: "asc" },
           select: {
@@ -433,6 +461,7 @@ export async function getOrderReturnHistory(orderId: string, orderNumber: string
       },
     }),
     getSalesReturnsBusinessCreatedAtByOrder(orderId),
+    getSalesReturnReversalsBusinessCreatedAtByOrder(orderId),
   ]);
   return returns.map((row) => ({
     id: row.id,
@@ -443,5 +472,12 @@ export async function getOrderReturnHistory(orderId: string, orderNumber: string
     repName: row.salesRep.user.name,
     businessCreatedAt: businessDates.get(row.id) ?? row.createdAt,
     items: row.items.map((item) => ({ orderItemId: item.orderItemId, label: describeOrderItem(item.orderItem), quantity: item.quantity, bonusQuantity: item.bonusQuantity, creditCents: item.creditCents })),
+    reversal: row.reversal
+      ? {
+          reason: row.reversal.reason,
+          createdByName: row.reversal.createdBy.name,
+          businessCreatedAt: reversalBusinessDates.get(row.reversal.id) ?? row.reversal.createdAt,
+        }
+      : null,
   }));
 }

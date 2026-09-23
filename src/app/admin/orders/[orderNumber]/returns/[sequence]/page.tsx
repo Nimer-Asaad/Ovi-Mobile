@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { requireEffectiveRepresentative } from "@/lib/auth/impersonation";
+import { requireRole } from "@/lib/auth/guards";
+import { ROLES } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
 import { formatBusinessDateTime, formatCurrencyFromCents } from "@/lib/utils";
 import { getOrderBusinessCreatedAt } from "@/lib/business-time";
@@ -13,13 +14,13 @@ interface PageProps {
 
 export const dynamic = "force-dynamic";
 
-/** سند مردود مبيعات — printable receipt for ONE return of one of the rep's
- * own invoices (browser print, no PDF library). Same server-side ownership
- * rule as the invoice page: Order.createdByRepId must equal the effective
- * rep's id, otherwise 404 — a manipulated orderNumber/sequence for another
- * rep's sale can never render. Read-only. */
-export default async function RepSalesReturnReceiptPage({ params }: PageProps) {
-  const effectiveRep = await requireEffectiveRepresentative();
+/** سند مردود مبيعات — ADMIN/ADMIN_ASSISTANT printable receipt for ONE
+ * return of ANY order (company-wide, unlike the REP's own order-number-
+ * scoped equivalent at /rep/sales/[orderNumber]/returns/[sequence] — same
+ * "ADMIN already has broader access" reasoning as the admin invoice page).
+ * Read-only. */
+export default async function AdminSalesReturnReceiptPage({ params }: PageProps) {
+  await requireRole([ROLES.ADMIN, ROLES.ADMIN_ASSISTANT]);
   const { orderNumber, sequence: sequenceParam } = await params;
   const sequence = Number(sequenceParam);
   if (!Number.isInteger(sequence) || sequence < 1) notFound();
@@ -30,12 +31,11 @@ export default async function RepSalesReturnReceiptPage({ params }: PageProps) {
       id: true,
       orderNumber: true,
       createdAt: true,
-      createdByRepId: true,
       contactName: true,
       merchant: { select: { businessName: true, contactPhone: true } },
     },
   });
-  if (!order || order.createdByRepId !== effectiveRep.repId) notFound();
+  if (!order) notFound();
 
   const history = await getOrderReturnHistory(order.id, order.orderNumber);
   const entry = history.find((row) => row.sequence === sequence);
@@ -50,7 +50,7 @@ export default async function RepSalesReturnReceiptPage({ params }: PageProps) {
     <div className="mx-auto flex max-w-2xl flex-col gap-4" dir="rtl">
       <style>{`@page { size: A5 portrait; margin: 8mm; } @media print { html, body { background: #fff !important; } tr { break-inside: avoid; } }`}</style>
       <div className="flex flex-wrap items-center justify-between gap-3 print:hidden">
-        <Link href={`/rep/sales/${order.orderNumber}`} className="text-sm text-gold-champagne hover:underline">
+        <Link href={`/admin/orders/${order.orderNumber}/invoice`} className="text-sm text-gold-champagne hover:underline">
           العودة إلى الفاتورة
         </Link>
         <PrintInventorySheetButton />

@@ -152,8 +152,28 @@ export function NewSaleForm({ products, customers, customerOrders, action = crea
     setBonusQuantities((prev) => ({ ...prev, [productKey]: bonusQuantity }));
   }
 
+  /** WRONG-MERCHANT INCIDENT FIX (2026-09-22): resolveOrCreateRepMerchant
+   * (src/lib/rep-merchants.ts) always resolves the real trader identity by
+   * `customerPhone` alone — `customerName` is only ever used when CREATING
+   * a brand-new trader, never to validate an existing match. Before this
+   * fix, editing only the name field after picking a known trader left
+   * `customerPhone` (and city/address) silently pointing at THAT trader —
+   * a rep who picked "عمر" then hand-corrected the name to "وجدي" could
+   * submit name="وجدي" with عمر's own phone, and the sale would post under
+   * عمر even though "وجدي" was what appeared on screen. Whenever the name
+   * is edited right after a real trader was picked (customerPicked), every
+   * dependent field that belonged to THAT trader is cleared together with
+   * it — the rep must then either pick a fresh suggestion (which fills
+   * name+phone+city+address atomically, see handlePickCustomer) or type a
+   * brand-new phone themselves, so a stale phone can never silently survive
+   * a name edit. */
   function handleCustomerNameChange(event: ChangeEvent<HTMLInputElement>) {
     setCustomerName(event.target.value);
+    if (customerPicked) {
+      setCustomerPhone("");
+      setCity("");
+      setAddress("");
+    }
     setCustomerPicked(false);
     setCurrentBalanceCents(null);
   }

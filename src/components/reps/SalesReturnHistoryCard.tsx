@@ -3,20 +3,35 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { formatBusinessDateTime, formatCurrencyFromCents } from "@/lib/utils";
 import { getReturnStatusLabel } from "@/lib/sales-return-math";
+import { SalesReturnReversalControl } from "@/components/admin/orders/SalesReturnReversalControl";
 import type { OrderReturnSummary, SalesReturnHistoryEntry } from "@/lib/sales-returns";
 
 /** "مردودات الفاتورة" — read-only history of every return recorded against
  * one invoice, plus the derived status / total returned / remaining
  * returnable quantity. Server-rendered, never part of the printed invoice
- * (print:hidden) — each return has its own printable receipt. */
+ * (print:hidden) — each return has its own printable receipt.
+ *
+ * Shared by the REP's own invoice page (/rep/sales/[orderNumber], always
+ * canReverse=false — a rep must never reverse their own historical return)
+ * and the ADMIN invoice page (/admin/orders/[orderNumber]/invoice,
+ * canReverse=true), which point receiptHrefBase at their own respective
+ * printable-receipt route so each role's "سند المردود / طباعة" link never
+ * crosses into the other role's URL space. */
 export function SalesReturnHistoryCard({
   orderNumber,
   summary,
   history,
+  receiptHrefBase,
+  canReverse = false,
 }: {
   orderNumber: string;
   summary: Pick<OrderReturnSummary, "status" | "returnedUnits" | "remainingUnits" | "totalCreditCents">;
   history: SalesReturnHistoryEntry[];
+  /** e.g. "/rep/sales/ORDNUM/returns" or "/admin/orders/ORDNUM/returns" —
+   * the receipt link for entry N is `${receiptHrefBase}/${entry.sequence}`. */
+  receiptHrefBase: string;
+  /** ADMIN-only — never true for a REP viewing their own invoice. */
+  canReverse?: boolean;
 }) {
   return (
     <Card className="print:hidden">
@@ -47,7 +62,10 @@ export function SalesReturnHistoryCard({
             {history.map((entry) => (
               <div key={entry.id} className="flex flex-col gap-1 py-3 first:pt-0 last:pb-0">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="text-sm font-semibold text-neutral-bg">{entry.reference}</span>
+                  <span className="flex items-center gap-2 text-sm font-semibold text-neutral-bg">
+                    {entry.reference}
+                    <Badge variant={entry.reversal ? "danger" : "success"}>{entry.reversal ? "ملغي / معكوس" : "فعال"}</Badge>
+                  </span>
                   <span className="text-xs text-neutral-bg/50">{formatBusinessDateTime(entry.businessCreatedAt)}</span>
                 </div>
                 <ul className="text-sm text-neutral-bg/80">
@@ -63,11 +81,24 @@ export function SalesReturnHistoryCard({
                     المندوب: {entry.repName} — قيمة المردود:{" "}
                     <span className="font-semibold text-gold-champagne">{formatCurrencyFromCents(entry.totalCreditCents)}</span>
                   </span>
-                  <Link href={`/rep/sales/${orderNumber}/returns/${entry.sequence}`} className="text-xs text-gold-champagne hover:underline">
+                  <Link href={`${receiptHrefBase}/${entry.sequence}`} className="text-xs text-gold-champagne hover:underline">
                     سند المردود / طباعة
                   </Link>
                 </div>
                 {entry.note && <p className="text-xs text-neutral-bg/50">ملاحظة: {entry.note}</p>}
+
+                {entry.reversal ? (
+                  <div className="mt-1 rounded-card border border-rose-500/20 bg-rose-500/5 p-2 text-xs text-rose-300">
+                    تم الإلغاء بتاريخ {formatBusinessDateTime(entry.reversal.businessCreatedAt)} بواسطة {entry.reversal.createdByName} — السبب:{" "}
+                    {entry.reversal.reason}
+                  </div>
+                ) : (
+                  canReverse && (
+                    <div className="mt-1">
+                      <SalesReturnReversalControl salesReturnId={entry.id} orderNumber={orderNumber} reference={entry.reference} />
+                    </div>
+                  )
+                )}
               </div>
             ))}
           </div>

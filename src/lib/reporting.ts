@@ -442,8 +442,18 @@ export async function fetchSalesReturnTotals(filters: { fromIso: string; toIso: 
         WHERE (("createdAt" AT TIME ZONE current_setting('TIMEZONE')) AT TIME ZONE 'Asia/Hebron')::date BETWEEN ${filters.fromIso}::date AND ${filters.toIso}::date
       `;
   if (idRows.length === 0) return { returnsCount: 0, returnsTotalCents: 0 };
+  // EFFECTIVE (non-reversed) returns only — an ADMIN-reversed return
+  // (src/lib/sales-return-reversal.ts) no longer represents a permanent net
+  // return: its credit is added back to the account, so it must not still
+  // reduce "net sales" here either. Reversed returns are still fully
+  // visible in the account statement/invoice history — this only affects
+  // this aggregate KPI, never the SalesReturn row itself.
   const aggregate = await prisma.salesReturn.aggregate({
-    where: { id: { in: idRows.map((row) => row.id) }, ...(filters.merchantId ? { account: { merchantId: filters.merchantId } } : {}) },
+    where: {
+      id: { in: idRows.map((row) => row.id) },
+      reversal: null,
+      ...(filters.merchantId ? { account: { merchantId: filters.merchantId } } : {}),
+    },
     _sum: { totalCreditCents: true },
     _count: { _all: true },
   });

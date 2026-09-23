@@ -6,7 +6,7 @@ import { ORDER_SOURCES, ORDER_STATUSES, PAYMENT_METHODS, STOCK_MOVEMENT_TYPES, R
 import type { RepSaleInput } from "@/lib/validation/repSale";
 import { decrementInventoryAtomic, recordStockMovement, InsufficientInventoryError } from "@/lib/inventory-transactions";
 import { getOrCreateMerchantAccount, getAccountBalanceCents, lockAccountForBalanceUpdate, recordInitialAccountPayment } from "@/lib/accounts";
-import { resolveOrCreateRepMerchant } from "@/lib/rep-merchants";
+import { resolveOrCreateRepMerchant, RepMerchantAmbiguousPhoneError } from "@/lib/rep-merchants";
 import { calculateLineChargeCents, calculateChargeableSubtotalCents, validateBonusQuantity, validateInvoiceDiscount, calculateInvoiceTotalCents, derivePaymentStatus } from "@/lib/sale-pricing";
 import { generateDailyOrderNumber } from "@/lib/order-number";
 import type { SaleProductOption } from "@/components/reps/ProductSalePicker";
@@ -332,6 +332,17 @@ export async function createRepSaleCore(input: RepSaleInput, context: CreateRepS
           throw new Error("MERCHANT_NOT_APPROVED");
         }
         const accountId = await getOrCreateMerchantAccount(tx, merchant.id);
+        // Explicit defensive assertion (added after the 2026-09-22
+        // wrong-merchant incident audit): getOrCreateMerchantAccount always
+        // derives accountId FROM merchant.id, so this can only ever fail if
+        // a future refactor breaks that — never expected to trip in normal
+        // operation, but the Order below must never be created with a
+        // merchantId/accountId pair that don't actually belong to the same
+        // trader, so this is checked rather than assumed.
+        const accountOwner = await tx.customerAccount.findUniqueOrThrow({ where: { id: accountId }, select: { merchantId: true } });
+        if (accountOwner.merchantId !== merchant.id) {
+          throw new Error("MERCHANT_ACCOUNT_MISMATCH");
+        }
 
         // Serialize against every other operation that can change this same
         // account's balance — MUST happen before the balance read just
@@ -360,7 +371,7 @@ export async function createRepSaleCore(input: RepSaleInput, context: CreateRepS
             openingBalanceCents: true,
             orders: { select: { status: true, totalCents: true } },
             payments: { select: { amountCents: true, cancellation: { select: { id: true } } } },
-            salesReturns: { select: { totalCreditCents: true } },
+            salesReturns: { select: { totalCreditCents: true, reversal: { select: { id: true } } } },
           },
         });
         const previousDebtCents = getAccountBalanceCents(account);
@@ -497,6 +508,12 @@ export async function createRepSaleCore(input: RepSaleInput, context: CreateRepS
       if (err instanceof Error && err.message === "CUSTOMER_ORDER_NOT_OPEN") return { ok: false, error: "لم تعد طلبية الزبون هذه نشطة — حدّث الصفحة وحاول مجدداً" };
       if (err instanceof Error && err.message === "MERCHANT_NOT_APPROVED") return { ok: false, error: "هذا التاجر موقوف حالياً ولا يمكن تسجيل بيع جديد له" };
       if (err instanceof Error && err.message === "PAYMENT_EXCEEDS_MERCHANT_BALANCE") return { ok: false, error: "الدفعة أكبر من إجمالي المبلغ المستحق على التاجر." };
+      if (err instanceof RepMerchantAmbiguousPhoneError) {
+        return { ok: false, error: "تعذر تحديد هوية التاجر بأمان — يوجد أكثر من تاجر مطابق لهذا الرقم. الرجاء مراجعة الإدارة قبل إتمام البيع." };
+      }
+      if (err instanceof Error && err.message === "MERCHANT_ACCOUNT_MISMATCH") {
+        return { ok: false, error: "تعذر إتمام البيع لخطأ داخلي في ربط حساب التاجر — الرجاء المحاولة مرة أخرى أو مراجعة الإدارة" };
+      }
       if (err instanceof InsufficientInventoryError) {
         return { ok: false, error: "الكمية المطلوبة أكبر من مخزونك الحالي لأحد المنتجات، حاول مرة أخرى" };
       }

@@ -45,8 +45,9 @@ export interface AccountStatementPaymentInput {
 
 /** One REP sales return (SalesReturn) — a credit (دائن) that reduces what
  * the account owes, exactly like a payment does, but never a payment: it
- * has no receipt, no method, and is never cancellable. Shaped to match a
- * Prisma `select` (nested `order`/`salesRep`) so a query result can be
+ * has no receipt, no method, and is never edited in place (only ever
+ * reversed by an ADMIN — see `reversal` below). Shaped to match a Prisma
+ * `select` (nested `order`/`salesRep`/`reversal`) so a query result can be
  * passed straight through. See SALES_RETURN_STATEMENT_SELECT in
  * src/lib/accounts.ts. */
 export interface AccountStatementSalesReturnInput {
@@ -56,9 +57,18 @@ export interface AccountStatementSalesReturnInput {
   totalCreditCents: number;
   order: { orderNumber: string };
   salesRep?: { user: { name: string } } | null;
+  /** Present only once an ADMIN has reversed this return (see
+   * src/lib/sales-return-reversal.ts). Mirrors AccountPaymentPayment's own
+   * `cancellation` field exactly: (a) marks the ORIGINAL SALES_RETURN row
+   * "ملغي / معكوس" without changing its debitCents/creditCents/position,
+   * and (b) appends a SEPARATE new SALES_RETURN_REVERSAL row at the
+   * reversal's own createdAt, the actual later accounting event that adds
+   * the credit back to the running balance. Never rewrites the original
+   * row. */
+  reversal?: { reason: string; createdAt: Date; createdBy?: { name: string } | null } | null;
 }
 
-export type AccountStatementRowType = "OPENING" | "SALE" | "PAYMENT" | "PAYMENT_REVERSAL" | "SALES_RETURN";
+export type AccountStatementRowType = "OPENING" | "SALE" | "PAYMENT" | "PAYMENT_REVERSAL" | "SALES_RETURN" | "SALES_RETURN_REVERSAL";
 
 export interface AccountStatementRow {
   key: string;
@@ -98,6 +108,12 @@ export interface AccountStatementRow {
    * row for the actual later accounting event). Always false for every
    * other row type, including PAYMENT_REVERSAL itself. */
   isCancelledPayment: boolean;
+  /** True only for a SALES_RETURN row that has since been reversed by an
+   * ADMIN — same convention as isCancelledPayment above, applied to
+   * returns instead of payments (see the separate SALES_RETURN_REVERSAL
+   * row for the actual later accounting event). Always false for every
+   * other row type, including SALES_RETURN_REVERSAL itself. */
+  isReversedReturn: boolean;
 }
 
 export interface AccountStatementInput {
@@ -129,16 +145,18 @@ export interface AccountStatementInput {
 export function buildAccountStatementRows(input: AccountStatementInput): AccountStatementRow[] {
   interface RawRow {
     date: Date;
-    type: "SALE" | "PAYMENT" | "PAYMENT_REVERSAL" | "SALES_RETURN";
+    type: "SALE" | "PAYMENT" | "PAYMENT_REVERSAL" | "SALES_RETURN" | "SALES_RETURN_REVERSAL";
     reference: string;
     description: string;
     debitCents: number;
     creditCents: number;
     isTerminalOrder: boolean;
     isCancelledPayment: boolean;
+    isReversedReturn: boolean;
     /** Deterministic tie-break for identical timestamps — orders sort
-     * before payments, which sort before payment reversals, at the exact
-     * same instant, then by reference. */
+     * before payments, which sort before payment reversals, then sales
+     * returns, then return reversals, at the exact same instant, then by
+     * reference. */
     sortTieBreak: string;
   }
 
@@ -161,6 +179,7 @@ export function buildAccountStatementRows(input: AccountStatementInput): Account
       creditCents: 0,
       isTerminalOrder: terminal,
       isCancelledPayment: false,
+      isReversedReturn: false,
       sortTieBreak: `0:${order.orderNumber}`,
     });
   }
@@ -186,6 +205,7 @@ export function buildAccountStatementRows(input: AccountStatementInput): Account
       creditCents: payment.amountCents,
       isTerminalOrder: false,
       isCancelledPayment: isCancelled,
+      isReversedReturn: false,
       sortTieBreak: `1:${payment.id}`,
     });
 
@@ -205,6 +225,7 @@ export function buildAccountStatementRows(input: AccountStatementInput): Account
         creditCents: 0,
         isTerminalOrder: false,
         isCancelledPayment: false,
+        isReversedReturn: false,
         sortTieBreak: `2:${payment.id}`,
       });
     }
@@ -212,17 +233,49 @@ export function buildAccountStatementRows(input: AccountStatementInput): Account
 
   for (const salesReturn of input.salesReturns) {
     const reference = `${salesReturn.order.orderNumber}-R${salesReturn.sequence}`;
+    const isReversed = Boolean(salesReturn.reversal);
+    const descriptionParts = [
+      `مردود مبيعات ${reference}`,
+      salesReturn.salesRep ? `— المندوب: ${salesReturn.salesRep.user.name}` : null,
+      isReversed ? "(ملغي / معكوس)" : null,
+    ].filter((part): part is string => Boolean(part));
+
+    // The original return row — unchanged debitCents/creditCents/position
+    // even when reversed. A reversal is a SEPARATE, later accounting event
+    // (the SALES_RETURN_REVERSAL row below), never a rewrite of this one.
     raw.push({
       date: salesReturn.createdAt,
       type: "SALES_RETURN",
       reference,
-      description: [`مردود مبيعات ${reference}`, salesReturn.salesRep ? `— المندوب: ${salesReturn.salesRep.user.name}` : null].filter((part): part is string => Boolean(part)).join(" "),
+      description: descriptionParts.join(" "),
       debitCents: 0,
       creditCents: salesReturn.totalCreditCents,
       isTerminalOrder: false,
       isCancelledPayment: false,
+      isReversedReturn: isReversed,
       sortTieBreak: `3:${salesReturn.id}`,
     });
+
+    if (salesReturn.reversal) {
+      const reversalDescriptionParts = [
+        `إلغاء مردود مبيعات ${reference}`,
+        `— السبب: ${salesReturn.reversal.reason}`,
+        salesReturn.reversal.createdBy?.name ? `— ألغاها: ${salesReturn.reversal.createdBy.name}` : null,
+      ].filter((part): part is string => Boolean(part));
+
+      raw.push({
+        date: salesReturn.reversal.createdAt,
+        type: "SALES_RETURN_REVERSAL",
+        reference,
+        description: reversalDescriptionParts.join(" "),
+        debitCents: salesReturn.totalCreditCents,
+        creditCents: 0,
+        isTerminalOrder: false,
+        isCancelledPayment: false,
+        isReversedReturn: false,
+        sortTieBreak: `4:${salesReturn.id}`,
+      });
+    }
   }
 
   raw.sort((a, b) => {
@@ -251,6 +304,7 @@ export function buildAccountStatementRows(input: AccountStatementInput): Account
       balanceCents: runningBalanceCents,
       isTerminalOrder: false,
       isCancelledPayment: false,
+      isReversedReturn: false,
     });
   }
 
@@ -267,6 +321,7 @@ export function buildAccountStatementRows(input: AccountStatementInput): Account
       balanceCents: runningBalanceCents,
       isTerminalOrder: row.isTerminalOrder,
       isCancelledPayment: row.isCancelledPayment,
+      isReversedReturn: row.isReversedReturn,
     });
   });
 

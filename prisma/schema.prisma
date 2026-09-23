@@ -77,8 +77,8 @@ model User {
   repCustomerOrdersCreated       RepCustomerOrder[]              @relation("RepCustomerOrderCreatedBy")
   manualInventoryBatchesCreated  ManualInventoryBatch[]          @relation("ManualInventoryBatchCreatedBy")
   onlineSalesRecorded            OnlineSale[]                    @relation("OnlineSaleCreatedBy")
-  salesReturnsCreated SalesReturn[] @relation("SalesReturnCreatedBy")
-
+  salesReturnsCreated            SalesReturn[]                   @relation("SalesReturnCreatedBy")
+  salesReturnReversalsCreated    SalesReturnReversal[]           @relation("SalesReturnReversalCreatedBy")
 
   @@map("users")
 }
@@ -160,8 +160,7 @@ model SalesRepresentative {
   stockReturns         StockReturn[]
   stockTransferBatches RepStockTransferBatch[]
   customerOrders       RepCustomerOrder[]
-  salesReturns SalesReturn[]
-
+  salesReturns         SalesReturn[]
 
   @@map("sales_representatives")
 }
@@ -653,8 +652,7 @@ model StockLocation {
   orderCompensations  OrderInventoryCompensation[]
   transferBatchesFrom RepStockTransferBatch[]      @relation("RepTransferBatchFromLocation")
   transferBatchesTo   RepStockTransferBatch[]      @relation("RepTransferBatchToLocation")
-  salesReturns SalesReturn[]
-
+  salesReturns        SalesReturn[]
 
   @@map("stock_locations")
 }
@@ -1000,11 +998,10 @@ model Order {
   /// this relation). Never set/read anywhere except through this real
   /// relation — never inferred from note text.
   initialPayment        AccountPayment?             @relation("OrderInitialPayment")
+  salesReturns          SalesReturn[]
 
   @@index([customerId])
   @@index([stockLocationId])
-  salesReturns SalesReturn[]
-
   @@map("orders")
 }
 
@@ -1058,11 +1055,10 @@ model OrderItem {
   bonusQuantity        Int                 @default(0)
   unitPriceCents       Int
   totalCents           Int
+  salesReturnItems     SalesReturnItem[]
 
   @@index([variantId])
   @@index([deviceColorVariantId])
-  salesReturnItems SalesReturnItem[]
-
   @@map("order_items")
 }
 
@@ -1149,12 +1145,11 @@ model CustomerAccount {
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
 
-  orders   Order[]
-  payments AccountPayment[]
-
-  @@index([phone])
+  orders       Order[]
+  payments     AccountPayment[]
   salesReturns SalesReturn[]
 
+  @@index([phone])
   @@map("customer_accounts")
 }
 
@@ -1438,13 +1433,54 @@ model SalesReturn {
   note             String?
   createdAt        DateTime            @default(now())
 
-  items SalesReturnItem[]
+  items    SalesReturnItem[]
+  /// Present only once this return has been reversed by an ADMIN — see
+  /// SalesReturnReversal below. NEVER hard-deleted: an "effective"/active
+  /// return is `reversal === null`; every accounting/inventory function that
+  /// must ignore a reversed return filters on that, never on deleting rows.
+  reversal SalesReturnReversal?
 
   @@unique([orderId, sequence])
   @@index([accountId])
   @@index([salesRepId])
   @@index([createdAt])
   @@map("sales_returns")
+}
+
+/// An ADMIN-only correction that reverses/cancels ONE SalesReturn — "إلغاء
+/// مردود المبيعات". Never a hard delete of the original SalesReturn/
+/// SalesReturnItem rows (both remain in history forever, exactly as
+/// AccountPaymentCancellation leaves the original AccountPayment untouched
+/// — the identical existing correction pattern, applied to returns). At
+/// most one reversal per return (`salesReturnId` @unique is both the
+/// eligibility check's data source and the DB-level "at most once"
+/// concurrency backstop for two simultaneous reversal clicks — see
+/// reverseSalesReturn in src/lib/sales-return-reversal.ts).
+///
+/// ACCOUNTING EFFECT: adds back exactly the original SalesReturn's
+/// totalCreditCents to the account's balance (never recomputed from
+/// current prices) — see getAccountBalanceCents in src/lib/accounts.ts.
+///
+/// INVENTORY EFFECT: removes the SAME physical quantity the original
+/// return put into that REP_CAR — see reverseSalesReturn, which uses the
+/// canonical decrementInventoryAtomic helper and blocks if current stock is
+/// insufficient (goods already sold/transferred onward), never allowing
+/// negative REP_CAR stock and never silently pulling from WAREHOUSE.
+///
+/// This row itself IS the audit trail (createdById + reason + createdAt),
+/// the same convention AccountPaymentCancellation already uses — no
+/// separate AdminAuditLog entry, since plain (non-impersonated) ADMIN
+/// corrections don't write one anywhere else in this codebase either.
+model SalesReturnReversal {
+  id            String      @id @default(cuid())
+  salesReturnId String      @unique
+  salesReturn   SalesReturn @relation(fields: [salesReturnId], references: [id])
+  createdById   String
+  createdBy     User        @relation("SalesReturnReversalCreatedBy", fields: [createdById], references: [id])
+  reason        String
+  createdAt     DateTime    @default(now())
+
+  @@map("sales_return_reversals")
 }
 
 /// One returned line of a SalesReturn, pointing at the ORIGINAL OrderItem.

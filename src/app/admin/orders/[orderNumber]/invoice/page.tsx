@@ -8,6 +8,8 @@ import type { InvoiceData } from "@/components/admin/orders/InvoiceView";
 import { getOrderAccountPosition, SALES_RETURN_STATEMENT_SELECT } from "@/lib/accounts";
 import { getOrderBusinessCreatedAt, getOrderStatusHistoryBusinessCreatedAt } from "@/lib/business-time";
 import { isTerminalOrderStatus } from "@/lib/order-lifecycle-rules";
+import { getOrderReturnHistory, getOrderReturnSummary } from "@/lib/sales-returns";
+import { SalesReturnHistoryCard } from "@/components/reps/SalesReturnHistoryCard";
 
 interface AdminInvoicePageProps {
   params: Promise<{ orderNumber: string }>;
@@ -32,13 +34,14 @@ interface AdminInvoicePageProps {
  * page, this route is order-number-scoped only — ADMIN already has broader
  * access to every order, unchanged from before this feature. */
 export default async function AdminInvoicePage({ params }: AdminInvoicePageProps) {
-  await requireRole([ROLES.ADMIN, ROLES.ADMIN_ASSISTANT]);
+  const actor = await requireRole([ROLES.ADMIN, ROLES.ADMIN_ASSISTANT]);
 
   const { orderNumber } = await params;
 
   const order = await prisma.order.findUnique({
     where: { orderNumber },
     select: {
+      id: true,
       orderNumber: true,
       createdAt: true,
       status: true,
@@ -157,6 +160,10 @@ export default async function AdminInvoicePage({ params }: AdminInvoicePageProps
 
   const whatsappNumber = order.merchant?.whatsappPhone ?? order.merchant?.contactPhone ?? null;
 
+  // Derived from the SalesReturn ledger only — the original order row (and
+  // its status) is never modified by a return or its reversal.
+  const [returnSummary, returnHistory] = await Promise.all([getOrderReturnSummary(order.id), getOrderReturnHistory(order.id, order.orderNumber)]);
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center justify-between gap-3 print:hidden">
@@ -166,6 +173,18 @@ export default async function AdminInvoicePage({ params }: AdminInvoicePageProps
       </div>
 
       <InvoiceActions order={invoiceData} whatsappNumber={whatsappNumber} />
+
+      {/* ADMIN_ASSISTANT can see the same return history as ADMIN (matches
+       * this whole page's existing ADMIN|ADMIN_ASSISTANT access), but only
+       * ADMIN may reverse a return — canReverse is the one thing that
+       * differs by role here. */}
+      <SalesReturnHistoryCard
+        orderNumber={order.orderNumber}
+        summary={returnSummary}
+        history={returnHistory}
+        receiptHrefBase={`/admin/orders/${order.orderNumber}/returns`}
+        canReverse={actor.role === ROLES.ADMIN}
+      />
     </div>
   );
 }

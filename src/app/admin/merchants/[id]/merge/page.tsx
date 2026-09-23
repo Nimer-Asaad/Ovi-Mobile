@@ -31,7 +31,7 @@ const CANDIDATE_SELECT = {
       openingBalanceCents: true,
       orders: { select: { status: true, totalCents: true } },
       payments: { select: { amountCents: true, cancellation: { select: { id: true } } } },
-      salesReturns: { select: { totalCreditCents: true } },
+      salesReturns: { select: { totalCreditCents: true, reversal: { select: { id: true } } } },
     },
   },
 } as const;

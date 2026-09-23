@@ -220,10 +220,16 @@ export async function transitionOrderStatusInTransaction(
   // every line to the order's stock location — if part of it already came
   // back through a REP sales return (src/lib/sales-returns.ts), doing both
   // would duplicate that stock and double-credit the account. Checked AFTER
-  // the account lock (createSalesReturn takes the same lock first) so it
-  // always sees every committed return. The rep/admin keeps the existing
-  // partial-return tool for such an invoice.
-  if (restoresInventory && (await tx.salesReturn.count({ where: { orderId: order.id } })) > 0) {
+  // the account lock (createSalesReturn/reverseSalesReturn both take the
+  // same lock first) so it always sees every committed return/reversal.
+  // EFFECTIVE (non-reversed) returns only — once an ADMIN reverses every
+  // SalesReturn on this order (src/lib/sales-return-reversal.ts), the
+  // inventory/balance effect those returns had is already fully undone, so
+  // this whole-order cancel/return path may proceed again exactly as if
+  // the returns had never happened. The rep/admin keeps the existing
+  // partial-return tool for an invoice with at least one still-active
+  // return.
+  if (restoresInventory && (await tx.salesReturn.count({ where: { orderId: order.id, reversal: null } })) > 0) {
     throw new LifecycleDomainError(
       "ORDER_HAS_SALES_RETURNS",
       "لا يمكن إلغاء أو إرجاع هذه الفاتورة بالكامل لأنه تم تسجيل مردود مبيعات عليها",

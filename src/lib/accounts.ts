@@ -22,12 +22,18 @@ export const SALES_RETURN_STATEMENT_SELECT = {
     totalCreditCents: true,
     order: { select: { orderNumber: true } },
     salesRep: { select: { user: { select: { name: true } } } },
+    // Present only once an ADMIN has reversed this return (see
+    // src/lib/sales-return-reversal.ts) — both getAccountBalanceCents below
+    // and buildAccountStatementRows (src/lib/account-statement.ts) key off
+    // this to net a reversed return's credit back to zero CURRENT effect,
+    // the exact same convention AccountPayment.cancellation already uses.
+    reversal: { select: { id: true, reason: true, createdAt: true, createdBy: { select: { name: true } } } },
   },
   orderBy: { createdAt: "asc" },
 } as const;
 
 /** Smaller sales-returns select for callers that only compute a balance. */
-export const SALES_RETURN_BALANCE_SELECT = { select: { totalCreditCents: true } } as const;
+export const SALES_RETURN_BALANCE_SELECT = { select: { totalCreditCents: true, reversal: { select: { id: true } } } } as const;
 
 type Tx = Prisma.TransactionClient;
 
@@ -353,8 +359,14 @@ export interface AccountBalanceInput {
   /** REP sales returns (SalesReturn.totalCreditCents) — each one is a
    * credit that reduces what the account owes, a separate accounting event
    * from any payment. Required so no call site can silently keep computing
-   * debt without returns. */
-  salesReturns: { totalCreditCents: number }[];
+   * debt without returns. `reversal` present (non-null) means an ADMIN has
+   * since reversed/cancelled this return (see
+   * src/lib/sales-return-reversal.ts) — its original totalCreditCents is
+   * still summed below (the original return's own historical effect is
+   * never erased) but then added straight back, netting to zero CURRENT
+   * effect — the exact same convention `payments[].cancellation` already
+   * uses for a cancelled payment. */
+  salesReturns: { totalCreditCents: number; reversal?: { id: string } | null }[];
 }
 
 /** The single source of truth for an account's balance due — never
@@ -365,8 +377,9 @@ export interface AccountBalanceInput {
  * subtracted, then added straight back — see AccountBalanceInput's own doc
  * comment) while its historical statement position stays untouched (see
  * buildAccountStatementRows). The result is always computed live from
- * openingBalanceCents + orders - payments + reversals - sales returns, never stored,
- * matching Order.paidAmountCents's existing "never stored" convention.
+ * openingBalanceCents + orders - payments + payment reversals - sales
+ * returns + sales return reversals, never stored, matching
+ * Order.paidAmountCents's existing "never stored" convention.
  * openingBalanceCents represents pre-system debt entered once by an ADMIN
  * (see setAccountOpeningBalance in src/app/admin/accounts/actions.ts) —
  * never a fabricated Order or AccountPayment. */
@@ -379,7 +392,14 @@ export function getAccountBalanceCents(account: AccountBalanceInput): number {
     .filter((payment) => payment.cancellation)
     .reduce((sum, payment) => sum + payment.amountCents, 0);
   const totalReturnedCents = account.salesReturns.reduce((sum, salesReturn) => sum + salesReturn.totalCreditCents, 0);
-  return account.openingBalanceCents + totalOwedCents - totalPaidCents + totalReversedCents - totalReturnedCents;
+  // Same "sum all, then add back the reversed ones" pattern as payments —
+  // an ADMIN-reversed return nets to zero CURRENT effect while its own
+  // historical row (and the reversal's own later statement row) stay
+  // exactly as they were (see buildAccountStatementRows).
+  const totalReturnReversedCents = account.salesReturns
+    .filter((salesReturn) => salesReturn.reversal)
+    .reduce((sum, salesReturn) => sum + salesReturn.totalCreditCents, 0);
+  return account.openingBalanceCents + totalOwedCents - totalPaidCents + totalReversedCents - totalReturnedCents + totalReturnReversedCents;
 }
 
 export interface OrderAccountPosition {

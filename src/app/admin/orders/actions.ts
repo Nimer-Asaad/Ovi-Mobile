@@ -6,6 +6,7 @@ import { requireRole } from "@/lib/auth/guards";
 import { ROLES } from "@/lib/constants";
 import { orderLifecycleTransitionSchema, paymentStatusSchema } from "@/lib/validation/order";
 import { transitionOrderStatus } from "@/lib/order-lifecycle";
+import { reverseSalesReturn, revalidateSalesReturnReversalPaths } from "@/lib/sales-return-reversal";
 import type { OrderStatus } from "@/types";
 
 export interface OrderActionState {
@@ -77,5 +78,37 @@ export async function updatePaymentStatus(
   await prisma.order.update({ where: { orderNumber }, data: { paymentStatus: parsed.data } });
 
   revalidateOrderPaths(orderNumber);
+  return { success: true };
+}
+
+export interface SalesReturnReversalState {
+  error?: string;
+  success?: boolean;
+}
+
+/** ADMIN-only "إلغاء مردود المبيعات" — never ADMIN_ASSISTANT (this reverses
+ * a financial + inventory correction, not a warehouse-prep action), and
+ * never reachable by a REP: unlike the return itself (owned by the rep who
+ * created it), a REP must not be able to reverse their own historical
+ * return — see reverseSalesReturn's own doc comment (src/lib/
+ * sales-return-reversal.ts) for the full atomic transaction this runs. */
+export async function reverseSalesReturnAction(_prevState: SalesReturnReversalState, formData: FormData): Promise<SalesReturnReversalState> {
+  const actor = await requireRole([ROLES.ADMIN]);
+
+  const salesReturnId = formData.get("salesReturnId")?.toString();
+  const orderNumber = formData.get("orderNumber")?.toString();
+  const reason = formData.get("reason")?.toString() ?? "";
+  if (!salesReturnId || !orderNumber) {
+    return { error: "مردود المبيعات غير موجود" };
+  }
+
+  const result = await reverseSalesReturn({ salesReturnId, actorUserId: actor.id, reason });
+  if (!result.ok) {
+    return { error: result.error };
+  }
+
+  revalidateOrderPaths(orderNumber);
+  revalidatePath(`/admin/orders/${orderNumber}/invoice`);
+  revalidateSalesReturnReversalPaths(orderNumber);
   return { success: true };
 }

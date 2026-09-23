@@ -38,7 +38,7 @@ export async function getMerchantsForRep(repId: string, region?: string): Promis
           openingBalanceCents: true,
           orders: { select: { status: true, totalCents: true } },
           payments: { select: { amountCents: true, cancellation: { select: { id: true } } } },
-          salesReturns: { select: { totalCreditCents: true } },
+          salesReturns: { select: { totalCreditCents: true, reversal: { select: { id: true } } } },
         },
       },
     },
@@ -124,7 +124,7 @@ export async function getRepTraderContactsForSaleForm(repId: string): Promise<Re
           openingBalanceCents: true,
           orders: { select: { status: true, totalCents: true } },
           payments: { select: { amountCents: true, cancellation: { select: { id: true } } } },
-          salesReturns: { select: { totalCreditCents: true } },
+          salesReturns: { select: { totalCreditCents: true, reversal: { select: { id: true } } } },
         },
       },
     },
@@ -170,16 +170,37 @@ export interface ResolveRepMerchantInput {
  * phone, recreating exactly the problem a merge exists to fix. Returning
  * the suspended match instead lets the caller's own
  * MERCHANT_NOT_APPROVED-style check (see createRepSaleCore) reject the sale
- * with a clear message, without ever spawning a fresh duplicate. */
+ * with a clear message, without ever spawning a fresh duplicate.
+ *
+ * DEFENSIVE AMBIGUITY GUARD (added after the 2026-09-22 wrong-merchant
+ * incident audit): this rep could in principle have TWO assigned Merchant
+ * rows that both match `contactPhone` (one via its own `contactPhone`
+ * column, the other via its linked `user.phone`) — a genuine data
+ * ambiguity, not a UI bug. Silently picking whichever row a query happens
+ * to return first would risk attaching a sale to the wrong one with no
+ * error at all. This never silently continues on that ambiguity: it throws
+ * RepMerchantAmbiguousPhoneError instead, which createRepSaleCore converts
+ * into a clear rejection asking the rep to contact an admin — the sale is
+ * never created against a guessed identity. */
+export class RepMerchantAmbiguousPhoneError extends Error {
+  constructor(public readonly contactPhone: string) {
+    super(`RepMerchantAmbiguousPhoneError: ${contactPhone} matches more than one merchant assigned to this rep`);
+  }
+}
+
 export async function resolveOrCreateRepMerchant(tx: Tx, input: ResolveRepMerchantInput): Promise<{ id: string; userId: string | null; status: string }> {
-  const existing = await tx.merchant.findFirst({
+  const candidates = await tx.merchant.findMany({
     where: {
       assignedRepId: input.salesRepId,
       OR: [{ contactPhone: input.contactPhone }, { user: { phone: input.contactPhone } }],
     },
     select: { id: true, userId: true, status: true },
+    orderBy: { createdAt: "asc" },
   });
-  if (existing) return existing;
+  if (candidates.length > 1) {
+    throw new RepMerchantAmbiguousPhoneError(input.contactPhone);
+  }
+  if (candidates.length === 1) return candidates[0]!;
 
   return tx.merchant.create({
     data: {
