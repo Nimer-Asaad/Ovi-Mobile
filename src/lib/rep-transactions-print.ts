@@ -4,7 +4,6 @@ import { ACCOUNT_PAYMENT_ORIGINS } from "@/lib/constants";
 import { getOrderAccountPosition, getPaymentAccountPosition, SALES_RETURN_STATEMENT_SELECT } from "@/lib/accounts";
 import { getOrderStatusHistoryBusinessCreatedAt, getPaymentCancellationBusinessCancelledAt } from "@/lib/business-time";
 import { isTerminalOrderStatus } from "@/lib/order-lifecycle-rules";
-import { getOrderIdsInRange, getPaymentIdsInRange } from "@/lib/reporting";
 import type { InvoiceData } from "@/components/admin/orders/InvoiceView";
 import type { PaymentReceiptData } from "@/components/shared/PaymentReceiptView";
 
@@ -20,12 +19,69 @@ function isValidIsoDate(value: string | undefined): value is string {
   return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
 }
 
-export type RepPrintRangeResult = { ok: true; fromIso: string; toIso: string } | { ok: false; error: string };
+const HH_MM = /^([01]\d|2[0-3]):[0-5]\d$/;
 
-export function parseRepPrintRange(from: string | undefined, to: string | undefined): RepPrintRangeResult {
+/** Empty/missing time falls back to the given default; anything else must be a strict 24h HH:mm. */
+function resolveTime(value: string | undefined, fallback: string): string | null {
+  const trimmed = value?.trim();
+  if (!trimmed) return fallback;
+  return HH_MM.test(trimmed) ? trimmed : null;
+}
+
+export type RepPrintRangeResult =
+  | { ok: true; fromIso: string; toIso: string; fromTime: string; toTime: string }
+  | { ok: false; error: string };
+
+/** Palestine business-local date + time range. Omitted times default to the
+ * whole day (00:00 → 23:59, with the end minute fully included — see the
+ * range queries below), which is exactly the previous date-only behavior. */
+export function parseRepPrintRange(
+  from: string | undefined,
+  to: string | undefined,
+  fromTimeInput?: string,
+  toTimeInput?: string,
+): RepPrintRangeResult {
   if (!isValidIsoDate(from) || !isValidIsoDate(to)) return { ok: false, error: "تاريخ غير صالح. الرجاء اختيار تاريخين صحيحين." };
-  if (from > to) return { ok: false, error: "تاريخ البداية يجب أن يكون قبل أو يساوي تاريخ النهاية." };
-  return { ok: true, fromIso: from, toIso: to };
+  const fromTime = resolveTime(fromTimeInput, "00:00");
+  const toTime = resolveTime(toTimeInput, "23:59");
+  if (!fromTime || !toTime) return { ok: false, error: "وقت غير صالح. الرجاء إدخال الوقت بصيغة HH:mm." };
+  if (`${from} ${fromTime}` > `${to} ${toTime}`) return { ok: false, error: "بداية الفترة يجب أن تكون قبل أو تساوي نهايتها." };
+  return { ok: true, fromIso: from, toIso: to, fromTime, toTime };
+}
+
+interface PrintRange {
+  fromTs: string;
+  toTs: string;
+}
+
+interface BusinessDatedId {
+  id: string;
+  businessCreatedAt: Date;
+}
+
+/** Same business-time interpretation as reporting.ts's getOrderIdsInRange /
+ * getPaymentIdsInRange (naive createdAt -> DB session zone -> Asia/Hebron
+ * wall clock), but compared as a full timestamp instead of ::date. The upper
+ * bound is exclusive at (to-minute + 1 minute), so the selected end minute is
+ * fully included — with the defaults (00:00 / 23:59) this selects exactly the
+ * same rows the old inclusive date BETWEEN did. The shared date-only helpers
+ * in reporting.ts are deliberately left untouched (other reports use them). */
+function getOrderIdsInDateTimeRange(range: PrintRange, salesRepId: string): Promise<BusinessDatedId[]> {
+  return prisma.$queryRaw<BusinessDatedId[]>`
+    SELECT "id", ("createdAt" AT TIME ZONE current_setting('TIMEZONE')) AS "businessCreatedAt" FROM "orders"
+    WHERE (("createdAt" AT TIME ZONE current_setting('TIMEZONE')) AT TIME ZONE 'Asia/Hebron') >= ${range.fromTs}::timestamp
+      AND (("createdAt" AT TIME ZONE current_setting('TIMEZONE')) AT TIME ZONE 'Asia/Hebron') < ${range.toTs}::timestamp + interval '1 minute'
+      AND "createdByRepId" = ${salesRepId}
+  `;
+}
+
+function getPaymentIdsInDateTimeRange(range: PrintRange, createdById: string): Promise<BusinessDatedId[]> {
+  return prisma.$queryRaw<BusinessDatedId[]>`
+    SELECT "id", ("createdAt" AT TIME ZONE current_setting('TIMEZONE')) AS "businessCreatedAt" FROM "account_payments"
+    WHERE (("createdAt" AT TIME ZONE current_setting('TIMEZONE')) AT TIME ZONE 'Asia/Hebron') >= ${range.fromTs}::timestamp
+      AND (("createdAt" AT TIME ZONE current_setting('TIMEZONE')) AT TIME ZONE 'Asia/Hebron') < ${range.toTs}::timestamp + interval '1 minute'
+      AND "createdById" = ${createdById}
+  `;
 }
 
 export type RepPrintTransaction =
@@ -73,13 +129,17 @@ const MERCHANT_SELECT = {
 /** Read-only. Sales = orders whose createdByRepId is this rep; payments =
  * account_payments whose createdById is this rep's User id (the actual
  * collector — never a merchant's assignedRepId). Both windows use the
- * existing inclusive Palestine business-date SQL helpers from reporting.ts,
+ * inclusive Palestine business date+time range queries above,
  * and every row is rendered from the same data the standalone invoice/
  * receipt pages use. Oldest first. */
-export async function loadRepTransactions(rep: { id: string; userId: string }, fromIso: string, toIso: string) {
+export async function loadRepTransactions(
+  rep: { id: string; userId: string },
+  range: { fromIso: string; toIso: string; fromTime: string; toTime: string },
+) {
+  const printRange: PrintRange = { fromTs: `${range.fromIso} ${range.fromTime}:00`, toTs: `${range.toIso} ${range.toTime}:00` };
   const [orderIdRows, paymentIdRows] = await Promise.all([
-    getOrderIdsInRange(fromIso, toIso, rep.id),
-    getPaymentIdsInRange(fromIso, toIso, rep.userId),
+    getOrderIdsInDateTimeRange(printRange, rep.id),
+    getPaymentIdsInDateTimeRange(printRange, rep.userId),
   ]);
   const orderBusinessAt = new Map(orderIdRows.map((row) => [row.id, row.businessCreatedAt]));
   const paymentBusinessAt = new Map(paymentIdRows.map((row) => [row.id, row.businessCreatedAt]));

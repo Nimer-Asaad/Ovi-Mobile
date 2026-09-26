@@ -23,8 +23,16 @@ export function RepTransactionsPrintForm({ repId, defaultDate }: { repId: string
         <input type="date" name="from" defaultValue={defaultDate} required className="h-9 rounded-card border border-navy-soft bg-navy-deep px-2 text-sm text-neutral-bg" />
       </label>
       <label className="flex flex-col gap-1 text-xs text-neutral-bg/70">
+        من وقت
+        <input type="time" name="fromTime" defaultValue="00:00" className="h-9 rounded-card border border-navy-soft bg-navy-deep px-2 text-sm text-neutral-bg" />
+      </label>
+      <label className="flex flex-col gap-1 text-xs text-neutral-bg/70">
         إلى تاريخ
         <input type="date" name="to" defaultValue={defaultDate} required className="h-9 rounded-card border border-navy-soft bg-navy-deep px-2 text-sm text-neutral-bg" />
+      </label>
+      <label className="flex flex-col gap-1 text-xs text-neutral-bg/70">
+        إلى وقت
+        <input type="time" name="toTime" defaultValue="23:59" className="h-9 rounded-card border border-navy-soft bg-navy-deep px-2 text-sm text-neutral-bg" />
       </label>
       <Button type="submit">عرض / طباعة</Button>
       <Button type="button" variant="outline" onClick={() => setOpen(false)}>

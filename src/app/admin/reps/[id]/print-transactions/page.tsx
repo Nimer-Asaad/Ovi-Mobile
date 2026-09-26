@@ -37,7 +37,18 @@ const A5_PRINT_CSS = `
 
 interface PageProps {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ from?: string; to?: string }>;
+  searchParams: Promise<{ from?: string; to?: string; fromTime?: string; toTime?: string }>;
+}
+
+/** Print-report-only name banner shared by invoices and receipts — the shared
+ * InvoiceView/PaymentReceiptView are deliberately untouched. Bold, large, and
+ * black-bordered so it survives grayscale printing. */
+function CustomerNameBanner({ name }: { name: string }) {
+  return (
+    <p className="rep-customer mb-2 rounded-card border-2 border-neutral-900 bg-white px-4 py-2 text-xl font-extrabold text-neutral-900 print:text-[20px]">
+      اسم الزبون: {name}
+    </p>
+  );
 }
 
 /** ADMIN-only, read-only combined printable document of one rep's sales
@@ -47,7 +58,7 @@ interface PageProps {
 export default async function AdminRepPrintTransactionsPage({ params, searchParams }: PageProps) {
   await requireRole([ROLES.ADMIN]);
   const { id } = await params;
-  const { from, to } = await searchParams;
+  const { from, to, fromTime, toTime } = await searchParams;
 
   const rep = await prisma.salesRepresentative.findUnique({
     where: { id },
@@ -55,7 +66,7 @@ export default async function AdminRepPrintTransactionsPage({ params, searchPara
   });
   if (!rep) notFound();
 
-  const range = parseRepPrintRange(from, to);
+  const range = parseRepPrintRange(from, to, fromTime, toTime);
   if (!range.ok) {
     return (
       <div className="flex flex-col gap-4">
@@ -67,11 +78,11 @@ export default async function AdminRepPrintTransactionsPage({ params, searchPara
     );
   }
 
-  const { transactions, totals } = await loadRepTransactions(rep, range.fromIso, range.toIso);
+  const { transactions, totals } = await loadRepTransactions(rep, range);
 
   const summary: [string, string][] = [
     ["اسم المندوب", rep.user.name],
-    ["الفترة", `من ${range.fromIso} إلى ${range.toIso}`],
+    ["الفترة", `من ${range.fromIso} ${range.fromTime} إلى ${range.toIso} ${range.toTime}`],
     ["عدد الفواتير", String(totals.salesCount)],
     ["إجمالي المبيعات", formatCurrencyFromCents(totals.salesTotalCents)],
     ["عدد الدفعات", String(totals.paymentsCount)],
@@ -117,14 +128,18 @@ export default async function AdminRepPrintTransactionsPage({ params, searchPara
             }`}
           >
             <p className="mb-1 text-sm font-bold text-gold-champagne print:mb-0 print:text-[11px] print:text-neutral-900">{tx.type === "SALE" ? "فاتورة بيع" : "سند قبض"}</p>
-            {tx.type === "SALE" && (
-              // Print-report-only banner (InvoiceView is shared and untouched): same
-              // name InvoiceView itself resolves for its customer label.
-              <p className="rep-customer mb-2 rounded-card border-2 border-neutral-900 bg-white px-4 py-2 text-xl font-extrabold text-neutral-900 print:text-[20px]">
-                اسم الزبون: {tx.invoice.merchant?.businessName ?? tx.invoice.customer?.name ?? tx.invoice.contactName ?? "—"}
-              </p>
+            {tx.type === "SALE" ? (
+              <>
+                <CustomerNameBanner name={tx.invoice.merchant?.businessName ?? tx.invoice.customer?.name ?? tx.invoice.contactName ?? "—"} />
+                <InvoiceView order={tx.invoice} />
+              </>
+            ) : (
+              <>
+                {/* A receipt carries no separate customer name: merchant business name, else the account's own display name (its non-merchant identity). */}
+                <CustomerNameBanner name={tx.receipt.merchant?.businessName ?? (tx.receipt.accountDisplayName || "—")} />
+                <PaymentReceiptView payment={tx.receipt} />
+              </>
             )}
-            {tx.type === "SALE" ? <InvoiceView order={tx.invoice} /> : <PaymentReceiptView payment={tx.receipt} />}
           </section>
         ))
       )}
