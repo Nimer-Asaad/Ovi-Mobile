@@ -1,5 +1,6 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
+import { ACCOUNT_PAYMENT_ORIGINS } from "@/lib/constants";
 import { getOrderAccountPosition, getPaymentAccountPosition, SALES_RETURN_STATEMENT_SELECT } from "@/lib/accounts";
 import { getOrderStatusHistoryBusinessCreatedAt, getPaymentCancellationBusinessCancelledAt } from "@/lib/business-time";
 import { isTerminalOrderStatus } from "@/lib/order-lifecycle-rules";
@@ -36,6 +37,9 @@ export interface RepPrintTotals {
   salesTotalCents: number;
   paymentsCount: number;
   paymentsTotalCents: number;
+  /** How many of paymentsCount are sale-linked payments printed inside their
+   * own invoice instead of as a separate receipt. */
+  embeddedPaymentsCount: number;
 }
 
 const ACCOUNT_SELECT = {
@@ -139,6 +143,8 @@ export async function loadRepTransactions(rep: { id: string; userId: string }, f
             method: true,
             note: true,
             createdAt: true,
+            origin: true,
+            sourceOrderId: true,
             createdBy: { select: { name: true } },
             cancellation: { select: { reason: true, cancelledAt: true, cancelledBy: { select: { name: true } } } },
             account: { select: { ...ACCOUNT_SELECT, merchant: { select: MERCHANT_SELECT } } },
@@ -147,7 +153,7 @@ export async function loadRepTransactions(rep: { id: string; userId: string }, f
   ]);
 
   const transactions: RepPrintTransaction[] = [];
-  const totals: RepPrintTotals = { salesCount: 0, salesTotalCents: 0, paymentsCount: 0, paymentsTotalCents: 0 };
+  const totals: RepPrintTotals = { salesCount: 0, salesTotalCents: 0, paymentsCount: 0, paymentsTotalCents: 0, embeddedPaymentsCount: 0 };
 
   for (const order of orders) {
     const businessCreatedAt = orderBusinessAt.get(order.id) ?? order.createdAt;
@@ -193,7 +199,33 @@ export async function loadRepTransactions(rep: { id: string; userId: string }, f
     }
   }
 
+  const printedOrderIds = new Set(orders.map((order) => order.id));
+
   for (const payment of payments) {
+    // The "paid now" portion of a sale is already shown INSIDE that sale's
+    // invoice (paidAmountCents — persisted, never clamped, so an amount above
+    // the invoice total from collecting older debt stays exact) — printing it
+    // again as a separate سند قبض duplicates it. Identified only through the
+    // canonical relation (origin + sourceOrderId), never receipt-number
+    // proximity, and only when that exact invoice is actually printed in this
+    // same report. A cancelled SALE_INITIAL payment is deliberately NOT
+    // suppressed: its reversal is a separate event the invoice does not show,
+    // so it keeps printing as a (cancelled) receipt exactly as before.
+    const isEmbeddedInPrintedInvoice =
+      payment.origin === ACCOUNT_PAYMENT_ORIGINS.SALE_INITIAL &&
+      payment.sourceOrderId !== null &&
+      printedOrderIds.has(payment.sourceOrderId) &&
+      !payment.cancellation;
+
+    if (isEmbeddedInPrintedInvoice) {
+      // Still a real, active collection: counted in the totals exactly as
+      // before (accounting semantics unchanged), just not printed twice.
+      totals.paymentsCount += 1;
+      totals.paymentsTotalCents += payment.amountCents;
+      totals.embeddedPaymentsCount += 1;
+      continue;
+    }
+
     const businessCreatedAt = paymentBusinessAt.get(payment.id) ?? payment.createdAt;
     const receipt: PaymentReceiptData = {
       id: payment.id,

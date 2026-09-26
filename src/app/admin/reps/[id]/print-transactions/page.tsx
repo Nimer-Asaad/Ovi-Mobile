@@ -15,8 +15,19 @@ const A5_PRINT_CSS = `
 @page { size: A5 portrait; margin: 6mm; }
 @media print {
   html, body { background: #fff !important; }
-  .rep-a5-doc { max-width: none !important; gap: 2mm !important; }
+  /* Block (not flex) in print: forced page breaks on flex items are not
+     reliable across browsers, so spacing moves from gap to a sibling margin. */
+  .rep-a5-doc { display: block !important; max-width: none !important; }
+  .rep-a5-doc > * + * { margin-top: 2mm; }
   .rep-a5-doc .rep-tx { break-inside: avoid; page-break-inside: avoid; }
+  /* .rep-break-before is decided per transaction in the render loop below:
+     the first transaction (so the summary is its own cover page and every
+     invoice page has the same usable area), every sale invoice, and any
+     receipt that directly follows a sale. Consecutive standalone receipts do
+     NOT get it, so they keep sharing pages. Break-BEFORE only (never
+     break-after), so no blank trailing page can follow the last transaction. */
+  .rep-a5-doc .rep-break-before { break-before: page; page-break-before: always; margin-top: 0; }
+  .rep-a5-doc .rep-customer { border: 2pt solid #000 !important; padding: 2mm 3mm !important; margin-bottom: 2mm !important; line-height: 1.25; }
   .rep-a5-doc .rep-tx > div { max-width: none !important; width: 100% !important; margin: 0 !important; padding: 2mm !important; border: 0 !important; box-shadow: none !important; zoom: 0.82; }
   .rep-a5-doc .rep-tx table { width: 100%; }
   .rep-a5-doc .rep-tx td, .rep-a5-doc .rep-tx th { overflow-wrap: anywhere; }
@@ -88,14 +99,31 @@ export default async function AdminRepPrintTransactionsPage({ params, searchPara
           ))}
         </dl>
         <p className="mt-2 text-xs text-neutral-500 print:mt-1 print:text-[9px]">الإجماليات لا تشمل الفواتير الملغاة/المرتجعة ولا الدفعات الملغاة.</p>
+        {totals.embeddedPaymentsCount > 0 && (
+          <p className="mt-1 text-xs text-neutral-500 print:text-[9px]">
+            الدفعات المسجلة مع الفاتورة ({totals.embeddedPaymentsCount}) مطبوعة داخل فاتورتها ضمن المبلغ المدفوع الآن ولا تظهر كسند قبض مستقل، وهي محسوبة في إجمالي الدفعات أعلاه.
+          </p>
+        )}
       </section>
 
       {transactions.length === 0 ? (
         <p className="py-8 text-center text-sm text-neutral-500">لا توجد فواتير أو دفعات في هذه الفترة.</p>
       ) : (
-        transactions.map((tx) => (
-          <section key={tx.key} className="rep-tx break-inside-avoid">
+        transactions.map((tx, index) => (
+          <section
+            key={tx.key}
+            className={`rep-tx ${tx.type === "SALE" ? "rep-tx-sale" : "rep-tx-payment"} break-inside-avoid ${
+              index === 0 || tx.type === "SALE" || transactions[index - 1]?.type === "SALE" ? "rep-break-before" : ""
+            }`}
+          >
             <p className="mb-1 text-sm font-bold text-gold-champagne print:mb-0 print:text-[11px] print:text-neutral-900">{tx.type === "SALE" ? "فاتورة بيع" : "سند قبض"}</p>
+            {tx.type === "SALE" && (
+              // Print-report-only banner (InvoiceView is shared and untouched): same
+              // name InvoiceView itself resolves for its customer label.
+              <p className="rep-customer mb-2 rounded-card border-2 border-neutral-900 bg-white px-4 py-2 text-xl font-extrabold text-neutral-900 print:text-[20px]">
+                اسم الزبون: {tx.invoice.merchant?.businessName ?? tx.invoice.customer?.name ?? tx.invoice.contactName ?? "—"}
+              </p>
+            )}
             {tx.type === "SALE" ? <InvoiceView order={tx.invoice} /> : <PaymentReceiptView payment={tx.receipt} />}
           </section>
         ))
