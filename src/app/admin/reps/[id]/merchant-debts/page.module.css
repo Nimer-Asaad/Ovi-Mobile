@@ -1,0 +1,21 @@
+/* Route-scoped print rules for the rep merchant-debt report only — imported
+ * solely by this route's page.tsx. Deliberately NOT in globals.css: @page is
+ * not a DOM-scoped rule, so declaring it globally would affect every print
+ * route in the app. Next.js only bundles a route's own imported CSS into
+ * that route, so this file is never applied to any other page. Same A4
+ * convention as the rep inventory-count sheet
+ * (RepInventorySheetView.module.css) — this report is a flowing multi-row
+ * table, never one-merchant-per-page, so rows are allowed to flow across
+ * pages; only a single row is ever kept from splitting. */
+
+@media print {
+  @page {
+    size: A4;
+    margin: 12mm;
+  }
+
+  .avoidBreak {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+}

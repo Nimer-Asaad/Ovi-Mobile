@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
+import { LinkButton } from "@/components/ui/LinkButton";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { StatCard } from "@/components/ui/StatCard";
 import { AdminStatusBadge } from "@/components/admin/AdminStatusBadge";
@@ -223,6 +224,9 @@ export default async function AdminRepDetailPage({ params }: AdminRepDetailPageP
             <Link href={`/admin/reps/${rep.id}/inventory-sheet`}>
               <Button variant="outline">طباعة كشف الجرد</Button>
             </Link>
+            <LinkButton href={`/admin/reps/${rep.id}/merchant-debts`} target="_blank" variant="outline">
+              طباعة مديونية التجار
+            </LinkButton>
             <RepTransactionsPrintForm repId={rep.id} defaultDate={getBusinessDateIso()} />
           </>
         }
