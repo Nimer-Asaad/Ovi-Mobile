@@ -14,7 +14,7 @@ import {
   mergeActivityRows,
   computeActivityTotals,
   fetchSalesReturnTotals,
-  getDefaultReportRange,
+  resolveMonthToDateReportRange,
 } from "@/lib/reporting";
 import { correctRepSaleAction, cancelRepManualPaymentAction } from "@/app/rep/sales/actions";
 
@@ -47,9 +47,8 @@ export default async function RepSalesPage({ searchParams }: RepSalesPageProps) 
   const effectiveRep = await requireEffectiveRepresentative();
   const { type, from, to, q } = await searchParams;
 
-  const defaults = getDefaultReportRange();
-  const fromIso = from?.trim() || defaults.fromIso;
-  const toIso = to?.trim() || defaults.toIso;
+  // Default = current Palestine calendar month to date (explicit from/to win).
+  const { fromIso, toIso } = resolveMonthToDateReportRange(from, to);
   const activeTab = type === "SALE" || type === "PAYMENT" ? type : "ALL";
 
   const [sales, payments, returnTotals] = await Promise.all([

@@ -1,9 +1,15 @@
 /**
- * Real-database verification for the REP dashboard "current month sales" KPI
- * (src/app/rep/page.tsx): getBusinessMonthRange + the canonical
- * fetchSaleActivityRows / computeActivityTotals the /rep/sales report uses —
- * no separate sales formula. Read-only reporting; nothing here changes any
- * accounting, payment or inventory logic.
+ * Real-database verification for the REP "current CALENDAR month to date"
+ * sales default: getBusinessMonthRange / resolveMonthToDateReportRange
+ * (src/lib/reporting.ts), used by BOTH the /rep dashboard KPI and the
+ * /rep/sales default date filter, over the canonical fetchSaleActivityRows /
+ * computeActivityTotals — no separate sales formula. Read-only reporting;
+ * nothing here changes any accounting, payment or inventory logic.
+ *
+ * Regression pinned here: /rep/sales used to default to
+ * getDefaultReportRange (the trailing 30 days — on 2026-10-03 that is
+ * 2026-09-03..2026-10-03), so September sales leaked into a "monthly" view.
+ * The monthly figure must reset on the 1st of each Palestine calendar month.
  *
  * Safety rails via resolveVerifyDatabaseUrl (prisma/verify-guardrails.ts) —
  * same convention as every other prisma/verify-*.ts script: never runs
@@ -25,6 +31,7 @@ process.env.DATABASE_URL = resolved.url;
 process.env.DIRECT_URL = resolved.url;
 
 async function main() {
+  const fs = await import("node:fs");
   const [{ PrismaClient }, constants, repSales, reporting] = await Promise.all([
     import("@prisma/client"),
     import("../src/lib/constants"),
@@ -35,7 +42,7 @@ async function main() {
   const prisma = new PrismaClient();
   const { ROLES, STOCK_LOCATION_TYPES, ACCOUNT_PAYMENT_METHODS, ORDER_SOURCES, ORDER_STATUSES } = constants;
   const { createRepSaleCore } = repSales;
-  const { fetchSaleActivityRows, computeActivityTotals, getBusinessMonthRange } = reporting;
+  const { fetchSaleActivityRows, computeActivityTotals, getBusinessMonthRange, getDefaultReportRange, resolveMonthToDateReportRange } = reporting;
   const runId = `verify-month-${Date.now()}`;
 
   function assert(condition: unknown, message: string): asserts condition {
@@ -50,15 +57,23 @@ async function main() {
       throw error;
     }
   }
+  const iso = (value: { fromIso: string; toIso: string }) => JSON.stringify(value);
 
   const admin = await prisma.user.create({ data: { role: ROLES.ADMIN, name: `${runId}-admin`, email: `${runId}-admin@example.invalid`, isActive: true } });
   const repUser = await prisma.user.create({ data: { role: ROLES.SALES_REPRESENTATIVE, name: `${runId}-repA`, email: `${runId}-repA@example.invalid`, isActive: true } });
   const otherRepUser = await prisma.user.create({ data: { role: ROLES.SALES_REPRESENTATIVE, name: `${runId}-repB`, email: `${runId}-repB@example.invalid`, isActive: true } });
+  // A dedicated REP for every fixed-date case so the real-time admin-on-behalf
+  // sale below can never leak into their totals.
+  const fixedRepUser = await prisma.user.create({ data: { role: ROLES.SALES_REPRESENTATIVE, name: `${runId}-repFixed`, email: `${runId}-repFixed@example.invalid`, isActive: true } });
   const rep = await prisma.salesRepresentative.create({ data: { userId: repUser.id, employeeCode: `${runId}-repA` } });
   const otherRep = await prisma.salesRepresentative.create({ data: { userId: otherRepUser.id, employeeCode: `${runId}-repB` } });
+  const fixedRep = await prisma.salesRepresentative.create({ data: { userId: fixedRepUser.id, employeeCode: `${runId}-repFixed` } });
   const repCar = await prisma.stockLocation.create({ data: { type: STOCK_LOCATION_TYPES.REP_CAR, name: `${runId}-car`, salesRepId: rep.id } });
   const product = await prisma.product.create({ data: { sku: `${runId}-p1`, name: `${runId}-p1`, retailPriceCents: 1000, wholesalePriceCents: 800, isActive: true } });
   await prisma.inventoryItem.create({ data: { productId: product.id, locationId: repCar.id, quantity: 100_000 } });
+
+  // 2026-10-03 12:00 in Palestine (+03): the exact regression date.
+  const NOW = new Date("2026-10-03T09:00:00Z");
 
   let seq = 0;
   async function makeMerchant(label: string) {
@@ -71,7 +86,7 @@ async function main() {
     const rows = await prisma.$queryRaw<{ ts: Date }[]>`SELECT ((${hebronWallClock}::timestamp AT TIME ZONE 'Asia/Hebron') AT TIME ZONE current_setting('TIMEZONE')) AS "ts"`;
     return rows[0]!.ts;
   }
-  async function makeOrder(label: string, opts: { totalCents: number; hebronWallClock: string; repId?: string; status?: string }) {
+  async function makeOrder(label: string, opts: { totalCents: number; hebronWallClock: string; repId: string; status?: string }) {
     const acc = await makeMerchant(label);
     return prisma.order.create({
       data: {
@@ -85,7 +100,7 @@ async function main() {
         paidAmountCents: 0,
         merchantId: acc.merchant.id,
         accountId: acc.account.id,
-        createdByRepId: opts.repId ?? rep.id,
+        createdByRepId: opts.repId,
         createdAt: await naiveCreatedAtForHebron(opts.hebronWallClock),
       },
     });
@@ -94,32 +109,74 @@ async function main() {
     const rows = await fetchSaleActivityRows({ fromIso: range.fromIso, toIso: range.toIso, salesRepId: repId }, (n) => `/rep/sales/${n}`);
     return { rows, totals: computeActivityTotals(rows, []) };
   }
+  const has = (rows: { documentNumber: string }[], order: { orderNumber: string }) => rows.some((row) => row.documentNumber === order.orderNumber);
 
   try {
-    await check("0. getBusinessMonthRange follows the Palestine calendar (summer +03 and winter +02 month boundaries)", async () => {
-      // 20:59:30Z = 23:59:30 Hebron (+03) on Sep 30; 21:00:30Z = 00:00:30 Hebron on Oct 1.
-      assert(JSON.stringify(getBusinessMonthRange(new Date("2026-09-30T20:59:30Z"))) === JSON.stringify({ fromIso: "2026-09-01", toIso: "2026-09-30" }), "Sep 30 23:59:30 Hebron is still September");
-      assert(JSON.stringify(getBusinessMonthRange(new Date("2026-09-30T21:00:30Z"))) === JSON.stringify({ fromIso: "2026-10-01", toIso: "2026-10-01" }), "Oct 1 00:00:30 Hebron is October");
-      // 21:59:30Z = 23:59:30 Hebron (+02) on Jan 31; 22:00:30Z = 00:00:30 Hebron on Feb 1.
-      assert(JSON.stringify(getBusinessMonthRange(new Date("2026-01-31T21:59:30Z"))) === JSON.stringify({ fromIso: "2026-01-01", toIso: "2026-01-31" }), "Jan 31 23:59:30 Hebron is still January");
-      assert(JSON.stringify(getBusinessMonthRange(new Date("2026-01-31T22:00:30Z"))) === JSON.stringify({ fromIso: "2026-02-01", toIso: "2026-02-01" }), "Feb 1 00:00:30 Hebron is February");
-      assert(getBusinessMonthRange(new Date("2026-12-31T21:30:00Z")).fromIso === "2026-12-01" && getBusinessMonthRange(new Date("2026-12-31T22:30:00Z")).fromIso === "2027-01-01", "year rollover");
+    await check("0. calendar month to date — NOT a rolling window (pure helpers)", async () => {
+      assert(iso(getBusinessMonthRange(NOW)) === iso({ fromIso: "2026-10-01", toIso: "2026-10-03" }), "2026-10-03 -> 2026-10-01..2026-10-03");
+      assert(getBusinessMonthRange(NOW).fromIso !== "2026-09-03", "never the trailing-30-days start");
+      assert(getDefaultReportRange(NOW).fromIso === "2026-09-03", "control: the old /rep/sales default really was the rolling window (2026-09-03)");
+      assert(iso(getBusinessMonthRange(new Date("2027-01-05T09:00:00Z"))) === iso({ fromIso: "2027-01-01", toIso: "2027-01-05" }), "year rollover: 2027-01-05 -> 2027-01-01..2027-01-05");
+      assert(iso(getBusinessMonthRange(new Date("2026-09-30T20:59:30Z"))) === iso({ fromIso: "2026-09-01", toIso: "2026-09-30" }), "Sep 30 23:59:30 Hebron is still September");
+      assert(iso(getBusinessMonthRange(new Date("2026-09-30T21:00:30Z"))) === iso({ fromIso: "2026-10-01", toIso: "2026-10-01" }), "Oct 1 00:00:30 Hebron is October (the month resets)");
+      assert(iso(getBusinessMonthRange(new Date("2026-01-31T21:59:30Z"))) === iso({ fromIso: "2026-01-01", toIso: "2026-01-31" }), "winter (+02) Jan 31 23:59:30");
+      assert(iso(getBusinessMonthRange(new Date("2026-01-31T22:00:30Z"))) === iso({ fromIso: "2026-02-01", toIso: "2026-02-01" }), "winter (+02) Feb 1 00:00:30");
     });
 
-    await check("1+2. a current-month sale is included; a previous-month sale is excluded from the default total", async () => {
-      const range = getBusinessMonthRange();
-      const prevDay = new Date(`${range.fromIso}T12:00:00Z`);
-      prevDay.setUTCDate(prevDay.getUTCDate() - 1);
-      const prevIso = prevDay.toISOString().slice(0, 10);
-      const inMonth = await makeOrder("cur", { totalCents: 12_300, hebronWallClock: `${range.toIso} 12:00:00` });
-      const lastMonth = await makeOrder("prev", { totalCents: 45_600, hebronWallClock: `${prevIso} 12:00:00` });
-      const { rows, totals } = await monthSales(rep.id, range);
-      assert(rows.some((row) => row.documentNumber === inMonth.orderNumber), "current-month sale present");
-      assert(!rows.some((row) => row.documentNumber === lastMonth.orderNumber), "previous-month sale absent");
-      assert(totals.salesTotalCents === 12_300 && totals.salesCount === 1, `default total = current month only, got ${totals.salesTotalCents}/${totals.salesCount}`);
+    // Fixed-date data, all for fixedRep. Sep 3 / Sep 15 / Sep 30 23:59 sit inside a rolling 30-day window
+    // ending 2026-10-03 but outside the calendar month; Oct 5 is after "now".
+    const sep3 = await makeOrder("sep3", { totalCents: 1_000, hebronWallClock: "2026-09-03 12:00:00", repId: fixedRep.id });
+    const sep15 = await makeOrder("sep15", { totalCents: 2_000, hebronWallClock: "2026-09-15 12:00:00", repId: fixedRep.id });
+    const sep30 = await makeOrder("sep30", { totalCents: 4_000, hebronWallClock: "2026-09-30 23:59:00", repId: fixedRep.id });
+    const oct1 = await makeOrder("oct1", { totalCents: 8_000, hebronWallClock: "2026-10-01 00:00:00", repId: fixedRep.id });
+    const oct3 = await makeOrder("oct3", { totalCents: 16_000, hebronWallClock: "2026-10-03 10:00:00", repId: fixedRep.id });
+    const oct5 = await makeOrder("oct5-future", { totalCents: 32_000, hebronWallClock: "2026-10-05 12:00:00", repId: fixedRep.id });
+
+    await check("1-5. on 2026-10-03: Sep 30 23:59 out, Oct 1 00:00 in, Oct 3 in, a sale after today out; September never counted", async () => {
+      const { rows, totals } = await monthSales(fixedRep.id, getBusinessMonthRange(NOW));
+      assert(!has(rows, sep30) && !has(rows, sep15) && !has(rows, sep3), "no September sale (including those a rolling 30 days would include)");
+      assert(has(rows, oct1) && has(rows, oct3), "Oct 1 00:00 and Oct 3 are included");
+      assert(!has(rows, oct5), "a sale dated after today is not month-to-date");
+      assert(totals.salesTotalCents === 24_000 && totals.salesCount === 2, `total = Oct 1 + Oct 3 only, got ${totals.salesTotalCents}/${totals.salesCount}`);
+      const rolling = await monthSales(fixedRep.id, getDefaultReportRange(NOW));
+      assert(rolling.totals.salesTotalCents === 31_000, "control: the OLD rolling range would have counted the September sales too (1000+2000+4000+8000+16000)");
     });
 
-    await check("3. an ADMIN-entered sale for the REP (createRepSaleCore with the admin as actor) still counts for that REP", async () => {
+    await check("9. the /rep dashboard KPI and the /rep/sales default range produce the SAME totals", async () => {
+      const dashboardRange = getBusinessMonthRange(NOW);
+      const salesPageRange = resolveMonthToDateReportRange(undefined, undefined, NOW);
+      assert(iso(dashboardRange) === iso(salesPageRange), "identical default range");
+      assert(iso(resolveMonthToDateReportRange("", "  ", NOW)) === iso(salesPageRange), "blank params fall back to the default too");
+      const dashboard = await monthSales(fixedRep.id, dashboardRange);
+      const salesPage = await monthSales(fixedRep.id, salesPageRange);
+      assert(dashboard.totals.salesTotalCents === salesPage.totals.salesTotalCents && dashboard.totals.salesCount === salesPage.totals.salesCount, "same totals");
+      assert(dashboard.totals.salesTotalCents === 24_000, "and they are the October-to-date figure");
+    });
+
+    await check("10. explicit custom date filters on /rep/sales still win over the default", async () => {
+      const sept = resolveMonthToDateReportRange("2026-09-01", "2026-09-30", NOW);
+      assert(iso(sept) === iso({ fromIso: "2026-09-01", toIso: "2026-09-30" }), "both bounds preserved");
+      const septSales = await monthSales(fixedRep.id, sept);
+      assert(septSales.totals.salesTotalCents === 7_000 && septSales.totals.salesCount === 3 && !has(septSales.rows, oct1), "September custom range = September sales only");
+      const fromOnly = resolveMonthToDateReportRange("2026-09-15", undefined, NOW);
+      assert(iso(fromOnly) === iso({ fromIso: "2026-09-15", toIso: "2026-10-03" }), "a custom from keeps the default to");
+      const fromOnlySales = await monthSales(fixedRep.id, fromOnly);
+      assert(fromOnlySales.totals.salesTotalCents === 30_000 && !has(fromOnlySales.rows, oct5), "Sep 15 .. Oct 3 total, the later sale still out");
+      const toOnly = resolveMonthToDateReportRange(undefined, "2026-10-01", NOW);
+      assert(iso(toOnly) === iso({ fromIso: "2026-10-01", toIso: "2026-10-01" }), "a custom to keeps the month start");
+    });
+
+    await check("8. cancelled / returned sales follow the canonical rule (excluded from the total, still listed)", async () => {
+      const range = getBusinessMonthRange(NOW);
+      const before = await monthSales(fixedRep.id, range);
+      const cancelled = await makeOrder("cancelled", { totalCents: 77_000, hebronWallClock: "2026-10-02 12:05:00", status: ORDER_STATUSES.CANCELLED, repId: fixedRep.id });
+      const returned = await makeOrder("returned", { totalCents: 66_000, hebronWallClock: "2026-10-02 12:06:00", status: ORDER_STATUSES.RETURNED, repId: fixedRep.id });
+      const after = await monthSales(fixedRep.id, range);
+      assert(after.totals.salesTotalCents === before.totals.salesTotalCents && after.totals.salesCount === before.totals.salesCount, "terminal sales do not change the total");
+      assert(has(after.rows, cancelled) && has(after.rows, returned), "they remain visible as rows");
+    });
+
+    await check("7. an ADMIN-entered sale for the REP (createRepSaleCore with the admin as actor) still counts for that REP", async () => {
       const range = getBusinessMonthRange();
       const before = await monthSales(rep.id, range);
       try {
@@ -148,26 +205,14 @@ async function main() {
       assert(other.totals.salesCount === 0, "and for nobody else");
     });
 
-    await check("4. cancelled / returned sales follow the canonical rule (excluded from the total, still listed)", async () => {
-      const range = getBusinessMonthRange();
-      const before = await monthSales(rep.id, range);
-      const cancelled = await makeOrder("cancelled", { totalCents: 77_000, hebronWallClock: `${range.toIso} 12:05:00`, status: ORDER_STATUSES.CANCELLED });
-      const returned = await makeOrder("returned", { totalCents: 66_000, hebronWallClock: `${range.toIso} 12:06:00`, status: ORDER_STATUSES.RETURNED });
-      const after = await monthSales(rep.id, range);
-      assert(after.totals.salesTotalCents === before.totals.salesTotalCents && after.totals.salesCount === before.totals.salesCount, "terminal sales do not change the total");
-      assert(after.rows.some((row) => row.documentNumber === cancelled.orderNumber) && after.rows.some((row) => row.documentNumber === returned.orderNumber), "they remain visible as rows");
-    });
-
-    await check("5. Asia/Hebron month boundary is respected (23:59:30 Sep 30 in, 00:00:30 Oct 1 out, 23:59:30 Aug 31 out)", async () => {
-      const sepRange = getBusinessMonthRange(new Date("2026-09-30T20:30:00Z"));
-      assert(sepRange.fromIso === "2026-09-01" && sepRange.toIso === "2026-09-30", "September range");
-      const lastSecondOfSep = await makeOrder("sep-last", { totalCents: 1_100, hebronWallClock: "2026-09-30 23:59:30" });
-      const firstOfOct = await makeOrder("oct-first", { totalCents: 2_200, hebronWallClock: "2026-10-01 00:00:30" });
-      const lastOfAug = await makeOrder("aug-last", { totalCents: 4_400, hebronWallClock: "2026-08-31 23:59:30" });
-      const { rows } = await monthSales(rep.id, sepRange);
-      assert(rows.some((row) => row.documentNumber === lastSecondOfSep.orderNumber), "Sep 30 23:59:30 Hebron is in September");
-      assert(!rows.some((row) => row.documentNumber === firstOfOct.orderNumber), "Oct 1 00:00:30 Hebron is not in September");
-      assert(!rows.some((row) => row.documentNumber === lastOfAug.orderNumber), "Aug 31 23:59:30 Hebron is not in September");
+    await check("11. wiring guard: /rep and /rep/sales both use the calendar-month default (never the rolling getDefaultReportRange); date inputs submit ISO", async () => {
+      const root = new URL("..", import.meta.url);
+      const read = (path: string) => fs.readFileSync(new URL(path, root), "utf8");
+      const dashboard = read("src/app/rep/page.tsx");
+      const salesPage = read("src/app/rep/sales/page.tsx");
+      assert(dashboard.includes("getBusinessMonthRange()") && !dashboard.includes("getDefaultReportRange"), "/rep dashboard uses getBusinessMonthRange, not the rolling default");
+      assert(salesPage.includes("resolveMonthToDateReportRange(from, to)") && !salesPage.includes("getDefaultReportRange"), "/rep/sales default uses resolveMonthToDateReportRange, not the rolling default");
+      assert(/name="from"[^>]*defaultValue={fromIso}/.test(salesPage) && /name="to"[^>]*defaultValue={toIso}/.test(salesPage), "the date inputs are prefilled with the ISO strings (an <input type=date> always submits YYYY-MM-DD whatever the browser displays)");
     });
 
     console.log("ALL PASS");

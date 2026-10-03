@@ -42,6 +42,21 @@ export function getBusinessMonthRange(now: Date = new Date()): { fromIso: string
   return { fromIso: `${toIso.slice(0, 7)}-01`, toIso };
 }
 
+/** A REP report's date range: whatever the user explicitly chose, else the
+ * current Palestine CALENDAR month to date (getBusinessMonthRange) — never the
+ * trailing-30-days getDefaultReportRange. Each bound falls back independently,
+ * exactly like the page-level `from || default` this replaces, so a custom
+ * range (or one custom bound) is preserved untouched. Shared by /rep/sales so
+ * its default can never drift from the /rep dashboard's monthly KPI. */
+export function resolveMonthToDateReportRange(
+  from: string | undefined,
+  to: string | undefined,
+  now: Date = new Date(),
+): { fromIso: string; toIso: string } {
+  const month = getBusinessMonthRange(now);
+  return { fromIso: from?.trim() || month.fromIso, toIso: to?.trim() || month.toIso };
+}
+
 /** One matching row's id plus its TRUE, unambiguous UTC instant — derived
  * via `"createdAt" AT TIME ZONE current_setting('TIMEZONE')` alone (no
  * second `AT TIME ZONE 'Asia/Hebron'` here — that half happens once, at
