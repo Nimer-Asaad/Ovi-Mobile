@@ -13,6 +13,7 @@ import { RepCarHero } from "@/components/reps/RepCarHero";
 import { RepStockRequestStatusBadge } from "@/components/reps/RepStockRequestStatusBadge";
 import { getActiveRequestCountForRep, getLatestRequestsForRep } from "@/lib/rep-stock-requests";
 import { getRepMerchantsFleetSummary } from "@/lib/rep-merchants";
+import { computeActivityTotals, fetchSaleActivityRows, getBusinessMonthRange } from "@/lib/reporting";
 
 /** Section heading used to group the dashboard into المبيعات / المخزون /
  * التجار والدفعات instead of one flat stat grid — the actions those buttons
@@ -27,14 +28,14 @@ export default async function RepDashboardPage() {
   const locationId = effectiveRep.carStockLocationId;
   const startOfToday = new Date();
   startOfToday.setHours(0, 0, 0, 0);
+  const monthRange = getBusinessMonthRange();
 
   const [
     stats,
     recentMovements,
     todaySalesCount,
     todaySalesAgg,
-    totalSalesCount,
-    totalSalesAgg,
+    monthSales,
     activeRequestCount,
     latestRequests,
     merchantsSummary,
@@ -61,15 +62,19 @@ export default async function RepDashboardPage() {
       where: { createdByRepId: repId, source: ORDER_SOURCES.REP_SALE, createdAt: { gte: startOfToday } },
       _sum: { totalCents: true },
     }),
-    prisma.order.count({ where: { createdByRepId: repId, source: ORDER_SOURCES.REP_SALE } }),
-    prisma.order.aggregate({
-      where: { createdByRepId: repId, source: ORDER_SOURCES.REP_SALE },
-      _sum: { totalCents: true },
-    }),
+    // Current-month KPI: the SAME canonical report rows/totals /rep/sales shows
+    // (REP attribution by Order.createdByRepId, Palestine business dates,
+    // cancelled/returned sales excluded) — never a separate sales formula.
+    fetchSaleActivityRows(
+      { fromIso: monthRange.fromIso, toIso: monthRange.toIso, salesRepId: repId },
+      (orderNumber) => `/rep/sales/${orderNumber}`,
+    ),
     getActiveRequestCountForRep(repId),
     getLatestRequestsForRep(repId, 3),
     getRepMerchantsFleetSummary(repId),
   ]);
+
+  const monthTotals = computeActivityTotals(monthSales, []);
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-8">
@@ -80,8 +85,8 @@ export default async function RepDashboardPage() {
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <StatCard label="مبيعات اليوم" value={String(todaySalesCount)} />
           <StatCard label="إجمالي مبيعات اليوم" value={formatCurrencyFromCents(todaySalesAgg._sum.totalCents ?? 0)} />
-          <StatCard label="إجمالي عدد المبيعات" value={String(totalSalesCount)} />
-          <StatCard label="إجمالي قيمة المبيعات" value={formatCurrencyFromCents(totalSalesAgg._sum.totalCents ?? 0)} />
+          <StatCard label="عدد مبيعات الشهر الحالي" value={String(monthTotals.salesCount)} />
+          <StatCard label="مجموع مبيعات الشهر الحالي" value={formatCurrencyFromCents(monthTotals.salesTotalCents)} />
         </div>
       </section>
 

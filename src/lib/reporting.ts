@@ -31,6 +31,17 @@ export function getDefaultReportRange(now: Date = new Date()): { fromIso: string
   return { fromIso, toIso };
 }
 
+/** The current Palestine business month so far — first day of the month
+ * through today, both as inclusive "YYYY-MM-DD" business dates (the same
+ * shape and meaning getDefaultReportRange returns, so it feeds the same report
+ * helpers). Derived purely from getBusinessDateIso (the one Asia/Hebron
+ * "today" this file uses), so there is no second timezone calculation and the
+ * month rolls over on the Palestine calendar, not the server's. */
+export function getBusinessMonthRange(now: Date = new Date()): { fromIso: string; toIso: string } {
+  const toIso = getBusinessDateIso(now);
+  return { fromIso: `${toIso.slice(0, 7)}-01`, toIso };
+}
+
 /** One matching row's id plus its TRUE, unambiguous UTC instant — derived
  * via `"createdAt" AT TIME ZONE current_setting('TIMEZONE')` alone (no
  * second `AT TIME ZONE 'Asia/Hebron'` here — that half happens once, at
