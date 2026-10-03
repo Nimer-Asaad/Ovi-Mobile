@@ -34,17 +34,15 @@ const TABS = [
  * they personally collected. Reuses the existing /rep/sales route/nav entry
  * rather than adding a second, competing report page.
  *
- * Ownership rule (payments): scoped by AccountPayment.createdById === this
- * rep's own User.id — the actual persisted collector, never inferred from
- * "merchant assigned to this rep." A payment an ADMIN recorded for one of
- * this rep's own merchants is correctly excluded here (it still shows on
- * that merchant's full account statement, just not as this rep's own
- * collected-payment activity) — see fetchPaymentActivityRows's own doc
- * comment. Sale-linked "paid now" payments ARE included when this rep is
- * the one who actually made the sale (createdById is always the acting
- * rep — see createRepSaleCore) — never hidden or merged into the sale row;
- * they appear as their own PAYMENT row, keeping sales totals and payment
- * totals separate. */
+ * Ownership rule (payments): scoped by commercial REP attribution
+ * (src/lib/payment-attribution.ts) — NOT by who entered the row and never by
+ * "merchant currently assigned to this rep". A payment that is part of this
+ * rep's own sale counts here even when an ADMIN entered it on the rep's
+ * behalf; a standalone payment counts only if this rep entered it (an ADMIN-
+ * entered standalone payment stays on the merchant's account statement but
+ * is not this rep's activity). createdById is untouched and still decides
+ * who may open/cancel a receipt. Sale-linked "paid now" payments appear as
+ * their own PAYMENT row, keeping sales totals and payment totals separate. */
 export default async function RepSalesPage({ searchParams }: RepSalesPageProps) {
   const effectiveRep = await requireEffectiveRepresentative();
   const { type, from, to, q } = await searchParams;
@@ -60,7 +58,7 @@ export default async function RepSalesPage({ searchParams }: RepSalesPageProps) 
       (orderNumber) => `/rep/sales/${orderNumber}`,
     ),
     fetchPaymentActivityRows(
-      { fromIso, toIso, search: q, collectorUserId: effectiveRep.actingUserId },
+      { fromIso, toIso, search: q, attributedRepId: effectiveRep.repId },
       (payment) => (payment.merchantId ? `/rep/merchants/${payment.merchantId}/payments/${payment.id}` : "#"),
       (orderNumber) => `/rep/sales?q=${encodeURIComponent(orderNumber)}`,
       // Correction-scoped replacement-payment entry point — NOT the

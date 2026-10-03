@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { resolvePaymentReceiptReference } from "@/lib/account-labels";
 import { ORDER_STATUSES } from "@/lib/constants";
 import { getValidNextOrderStatuses, isTerminalOrderStatus } from "@/lib/order-lifecycle-rules";
+import { dayRange, getPaymentsAttributedToRep } from "@/lib/payment-attribution";
 
 const BUSINESS_TIMEZONE = "Asia/Hebron";
 
@@ -71,16 +72,16 @@ export async function getOrderIdsInRange(fromIso: string, toIso: string, salesRe
 }
 
 /** Same technique as getOrderIdsInRange, applied to account_payments.
- * `createdById` scoping here is the ACTUAL persisted collector/creator of
- * the payment (never a merchant's assignedRepId) — see getRepActivityReport's
- * own doc comment for why that distinction matters. */
-export async function getPaymentIdsInRange(fromIso: string, toIso: string, createdById?: string): Promise<BusinessDatedId[]> {
-  return createdById
-    ? await prisma.$queryRaw<BusinessDatedId[]>`
-        SELECT "id", ("createdAt" AT TIME ZONE current_setting('TIMEZONE')) AS "businessCreatedAt" FROM "account_payments"
-        WHERE (("createdAt" AT TIME ZONE current_setting('TIMEZONE')) AT TIME ZONE 'Asia/Hebron')::date BETWEEN ${fromIso}::date AND ${toIso}::date
-          AND "createdById" = ${createdById}
-      `
+ * `attributedRepId` (a SalesRepresentative.id) scopes to the payments that REP
+ * gets commercial credit for — see src/lib/payment-attribution.ts for the
+ * one canonical rule (linked sale -> the order's rep, strict legacy 1:1
+ * match, else the entering rep). It is deliberately NOT a createdById filter:
+ * createdById stays the audit/permission identity ("who entered it"), never
+ * Merchant.assignedRepId either (mutable). Cancelled payments are included
+ * here; callers exclude them from active totals as before. */
+export async function getPaymentIdsInRange(fromIso: string, toIso: string, attributedRepId?: string): Promise<BusinessDatedId[]> {
+  return attributedRepId
+    ? await getPaymentsAttributedToRep(attributedRepId, dayRange(fromIso, toIso))
     : await prisma.$queryRaw<BusinessDatedId[]>`
         SELECT "id", ("createdAt" AT TIME ZONE current_setting('TIMEZONE')) AS "businessCreatedAt" FROM "account_payments"
         WHERE (("createdAt" AT TIME ZONE current_setting('TIMEZONE')) AT TIME ZONE 'Asia/Hebron')::date BETWEEN ${fromIso}::date AND ${toIso}::date
@@ -217,13 +218,11 @@ export interface ActivityReportFilters {
   search?: string;
   /** SalesRepresentative.id — scopes Orders (createdByRepId). */
   salesRepId?: string;
-  /** User.id — scopes AccountPayments (createdById), the actual collector.
-   * Deliberately a SEPARATE id space from salesRepId (Order.createdByRepId
-   * is a SalesRepresentative.id; AccountPayment.createdById is a User.id) —
-   * callers must resolve a rep's own userId themselves when they want "this
-   * rep's sales AND this same rep's collected payments" (see both report
-   * pages, which do exactly that). */
-  collectorUserId?: string;
+  /** SalesRepresentative.id — scopes AccountPayments to the ones this REP gets
+   * commercial credit for (payment-attribution.ts), so "this rep's sales AND
+   * this rep's payments" use the same id. Not a "who entered it" filter:
+   * AccountPayment.createdById is audit/permission metadata only. */
+  attributedRepId?: string;
   /** Merchant.id — scopes Orders (merchantId) and AccountPayments
    * (account.merchantId) to one merchant, applied server-side via the
    * persisted relation on each entity (never inferred from note text). */
@@ -357,7 +356,7 @@ export async function fetchPaymentActivityRows(
    * caller's own destination route needs. */
   buildReplacementHref: (payment: PaymentHrefContext) => string,
 ): Promise<PaymentActivityRow[]> {
-  const idRows = await getPaymentIdsInRange(filters.fromIso, filters.toIso, filters.collectorUserId);
+  const idRows = await getPaymentIdsInRange(filters.fromIso, filters.toIso, filters.attributedRepId);
   if (idRows.length === 0) return [];
   const businessCreatedAtById = new Map(idRows.map((row) => [row.id, row.businessCreatedAt]));
 

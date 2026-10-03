@@ -18,6 +18,7 @@
     "verify:online-sales-commission": "node --conditions=react-server --import tsx prisma/verify-online-sales-commission.ts",
     "verify:merchant-merge": "node --conditions=react-server --import tsx prisma/verify-merchant-merge.ts",
     "verify:sale-discount-bonus": "node --conditions=react-server --import tsx prisma/verify-sale-discount-bonus.ts",
+    "verify:rep-payment-attribution": "node --conditions=react-server --import tsx prisma/verify-rep-payment-attribution.ts",
     "postinstall": "prisma generate",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",

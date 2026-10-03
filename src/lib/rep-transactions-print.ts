@@ -1,9 +1,9 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
-import { ACCOUNT_PAYMENT_ORIGINS } from "@/lib/constants";
 import { getOrderAccountPosition, getPaymentAccountPosition, SALES_RETURN_STATEMENT_SELECT } from "@/lib/accounts";
 import { getOrderStatusHistoryBusinessCreatedAt, getPaymentCancellationBusinessCancelledAt } from "@/lib/business-time";
 import { isTerminalOrderStatus } from "@/lib/order-lifecycle-rules";
+import { getPaymentsAttributedToRep, minuteRange } from "@/lib/payment-attribution";
 import type { InvoiceData } from "@/components/admin/orders/InvoiceView";
 import type { PaymentReceiptData } from "@/components/shared/PaymentReceiptView";
 
@@ -75,15 +75,6 @@ function getOrderIdsInDateTimeRange(range: PrintRange, salesRepId: string): Prom
   `;
 }
 
-function getPaymentIdsInDateTimeRange(range: PrintRange, createdById: string): Promise<BusinessDatedId[]> {
-  return prisma.$queryRaw<BusinessDatedId[]>`
-    SELECT "id", ("createdAt" AT TIME ZONE current_setting('TIMEZONE')) AS "businessCreatedAt" FROM "account_payments"
-    WHERE (("createdAt" AT TIME ZONE current_setting('TIMEZONE')) AT TIME ZONE 'Asia/Hebron') >= ${range.fromTs}::timestamp
-      AND (("createdAt" AT TIME ZONE current_setting('TIMEZONE')) AT TIME ZONE 'Asia/Hebron') < ${range.toTs}::timestamp + interval '1 minute'
-      AND "createdById" = ${createdById}
-  `;
-}
-
 export type RepPrintTransaction =
   | { type: "SALE"; key: string; at: Date; invoice: InvoiceData }
   | { type: "PAYMENT"; key: string; at: Date; receipt: PaymentReceiptData };
@@ -126,12 +117,13 @@ const MERCHANT_SELECT = {
   region: true,
 } as const;
 
-/** Read-only. Sales = orders whose createdByRepId is this rep; payments =
- * account_payments whose createdById is this rep's User id (the actual
- * collector — never a merchant's assignedRepId). Both windows use the
- * inclusive Palestine business date+time range queries above,
- * and every row is rendered from the same data the standalone invoice/
- * receipt pages use. Oldest first. */
+/** Read-only. Sales = orders whose createdByRepId is this rep; payments = the
+ * ones this REP is commercially credited with (payment-attribution.ts: the
+ * linked sale's rep, a strict legacy 1:1 sale match, else the rep who entered
+ * it — never createdById alone, never a merchant's assignedRepId). Both
+ * windows use the inclusive Palestine business date+time range, and every row
+ * is rendered from the same data the standalone invoice/receipt pages use.
+ * Oldest first. */
 export async function loadRepTransactions(
   rep: { id: string; userId: string },
   range: { fromIso: string; toIso: string; fromTime: string; toTime: string },
@@ -139,10 +131,11 @@ export async function loadRepTransactions(
   const printRange: PrintRange = { fromTs: `${range.fromIso} ${range.fromTime}:00`, toTs: `${range.toIso} ${range.toTime}:00` };
   const [orderIdRows, paymentIdRows] = await Promise.all([
     getOrderIdsInDateTimeRange(printRange, rep.id),
-    getPaymentIdsInDateTimeRange(printRange, rep.userId),
+    getPaymentsAttributedToRep(rep.id, minuteRange(range.fromIso, range.fromTime, range.toIso, range.toTime)),
   ]);
   const orderBusinessAt = new Map(orderIdRows.map((row) => [row.id, row.businessCreatedAt]));
   const paymentBusinessAt = new Map(paymentIdRows.map((row) => [row.id, row.businessCreatedAt]));
+  const paymentAttribution = new Map(paymentIdRows.map((row) => [row.id, row]));
 
   const [orders, payments] = await Promise.all([
     orderIdRows.length === 0
@@ -203,8 +196,6 @@ export async function loadRepTransactions(
             method: true,
             note: true,
             createdAt: true,
-            origin: true,
-            sourceOrderId: true,
             createdBy: { select: { name: true } },
             cancellation: { select: { reason: true, cancelledAt: true, cancelledBy: { select: { name: true } } } },
             account: { select: { ...ACCOUNT_SELECT, merchant: { select: MERCHANT_SELECT } } },
@@ -266,15 +257,19 @@ export async function loadRepTransactions(
     // invoice (paidAmountCents — persisted, never clamped, so an amount above
     // the invoice total from collecting older debt stays exact) — printing it
     // again as a separate سند قبض duplicates it. Identified only through the
-    // canonical relation (origin + sourceOrderId), never receipt-number
+    // payment-attribution sale link — the canonical origin + sourceOrderId
+    // relation (LINKED), or a strict symmetric legacy 1:1 order/payment match
+    // for rows that predate that link (LEGACY) — never receipt-number
     // proximity, and only when that exact invoice is actually printed in this
-    // same report. A cancelled SALE_INITIAL payment is deliberately NOT
-    // suppressed: its reversal is a separate event the invoice does not show,
-    // so it keeps printing as a (cancelled) receipt exactly as before.
+    // same report. A cancelled payment is deliberately NOT suppressed: its
+    // reversal is a separate event the invoice does not show, so it keeps
+    // printing as a (cancelled) receipt exactly as before.
+    const attribution = paymentAttribution.get(payment.id);
     const isEmbeddedInPrintedInvoice =
-      payment.origin === ACCOUNT_PAYMENT_ORIGINS.SALE_INITIAL &&
-      payment.sourceOrderId !== null &&
-      printedOrderIds.has(payment.sourceOrderId) &&
+      attribution !== undefined &&
+      attribution.via !== "CREATOR" &&
+      attribution.orderId !== null &&
+      printedOrderIds.has(attribution.orderId) &&
       !payment.cancellation;
 
     if (isEmbeddedInPrintedInvoice) {

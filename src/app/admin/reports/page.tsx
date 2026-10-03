@@ -52,7 +52,7 @@ export default async function AdminReportsPage({ searchParams }: AdminReportsPag
   const selectedRepId = repId?.trim() || undefined;
   const selectedMerchantId = merchantId?.trim() || undefined;
 
-  const [reps, merchants, selectedRep] = await Promise.all([
+  const [reps, merchants] = await Promise.all([
     prisma.salesRepresentative.findMany({
       orderBy: { user: { name: "asc" } },
       select: { id: true, employeeCode: true, user: { select: { name: true } } },
@@ -64,9 +64,6 @@ export default async function AdminReportsPage({ searchParams }: AdminReportsPag
       orderBy: { businessName: "asc" },
       select: { id: true, businessName: true },
     }),
-    selectedRepId
-      ? prisma.salesRepresentative.findUnique({ where: { id: selectedRepId }, select: { userId: true } })
-      : Promise.resolve(null),
   ]);
 
   const [sales, payments, returnTotals] = await Promise.all([
@@ -75,7 +72,7 @@ export default async function AdminReportsPage({ searchParams }: AdminReportsPag
       (orderNumber) => `/admin/orders/${orderNumber}/invoice`,
     ),
     fetchPaymentActivityRows(
-      { fromIso, toIso, search: q, collectorUserId: selectedRep?.userId, merchantId: selectedMerchantId },
+      { fromIso, toIso, search: q, attributedRepId: selectedRepId, merchantId: selectedMerchantId },
       // Report-scoped receipt route (not /admin/accounts/**) — reachable by
       // both ADMIN and ADMIN_ASSISTANT, see this page's own doc comment.
       (payment) => `/admin/reports/payments/${payment.id}`,

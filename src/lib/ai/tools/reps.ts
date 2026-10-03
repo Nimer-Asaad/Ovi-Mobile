@@ -6,6 +6,7 @@ import { buildEntityRetrievalVariants } from "@/lib/ai/language/search-variants"
 import { scoreCandidateLabel, classifyCandidates, type ConfidenceAction, type MatchType } from "@/lib/ai/fuzzy";
 import { resolvePeriod, type SalesPeriodInput, type ResolvedPeriod } from "@/lib/ai/tools/sales";
 import { isTerminalOrderStatus } from "@/lib/order-lifecycle-rules";
+import { businessTimeInRange, dayRange, paymentAttributionCtes } from "@/lib/payment-attribution";
 
 export interface RepCandidate {
   repId: string;
@@ -86,7 +87,6 @@ export async function getRepSummary(repId: string, period: SalesPeriodInput = { 
       id: true,
       employeeCode: true,
       isActive: true,
-      userId: true,
       user: { select: { name: true } },
       carStockLocation: { select: { id: true } },
     },
@@ -94,6 +94,7 @@ export async function getRepSummary(repId: string, period: SalesPeriodInput = { 
   if (!rep) return null;
 
   const resolved = resolvePeriod(period);
+  const paymentRange = dayRange(resolved.fromIso, resolved.toIso);
   const locationId = rep.carStockLocation?.id ?? null;
 
   const [stockItems, orders, payments] = await Promise.all([
@@ -105,12 +106,15 @@ export async function getRepSummary(repId: string, period: SalesPeriodInput = { 
       WHERE "createdByRepId" = ${rep.id}
         AND (("createdAt" AT TIME ZONE current_setting('TIMEZONE')) AT TIME ZONE 'Asia/Hebron')::date BETWEEN ${resolved.fromIso}::date AND ${resolved.toIso}::date
     `,
+    // Same commercial-attribution rule as every REP payment report
+    // (payment-attribution.ts) — NOT "created by this rep's user".
     prisma.$queryRaw<{ amountCents: number; cancelled: boolean }[]>`
+      WITH ${paymentAttributionCtes(paymentRange)}
       SELECT ap."amountCents", (apc."id" IS NOT NULL) AS cancelled
-      FROM "account_payments" ap
+      FROM payment_attribution pa
+      JOIN attr_pay ap ON ap."id" = pa.payment_id
       LEFT JOIN "account_payment_cancellations" apc ON apc."paymentId" = ap."id"
-      WHERE ap."createdById" = ${rep.userId}
-        AND ((ap."createdAt" AT TIME ZONE current_setting('TIMEZONE')) AT TIME ZONE 'Asia/Hebron')::date BETWEEN ${resolved.fromIso}::date AND ${resolved.toIso}::date
+      WHERE pa.rep_id = ${rep.id} AND ${businessTimeInRange(`ap."createdAt"`, paymentRange)}
     `,
   ]);
 
@@ -151,14 +155,15 @@ export interface RepPaymentsSummaryResult {
   reps: RepPaymentsSummaryRow[];
 }
 
-/** "دفعات المندوبين مبارح؟" — company-wide payments collected BY reps for a
+/** "دفعات المندوبين مبارح؟" — company-wide payments credited TO reps for a
  * period, grouped by rep. No existing report helper returns grouped-by-rep
  * data (fetchPaymentActivityRows/computeActivityTotals, reporting.ts, only
  * ever produce a flat company total), so this is the one small, dedicated,
  * read-only capability the spec explicitly allows adding for that gap —
- * still built on the exact same "representative ownership" semantics
- * getRepSummary above already established (a payment belongs to the rep
- * whose OWN linked User id is AccountPayment.createdById) and the same
+ * built on the exact same commercial attribution as getRepSummary above and
+ * every REP payment report (src/lib/payment-attribution.ts: linked sale ->
+ * the order's rep, strict legacy 1:1 sale match, else the rep who entered
+ * it; never plain createdById, never Merchant.assignedRepId) and the same
  * fixed, parameterized `AT TIME ZONE current_setting('TIMEZONE')` -> `AT
  * TIME ZONE 'Asia/Hebron'` business-time technique reporting.ts documents,
  * never a second competing time rule. Cancelled payments (LEFT JOIN
@@ -167,26 +172,29 @@ export interface RepPaymentsSummaryResult {
  * never a padded zero row. */
 export async function getRepPaymentsSummary(period: SalesPeriodInput): Promise<RepPaymentsSummaryResult> {
   const resolved = resolvePeriod(period);
+  const paymentRange = dayRange(resolved.fromIso, resolved.toIso);
 
   const [reps, payments] = await Promise.all([
-    prisma.salesRepresentative.findMany({ where: { isActive: true }, select: { id: true, userId: true, user: { select: { name: true } } } }),
-    prisma.$queryRaw<{ createdById: string; amountCents: number; cancelled: boolean }[]>`
-      SELECT ap."createdById", ap."amountCents", (apc."id" IS NOT NULL) AS cancelled
-      FROM "account_payments" ap
+    prisma.salesRepresentative.findMany({ where: { isActive: true }, select: { id: true, user: { select: { name: true } } } }),
+    prisma.$queryRaw<{ repId: string; amountCents: number; cancelled: boolean }[]>`
+      WITH ${paymentAttributionCtes(paymentRange)}
+      SELECT pa.rep_id AS "repId", ap."amountCents", (apc."id" IS NOT NULL) AS cancelled
+      FROM payment_attribution pa
+      JOIN attr_pay ap ON ap."id" = pa.payment_id
       LEFT JOIN "account_payment_cancellations" apc ON apc."paymentId" = ap."id"
-      WHERE ((ap."createdAt" AT TIME ZONE current_setting('TIMEZONE')) AT TIME ZONE 'Asia/Hebron')::date BETWEEN ${resolved.fromIso}::date AND ${resolved.toIso}::date
+      WHERE ${businessTimeInRange(`ap."createdAt"`, paymentRange)}
     `,
   ]);
 
-  const repByUserId = new Map(reps.map((rep) => [rep.userId, rep]));
+  const repById = new Map(reps.map((rep) => [rep.id, rep]));
   const byRepId = new Map<string, { repName: string; amountCents: number; count: number }>();
   let totalAmountCents = 0;
   let totalPaymentsCount = 0;
 
   for (const payment of payments) {
     if (payment.cancelled) continue;
-    const rep = repByUserId.get(payment.createdById);
-    if (!rep) continue; // created by a non-rep (e.g. an admin) — out of scope for "دفعات المندوبين"
+    const rep = repById.get(payment.repId);
+    if (!rep) continue; // not attributed to an active rep (e.g. an admin-entered standalone payment) — out of scope for "دفعات المندوبين"
     const entry = byRepId.get(rep.id) ?? { repName: rep.user.name, amountCents: 0, count: 0 };
     entry.amountCents += payment.amountCents;
     entry.count += 1;
