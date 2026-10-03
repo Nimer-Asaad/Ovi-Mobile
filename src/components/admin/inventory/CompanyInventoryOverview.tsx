@@ -348,13 +348,23 @@ function ProductInventoryDetailModal({
               </Badge>
             )}
             {canPrintProduct && (
-              <Link
-                href={`/admin/inventory/overview/product/${product.id}/print`}
-                target="_blank"
-                className="mt-2 inline-block rounded-card border border-gold-champagne/40 px-3 py-1 text-xs text-gold-dark transition-colors hover:bg-gold-champagne/10"
-              >
-                طباعة كشف المنتج
-              </Link>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <Link
+                  href={`/admin/inventory/overview/product/${product.id}/print`}
+                  target="_blank"
+                  className="inline-block rounded-card border border-gold-champagne/40 px-3 py-1 text-xs text-gold-dark transition-colors hover:bg-gold-champagne/10"
+                >
+                  طباعة كشف المنتج
+                </Link>
+                <Link
+                  href={`/admin/inventory/overview/product/${product.id}/availability`}
+                  target="_blank"
+                  title="قائمة بالموديلات المتوفرة في المخزن فقط — بدون كميات وبدون سيارات المندوبين"
+                  className="inline-block rounded-card border border-gold-champagne/40 px-3 py-1 text-xs text-gold-dark transition-colors hover:bg-gold-champagne/10"
+                >
+                  جرد الصنف
+                </Link>
+              </div>
             )}
           </div>
           <button

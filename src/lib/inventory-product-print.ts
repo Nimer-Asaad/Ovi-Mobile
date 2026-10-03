@@ -1,4 +1,5 @@
 import "server-only";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { STOCK_LOCATION_TYPES } from "@/lib/constants";
 import { buildInventoryOverviewData, type InventoryOverviewDimensionGroup, type InventoryOverviewProduct } from "@/lib/inventory-overview";
@@ -19,6 +20,47 @@ const PHONE_MODEL_SELECT = {
   phoneBrandId: true,
   phoneBrand: { select: { id: true, name: true, nameAr: true } },
 } as const;
+
+/** The one product select every per-product inventory print/availability
+ * sheet shares — the canonical overview inputs (active variants/combos in
+ * brand -> model order, main image) and nothing from any legacy stock field. */
+export const PRODUCT_INVENTORY_PRINT_SELECT = {
+  id: true,
+  sku: true,
+  name: true,
+  nameAr: true,
+  isActive: true,
+  categoryId: true,
+  category: { select: { name: true, nameAr: true } },
+  brand: { select: { name: true } },
+  images: { where: { mediaType: "IMAGE" }, select: { url: true, altText: true }, orderBy: [{ isMain: "desc" }, { sortOrder: "asc" }], take: 1 },
+  variantMode: true,
+  inventoryTrackingMode: true,
+  variants: { where: { isActive: true }, orderBy: BRAND_MODEL_ORDER, select: { id: true, phoneModel: { select: PHONE_MODEL_SELECT } } },
+  deviceColorVariants: {
+    where: { isActive: true },
+    orderBy: BRAND_MODEL_ORDER,
+    select: { id: true, phoneModel: { select: PHONE_MODEL_SELECT }, color: { select: { id: true, name: true, nameAr: true, hexCode: true } } },
+  },
+} satisfies Prisma.ProductSelect;
+
+/** dimensionGroups in print order: brand (DB brand order, first appearance)
+ * -> natural model order -> color; the unclassified catch-all group always
+ * last. Shared so every per-product sheet orders identically. */
+export function sortDimensionGroupsForPrint(groups: InventoryOverviewDimensionGroup[]): InventoryOverviewDimensionGroup[] {
+  const brandOrder = new Map<string, number>();
+  for (const group of groups) {
+    if (!brandOrder.has(group.brandId)) brandOrder.set(group.brandId, brandOrder.size);
+  }
+  return [...groups].sort((a, b) => {
+    if (Boolean(a.isUnclassified) !== Boolean(b.isUnclassified)) return a.isUnclassified ? 1 : -1;
+    return (
+      (brandOrder.get(a.brandId) ?? 0) - (brandOrder.get(b.brandId) ?? 0) ||
+      naturalCompare(a.modelLabel, b.modelLabel) ||
+      naturalCompare(a.colorLabel ?? "", b.colorLabel ?? "")
+    );
+  });
+}
 
 export interface ProductInventoryPrintData {
   product: InventoryOverviewProduct;
@@ -41,25 +83,7 @@ export async function loadProductInventoryPrint(productId: string): Promise<Prod
   const [raw, inventoryItems, locations] = await Promise.all([
     prisma.product.findUnique({
       where: { id: productId },
-      select: {
-        id: true,
-        sku: true,
-        name: true,
-        nameAr: true,
-        isActive: true,
-        categoryId: true,
-        category: { select: { name: true, nameAr: true } },
-        brand: { select: { name: true } },
-        images: { where: { mediaType: "IMAGE" }, select: { url: true, altText: true }, orderBy: [{ isMain: "desc" }, { sortOrder: "asc" }], take: 1 },
-        variantMode: true,
-        inventoryTrackingMode: true,
-        variants: { where: { isActive: true }, orderBy: BRAND_MODEL_ORDER, select: { id: true, phoneModel: { select: PHONE_MODEL_SELECT } } },
-        deviceColorVariants: {
-          where: { isActive: true },
-          orderBy: BRAND_MODEL_ORDER,
-          select: { id: true, phoneModel: { select: PHONE_MODEL_SELECT }, color: { select: { id: true, name: true, nameAr: true, hexCode: true } } },
-        },
-      },
+      select: PRODUCT_INVENTORY_PRINT_SELECT,
     }),
     prisma.inventoryItem.findMany({
       where: { productId, quantity: { gt: 0 }, location: { type: { in: locationTypes } } },
@@ -74,18 +98,7 @@ export async function loadProductInventoryPrint(productId: string): Promise<Prod
 
   const product = buildInventoryOverviewData([raw], inventoryItems)[0]!;
 
-  const brandOrder = new Map<string, number>();
-  for (const group of product.dimensionGroups) {
-    if (!brandOrder.has(group.brandId)) brandOrder.set(group.brandId, brandOrder.size);
-  }
-  const sortedGroups = [...product.dimensionGroups].sort((a, b) => {
-    if (Boolean(a.isUnclassified) !== Boolean(b.isUnclassified)) return a.isUnclassified ? 1 : -1;
-    return (
-      (brandOrder.get(a.brandId) ?? 0) - (brandOrder.get(b.brandId) ?? 0) ||
-      naturalCompare(a.modelLabel, b.modelLabel) ||
-      naturalCompare(a.colorLabel ?? "", b.colorLabel ?? "")
-    );
-  });
+  const sortedGroups = sortDimensionGroupsForPrint(product.dimensionGroups);
 
   const locationLabels: Record<string, string> = {};
   for (const location of locations) {
