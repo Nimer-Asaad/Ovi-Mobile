@@ -42,6 +42,17 @@ export function getBusinessMonthRange(now: Date = new Date()): { fromIso: string
   return { fromIso: `${toIso.slice(0, 7)}-01`, toIso };
 }
 
+/** The previous Palestine business month in full — its first through last day
+ * as inclusive "YYYY-MM-DD" business dates (January rolls back to the prior
+ * year's December). Same single "today" source as getBusinessMonthRange, so the
+ * two presets can never disagree about which month is "current". */
+export function getPreviousBusinessMonthRange(now: Date = new Date()): { fromIso: string; toIso: string } {
+  const [year, month] = getBusinessDateIso(now).split("-").map(Number) as [number, number];
+  // Day 0 of the (1-based) current month is the last day of the previous one.
+  const lastDayIso = new Date(Date.UTC(year, month - 1, 0)).toISOString().slice(0, 10);
+  return { fromIso: `${lastDayIso.slice(0, 7)}-01`, toIso: lastDayIso };
+}
+
 /** A REP report's date range: whatever the user explicitly chose, else the
  * current Palestine CALENDAR month to date (getBusinessMonthRange) — never the
  * trailing-30-days getDefaultReportRange. Each bound falls back independently,

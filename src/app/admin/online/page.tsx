@@ -6,7 +6,8 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { OnlineSaleEntryForm } from "@/components/admin/online/OnlineSaleEntryForm";
 import { OnlineSalesSummary } from "@/components/admin/online/OnlineSalesSummary";
 import { OnlineSalesHistoryTable, type OnlineSaleHistoryRow } from "@/components/admin/online/OnlineSalesHistoryTable";
-import { getBusinessDateIso, getDefaultReportRange } from "@/lib/reporting";
+import { LinkButton } from "@/components/ui/LinkButton";
+import { getBusinessDateIso, getBusinessMonthRange, getDefaultReportRange, getPreviousBusinessMonthRange } from "@/lib/reporting";
 import { computeOnlineSalesTotals, isoToSaleDate, saleDateToIso } from "@/lib/online-sales";
 import type { OnlineSaleCategory } from "@/types";
 
@@ -27,6 +28,13 @@ export default async function AdminOnlinePage({ searchParams }: AdminOnlinePageP
   const defaults = getDefaultReportRange();
   const fromIso = from?.trim() || defaults.fromIso;
   const toIso = to?.trim() || defaults.toIso;
+
+  // Quick month presets for settling up with the owner. Plain GET links to the
+  // same from/to filter, so the totals below always match what is listed.
+  const presets = [
+    { label: "الشهر الحالي", range: getBusinessMonthRange() },
+    { label: "الشهر الماضي", range: getPreviousBusinessMonthRange() },
+  ];
 
   const sales = await prisma.onlineSale.findMany({
     where: { saleDate: { gte: isoToSaleDate(fromIso), lte: isoToSaleDate(toIso) } },
@@ -63,6 +71,23 @@ export default async function AdminOnlinePage({ searchParams }: AdminOnlinePageP
           <CardTitle>سجل المبيعات</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
+          <div className="flex flex-wrap gap-2">
+            {presets.map(({ label, range }) => {
+              const active = range.fromIso === fromIso && range.toIso === toIso;
+              return (
+                <LinkButton
+                  key={label}
+                  href={`/admin/online?from=${range.fromIso}&to=${range.toIso}`}
+                  variant={active ? "primary" : "secondary"}
+                  size="sm"
+                  aria-current={active ? "true" : undefined}
+                >
+                  {label}
+                </LinkButton>
+              );
+            })}
+          </div>
+
           <form method="GET" className="grid grid-cols-1 gap-3 rounded-card border border-navy-soft bg-navy-surface p-4 sm:grid-cols-3">
             <Input type="date" name="from" label="من تاريخ" defaultValue={fromIso} max={todayIso} />
             <Input type="date" name="to" label="إلى تاريخ" defaultValue={toIso} max={todayIso} />
