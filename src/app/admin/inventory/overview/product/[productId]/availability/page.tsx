@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { requireRole } from "@/lib/auth/guards";
 import { ROLES } from "@/lib/constants";
 import { formatBusinessDateTime } from "@/lib/utils";
-import { loadProductAvailabilitySheet } from "@/lib/inventory-availability-sheet";
+import { buildAvailabilityTables, loadProductAvailabilitySheet } from "@/lib/inventory-availability-sheet";
 import { PrintInventorySheetButton } from "@/components/reps/PrintInventorySheetButton";
 
 interface PageProps {
@@ -18,8 +18,10 @@ const PRINT_CSS = `
      split: each model row, the product header, and a brand heading with its
      first rows. (A whole-brand break-inside:avoid pushed a taller-than-a-page
      brand to a fresh page and left page 1 nearly empty.) */
-  .avail-model, .avail-header { break-inside: avoid; page-break-inside: avoid; }
-  .avail-brand h3 { break-after: avoid; page-break-after: avoid; }
+  .avail-header, .avail-table tr { break-inside: avoid; page-break-inside: avoid; }
+  /* The brand header row repeats on every printed page of a long table. */
+  .avail-table thead { display: table-header-group; }
+  .avail-table tbody { display: table-row-group; }
 }
 `;
 
@@ -38,7 +40,7 @@ export default async function AdminProductAvailabilitySheetPage({ params }: Page
   if (!sheet) notFound();
   const { product, mode, brands, simpleWarehouseQuantity, hasAvailability } = sheet;
   const showColors = mode === "DEVICE_MODEL_COLOR";
-  const columns = Math.min(Math.max(brands.length, 1), 3);
+  const tables = buildAvailabilityTables(brands, showColors);
 
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-4 print:max-w-none" dir="rtl">
@@ -82,23 +84,35 @@ export default async function AdminProductAvailabilitySheetPage({ params }: Page
               الكمية المتوفرة في المخزن: <span dir="ltr">{simpleWarehouseQuantity}</span>
             </p>
           ) : (
-            <div className="grid gap-x-10 gap-y-7" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}>
-              {brands.map((brand) => (
-                <section key={brand.brandId} className="avail-brand">
-                  <h3 className="mb-2.5 border-b-2 border-black pb-1 text-start text-[17px] font-extrabold uppercase tracking-wide" dir="auto">
-                    {brand.label}
-                  </h3>
-                  <ul className="flex flex-col gap-[3px]">
-                    {brand.models.map((model) => (
-                      <li key={model.modelId} className="avail-model text-start text-[13.5px] font-semibold leading-[18px]" dir="auto">
-                        {model.label}
-                        {showColors && model.colors.length > 0 && (
-                          <span className="font-normal uppercase text-neutral-700"> — {model.colors.map((color) => color.label).join(", ")}</span>
-                        )}
-                      </li>
+            <div className="flex flex-col gap-8">
+              {tables.map((table, tableIndex) => (
+                <table key={tableIndex} className="avail-table w-full table-fixed border-collapse border border-neutral-700" dir="rtl">
+                  <thead>
+                    <tr>
+                      {table.brands.map((brand) => (
+                        <th key={brand.id} className="border border-neutral-700 bg-neutral-100 px-3 py-2 text-start text-[17px] font-extrabold uppercase tracking-wide" dir="auto">
+                          {brand.label}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {table.rows.map((row, rowIndex) => (
+                      <tr key={rowIndex}>
+                        {row.map((cell, columnIndex) => (
+                          <td key={columnIndex} className="border border-neutral-700 px-3 py-[7px] text-start align-middle text-[15px] leading-[20px]" dir="auto">
+                            {cell && (
+                              <>
+                                <span className="font-semibold">{cell.label}</span>
+                                {cell.colors.length > 0 && <span className="font-normal uppercase text-neutral-700"> — {cell.colors.join(", ")}</span>}
+                              </>
+                            )}
+                          </td>
+                        ))}
+                      </tr>
                     ))}
-                  </ul>
-                </section>
+                  </tbody>
+                </table>
               ))}
             </div>
           )}

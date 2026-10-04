@@ -136,3 +136,54 @@ export async function loadProductAvailabilitySheet(productId: string): Promise<P
     alt: product.thumbnailAlt,
   });
 }
+
+/** Color labels that carry no information on the sheet and are never printed
+ * (a clear/transparent case has no meaningful "color"). Presentation only —
+ * the model itself is still listed whenever its warehouse quantity qualifies. */
+export const HIDDEN_COLOR_LABELS: ReadonlySet<string> = new Set(["شفاف"]);
+
+/** At most this many brand columns share one printed table. */
+export const MAX_BRAND_COLUMNS_PER_TABLE = 3;
+
+export interface AvailabilityTableCell {
+  label: string;
+  /** Printable colors only (hidden labels removed); empty for PHONE_COMPATIBILITY. */
+  colors: string[];
+}
+
+export interface AvailabilityTable {
+  brands: { id: string; label: string }[];
+  /** rows[r][c] is the r-th model of brand c, or null when that brand has fewer models. */
+  rows: (AvailabilityTableCell | null)[][];
+}
+
+export function visibleColorLabels(colors: AvailabilityColor[]): string[] {
+  return colors.map((color) => color.label.trim()).filter((label) => label !== "" && !HIDDEN_COLOR_LABELS.has(label));
+}
+
+/** Pure presentation: lays the already-filtered brands out as brand-column
+ * tables. Brands are spread evenly over ceil(n / 3) tables (4 -> 2+2,
+ * 5 -> 3+2, 7 -> 3+2+2) so no table is left with a lone column. */
+export function buildAvailabilityTables(brands: AvailabilityBrand[], showColors: boolean): AvailabilityTable[] {
+  if (brands.length === 0) return [];
+  const tableCount = Math.ceil(brands.length / MAX_BRAND_COLUMNS_PER_TABLE);
+  // Balanced split (sizes differ by at most one): 4 -> 2+2, 5 -> 3+2, 7 -> 3+2+2.
+  const baseSize = Math.floor(brands.length / tableCount);
+  const largerTables = brands.length % tableCount;
+  const tables: AvailabilityTable[] = [];
+  let start = 0;
+  for (let tableIndex = 0; tableIndex < tableCount; tableIndex++) {
+    const size = baseSize + (tableIndex < largerTables ? 1 : 0);
+    const chunk = brands.slice(start, start + size);
+    start += size;
+    const rowCount = Math.max(...chunk.map((brand) => brand.models.length));
+    const rows = Array.from({ length: rowCount }, (_, rowIndex) =>
+      chunk.map((brand): AvailabilityTableCell | null => {
+        const model = brand.models[rowIndex];
+        return model ? { label: model.label, colors: showColors ? visibleColorLabels(model.colors) : [] } : null;
+      }),
+    );
+    tables.push({ brands: chunk.map((brand) => ({ id: brand.brandId, label: brand.label })), rows });
+  }
+  return tables;
+}

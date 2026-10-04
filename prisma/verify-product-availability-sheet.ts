@@ -38,7 +38,7 @@ async function main() {
 
   const prisma = new PrismaClient();
   const { ROLES, STOCK_LOCATION_TYPES } = constants;
-  const { loadProductAvailabilitySheet, MIN_AVAILABLE_WAREHOUSE_QUANTITY } = sheetLib;
+  const { loadProductAvailabilitySheet, MIN_AVAILABLE_WAREHOUSE_QUANTITY, buildAvailabilityTables, visibleColorLabels, HIDDEN_COLOR_LABELS } = sheetLib;
   const runId = `verify-avail-${Date.now()}`;
 
   function assert(condition: unknown, message: string): asserts condition {
@@ -151,6 +151,19 @@ async function main() {
   const simpleCarOnly = await product("simple-car", "SIMPLE"); // wh 0 + car 900
   await stock(simpleCarOnly.id, car.id, 900);
 
+  // ---- DEVICE_MODEL_COLOR product using the hidden "شفاف" color (and one real color) ----
+  const clear = await prisma.color.create({ data: { name: "شفاف" } });
+  const clearProduct = await product("clear", "DEVICE");
+  async function clearCombo(modelId: string, colorId: string, whQty: number) {
+    const combo = await prisma.deviceColorVariant.create({ data: { productId: clearProduct.id, phoneModelId: modelId, colorId } });
+    await stock(clearProduct.id, wh1.id, whQty, { deviceColorVariantId: combo.id });
+  }
+  await clearCombo(ip12.id, clear.id, 10); //  IP 12 شفاف  -> listed, no color printed
+  await clearCombo(ip13.id, clear.id, 8); //   IP 13 شفاف  -> listed ...
+  await clearCombo(ip13.id, black.id, 6); //   ... plus a REAL color that must stay
+  await clearCombo(s22.id, clear.id, 3); //    wh 3        -> excluded by the rule, not by the filter
+  await clearCombo(s23.id, clear.id, 12); //   S23 شفاف    -> listed, no color printed
+
   const labelOf = (name: string) => name.replace(`${runId}-`, "").replace(`${runId} `, "");
   const shape = (sheet: NonNullable<Awaited<ReturnType<typeof loadProductAvailabilitySheet>>>) =>
     sheet.brands.map((brand) => ({ brand: labelOf(brand.label), models: brand.models.map((m) => ({ model: labelOf(m.label), colors: m.colors.map((c) => labelOf(c.label)) })) }));
@@ -249,6 +262,49 @@ async function main() {
       assert(none === null, "an unknown product id yields null (the page 404s)");
     });
 
+    await check("14. table layout: brands become columns, models rows; unequal brands pad with empty cells; \"شفاف\" is never printed", async () => {
+      const compatSheet = await loadProductAvailabilitySheet(compat.id);
+      assert(compatSheet, "compat sheet");
+      const tables = buildAvailabilityTables(compatSheet.brands, false);
+      assert(tables.length === 1 && tables[0]!.brands.length === 2, "two brands share one table (two columns)");
+      assert(tables[0]!.brands.map((b) => labelOf(b.label)).join(",") === "IPHONE,SAMSUNG", "brand columns in brand order");
+      assert(tables[0]!.rows.length === 3 && tables[0]!.rows[0]!.length === 2, "3 rows x 2 columns");
+      assert(tables[0]!.rows[1]![1] === null && tables[0]!.rows[2]![1] === null, "the shorter brand pads with empty cells");
+      assert(tables[0]!.rows.flat().every((cell) => cell === null || cell.colors.length === 0), "compatibility models carry no colors");
+
+      const clearSheet = await loadProductAvailabilitySheet(clearProduct.id);
+      assert(clearSheet && clearSheet.mode === "DEVICE_MODEL_COLOR", "clear-color sheet");
+      const clearTables = buildAvailabilityTables(clearSheet.brands, true);
+      const cells = clearTables.flatMap((table) => table.rows.flat()).filter((cell) => cell !== null);
+      const printed = JSON.stringify(clearTables);
+      assert(!printed.includes("شفاف"), "the word شفاف appears nowhere in the table data");
+      assert(HIDDEN_COLOR_LABELS.has("شفاف"), "the hidden label set holds it");
+      assert(cells.map((c) => labelOf(c!.label)).sort().join(",") === "IP 12,IP 13,S23", "models whose only color is شفاف are still listed (S22 stays out: warehouse 3)");
+      assert(cells.find((c) => labelOf(c!.label) === "IP 13")!.colors.map(labelOf).join(",") === "Black", "a real color is kept next to its model");
+      assert(cells.find((c) => labelOf(c!.label) === "IP 12")!.colors.length === 0, "no color text when the only color was hidden");
+      assert(visibleColorLabels([{ id: "a", label: "شفاف", hex: null }, { id: "b", label: "Red", hex: null }]).join(",") === "Red", "mixed list: only the hidden word is dropped");
+      // the stock rule itself is unaffected by the filter
+      const whOf = (await loadProductAvailabilitySheet(clearProduct.id))!.brands.flatMap((b) => b.models).map((m) => labelOf(m.label));
+      assert(!whOf.includes("S22"), "wh 3 still excluded");
+    });
+
+    await check("15. brand distribution: 4 brands -> 2+2, 5 -> 3+2, 7 -> 3+2+2, never a lone column", async () => {
+      const fake = (n: number) => Array.from({ length: n }, (_, i) => ({ brandId: `b${i}`, label: `B${i}`, models: [{ modelId: `m${i}`, label: `M${i}`, colors: [] }] }));
+      const widths = (n: number) => buildAvailabilityTables(fake(n), false).map((t) => t.brands.length).join("+");
+      assert(widths(1) === "1" && widths(2) === "2" && widths(3) === "3", "1-3 brands: one table");
+      assert(widths(4) === "2+2" && widths(5) === "3+2" && widths(6) === "3+3" && widths(7) === "3+2+2", "4+ brands spread evenly");
+      assert(buildAvailabilityTables([], false).length === 0, "no brands -> no tables");
+    });
+
+    await check("16. the page is table-based (th/td, bordered) and never prints colors outside the filter helper", async () => {
+      const page = fs.readFileSync(new URL("../src/app/admin/inventory/overview/product/[productId]/availability/page.tsx", import.meta.url), "utf8");
+      assert(/<table[^]*<thead>[^]*<th[^]*<tbody>[^]*<td/.test(page), "renders a real table with header and body cells");
+      assert(!/<ul[ >]|<li[ >]/.test(page), "no list markup left");
+      assert(page.includes("buildAvailabilityTables(brands, showColors)") && !page.includes(".colors.map"), "colors reach the page only through buildAvailabilityTables");
+      assert(!page.includes("شفاف"), "the page itself hard-codes no color text");
+      assert(page.includes(".avail-table thead { display: table-header-group; }") && page.includes(".avail-table tr { break-inside: avoid"), "header repeats across pages and rows never split");
+    });
+
     console.log("ALL PASS");
   } finally {
     const productIds = (await prisma.product.findMany({ where: { sku: { startsWith: runId } }, select: { id: true } })).map((p) => p.id);
@@ -257,7 +313,7 @@ async function main() {
     await prisma.deviceColorVariant.deleteMany({ where: { productId: { in: productIds } } });
     await prisma.productVariant.deleteMany({ where: { productId: { in: productIds } } });
     await prisma.product.deleteMany({ where: { id: { in: productIds } } });
-    await prisma.color.deleteMany({ where: { name: { startsWith: runId } } });
+    await prisma.color.deleteMany({ where: { OR: [{ name: { startsWith: runId } }, { id: clear.id }] } });
     await prisma.phoneModel.deleteMany({ where: { name: { startsWith: runId } } });
     await prisma.phoneBrand.deleteMany({ where: { name: { startsWith: runId } } });
     await prisma.stockLocation.deleteMany({ where: { name: { startsWith: runId } } });
