@@ -25,7 +25,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ prod
   const { productId } = await params;
   const result = await generateCustomerCatalogPng(productId);
   if (!result.ok) {
-    return result.reason === "NOT_FOUND" ? text("الصنف غير موجود", 404) : text("لا توجد موديلات متوفرة في المخزن لهذا الصنف لعرضها على الزبون", 409);
+    if (result.reason === "NOT_FOUND") return text("الصنف غير موجود", 404);
+    if (result.reason === "TOO_LARGE") return text("عدد الموديلات كبير جداً ولا يمكن عرضه بشكل مقروء في صفحة A4 واحدة", 422);
+    return text("لا توجد موديلات متوفرة في المخزن لهذا الصنف لعرضها على الزبون", 409);
   }
 
   const download = new URL(request.url).searchParams.get("download") === "1";

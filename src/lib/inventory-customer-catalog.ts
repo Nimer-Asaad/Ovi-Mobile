@@ -10,32 +10,10 @@ import { buildAvailabilityTables, type AvailabilityBrand, type ProductAvailabili
  * renderer can size the canvas without measuring anything and nothing can be
  * clipped or overlap. */
 
-export const CUSTOMER_IMAGE_WIDTH = 1080;
-/** More brands than this are split into balanced stacked tables (4 -> one
- * 4-column table, 5 -> 3+2, 6 -> 3+3, 9 -> 3+3+3 ...), never a lone column. */
-export const CUSTOMER_MAX_BRAND_COLUMNS = 4;
-export const CUSTOMER_MAX_IMAGES = 3;
-
-const SIDE_MARGIN = 40;
-const CONTENT_WIDTH = CUSTOMER_IMAGE_WIDTH - SIDE_MARGIN * 2;
-const SINGLE_BRAND_TABLE_WIDTH = 560;
-const SECTION_GAP = 36;
-const TITLE_TEXT_WIDTH = CONTENT_WIDTH - 40;
-const HEAD_MIN_HEIGHT = 72;
-const ROW_MIN_HEIGHT = 66;
-const CELL_PAD_X = 14;
-const CELL_PAD_Y = 14;
 const LINE_HEIGHT = 1.2;
 /** Last resort for a single unbreakable token wider than its cell (e.g. a
  * 30+ character hyphenated model name): shrink it rather than let it overflow. */
 const MIN_FALLBACK_FONT_SIZE = 12;
-const MIN_SLOT_WIDTH = 250;
-const MIN_SLOT_HEIGHT = 210;
-const SLOT_PAD = 16;
-const FOOTER_BAR_HEIGHT = 14;
-const BOTTOM_PAD = 40;
-/** Outer frame of a table (drawn as a border; the renderer is border-box). */
-const TABLE_FRAME = 3;
 
 /** Labels that describe HOW a variant is stocked, not WHICH phone it fits —
  * never shown to a customer as a model/color suffix. Whole-label match only,
@@ -223,116 +201,197 @@ export function fitText(text: string, width: number, options: FitTextOptions): T
 }
 
 // ---------------------------------------------------------------------------
-// Layout
+// Layout — ONE fixed A4 sheet in the style of a wholesaler's catalog table:
+// a blue title band, one pale brand header row, compact alternating model
+// rows, and the product photos MERGED into the unused area under the shorter
+// brand columns (a rectangle of merged cells, not a card, not a blank grid).
+//
+// THE CANVAS NEVER GROWS. The page is always CATALOG_PAGE (1240 x 1754). When
+// the models do not fit legibly the layout tightens in fixed steps (see
+// planCustomerCatalog); if even the tightest step cannot fit, the result is
+// TOO_LARGE — a controlled "cannot fit on one A4 sheet" state — never a taller
+// image.
 // ---------------------------------------------------------------------------
 
-export interface CatalogCell {
-  model: TextBlock;
-  /** Real (non-generic) colors only — DEVICE_MODEL_COLOR; null otherwise. */
-  colors: TextBlock | null;
+/** A4 portrait at 150 dpi. Every customer catalog is exactly this size. */
+export const CATALOG_PAGE = { width: 1240, height: 1754 } as const;
+
+/** Brand columns per table: 1-4 brands are always ONE table; more brands are
+ * balanced over several tables on the same page (5 -> 3+2, 7 -> 4+3 ...). */
+export const CUSTOMER_MAX_BRAND_COLUMNS = 4;
+export const CUSTOMER_MAX_IMAGES = 3;
+
+/** Fitting steps, tried in this order until the longest column fits:
+ *  1-3 NORMAL chrome with 4, 5, then 6 brand columns per table (rebalancing
+ *      brand groups only matters for 5+ brands);
+ *  4-6 COMPACT chrome (smaller margins / title / header, tighter gaps), same
+ *      three groupings, with a slightly lower row floor.
+ * The row floor is the safe minimum: 22px rows (14px font) normally, 20px rows
+ * (13px font) in COMPACT. Below that: TOO_LARGE. */
+const FIT_GROUPINGS = [4, 5, 6] as const;
+const CHROME = {
+  NORMAL: { marginX: 64, marginTop: 52, marginBottom: 52, headHeight: 44, headFont: 24, titleMin: 52, titlePad: 22, tableGap: 24, rowMin: 22 },
+  COMPACT: { marginX: 56, marginTop: 36, marginBottom: 36, headHeight: 36, headFont: 20, titleMin: 44, titlePad: 14, tableGap: 14, rowMin: 20 },
+} as const;
+export type CatalogDensity = keyof typeof CHROME;
+export const CATALOG_CHROME = CHROME;
+/** Outer frame; every other grid line is 1px. The renderer is border-box. */
+export const CATALOG_FRAME = 2;
+export const CATALOG_ZONE_PAD = 6;
+export const CATALOG_ZONE_GAP = 6;
+
+const ROW_MAX = 60;
+const ROW_FONT_RATIO = 0.66;
+const ROW_FONT_MIN = 13;
+const ROW_FONT_MAX = 26;
+const CELL_PAD_X = 6;
+const ZONE_MIN_ROWS = 4;
+const ZONE_MIN_HEIGHT = 140;
+const ZONE_MIN_IMAGE_HEIGHT = 140;
+const ZONE_IMAGE_WEIGHTS: Record<number, number[]> = { 1: [1], 2: [0.62, 0.38], 3: [0.5, 0.3, 0.2] };
+const BOTTOM_ZONE_RESERVE = 0.26;
+const BOTTOM_ZONE_MIN_HEIGHT = 160;
+/** A bottom photo area is only reserved while rows stay at least this tall —
+ * readability always wins over fitting a photo (very long lists show no photo). */
+const BOTTOM_ZONE_MIN_ROW = 30;
+const SINGLE_BRAND_MAX_WIDTH = 620;
+
+/** The largest font size (down to the 12px last resort) at which `text` fits
+ * on ONE line — an exceptionally long name shrinks alone, it never wraps. */
+export function fitSingleLine(text: string, width: number, maxFontSize: number, options: { bold?: boolean; uppercase?: boolean } = {}): number {
+  for (let size = maxFontSize; size > MIN_FALLBACK_FONT_SIZE; size -= 1) {
+    if (estimateTextWidth(text, size, options) <= width) return size;
+  }
+  return MIN_FALLBACK_FONT_SIZE;
 }
 
-/** A rectangle inside a table body, in pixels from the body's top-left. */
-export interface CatalogImageSlot {
-  firstColumn: number;
-  columnCount: number;
-  top: number;
-  width: number;
-  height: number;
+export interface CatalogLabel {
+  text: string;
+  fontSize: number;
 }
 
-export interface CatalogTable {
-  width: number;
-  columnWidth: number;
-  headHeight: number;
-  brands: { id: string; text: TextBlock }[];
-  rowHeights: number[];
-  /** rows[r][c]: the r-th model of brand column c, or null when it has fewer. */
-  rows: (CatalogCell | null)[][];
-  bodyHeight: number;
-  /** The product photo, placed in the free area under the shorter columns. */
-  imageSlot: CatalogImageSlot | null;
-  /** head + body + the outer frame (TABLE_FRAME on every side). */
-  height: number;
+export interface CatalogCell extends CatalogLabel {
+  /** Real (non-generic) colors only, shown after the model — DEVICE_MODEL_COLOR. */
+  colors: string | null;
+}
+
+export interface CatalogColumn {
+  brand: CatalogLabel;
+  cells: CatalogCell[];
+  /** Rows below the last model that are neither a photo zone nor a model:
+   * drawn as ONE merged blank cell, never as a grid of empty cells. */
+  tailRows: number;
 }
 
 export interface CatalogImageBox {
   imageIndex: number;
+  /** Inside the zone, excluding the zone padding. */
   x: number;
   y: number;
   width: number;
   height: number;
 }
 
-export interface CatalogLayout {
+export interface CatalogZone {
+  /** COLUMNS: merged under adjacent shorter columns, long columns continue
+   * beside it. BOTTOM: merged across ALL columns below the last model row. */
+  kind: "COLUMNS" | "BOTTOM";
+  firstColumn: number;
+  columnCount: number;
+  /** Model rows above the zone in the columns it spans. */
+  topRows: number;
+  rows: number;
   width: number;
   height: number;
+  boxes: CatalogImageBox[];
+}
+
+export interface CatalogTable {
+  /** Inner width (frame excluded). */
+  width: number;
+  columnWidth: number;
+  rowCount: number;
+  /** Height of each model row: the base row height, +1px on the first few rows
+   * when the page does not divide evenly, so the table fills the sheet exactly. */
+  rowHeights: number[];
+  columns: CatalogColumn[];
+  zone: CatalogZone | null;
+  /** Page height left over once the rows are placed (rows are capped at ROW_MAX),
+   * given to the photo zone and, as one merged blank cell, to the other columns
+   * — so a short product still fills the sheet instead of leaving a blank footer.
+   * Zero whenever the leftover is small enough to be spread over the rows. */
+  extraHeight: number;
+  /** First table only: the merged full-width title band. */
+  title: TextBlock | null;
   titleHeight: number;
-  brandLine: string;
-  title: TextBlock;
-  sku: string;
+  /** Outer height, frame included. */
+  height: number;
+}
+
+export interface CatalogLayout {
+  /** Always exactly CATALOG_PAGE — the type makes any other size a compile error. */
+  width: typeof CATALOG_PAGE.width;
+  height: typeof CATALOG_PAGE.height;
+  density: CatalogDensity;
+  headHeight: number;
+  marginTop: number;
+  rowHeight: number;
+  rowFontSize: number;
+  tableGap: number;
   tables: CatalogTable[];
-  /** Index (into the image list) of the picture placed inside a table, or null. */
-  slotImageIndex: number | null;
-  collage: { width: number; height: number; boxes: CatalogImageBox[] } | null;
-  sectionGap: number;
-  bottomPad: number;
-  footerBarHeight: number;
-  /** Pixel size to pre-scale each image to (contain-fit) — one entry per image. */
+  /** Pixel box each placed image is prepared for, by image index. */
   imageBoxes: { width: number; height: number }[];
 }
 
-/** One model font size for the whole table (looks like a printed sheet, not a
- * ragged list): the largest size (32 down to 26) at which EVERY model fits on
- * one line. When some name is longer than that, the table stays at 26 and only
- * those outliers wrap (or shrink) — one unusually long name never makes every
- * other cell small. */
-function uniformModelFontSize(table: { rows: ({ label: string } | null)[][] }, textWidth: number): number {
-  for (let size = 32; size >= 26; size -= 2) {
-    if (table.rows.every((row) => row.every((cell) => !cell || estimateTextWidth(cell.label, size) <= textWidth))) return size;
-  }
-  return 26;
+/** Cover when the photo's proportions are close to its box (a cleanly cropped
+ * edge-to-edge fill), contain otherwise (never distorted, never cut hard). */
+export function chooseImageFit(imageWidth: number, imageHeight: number, boxWidth: number, boxHeight: number): "cover" | "contain" {
+  const ratio = imageWidth / imageHeight / (boxWidth / boxHeight);
+  return ratio >= 0.7 && ratio <= 1.43 ? "cover" : "contain";
 }
 
-function buildSlot(table: Pick<CatalogTable, "columnWidth" | "rowHeights" | "rows">, columnCount: number): CatalogImageSlot | null {
-  const rowCount = table.rowHeights.length;
-  const lengths = Array.from({ length: columnCount }, (_, column) => table.rows.reduce((count, row) => (row[column] ? count + 1 : count), 0));
-  let best: (CatalogImageSlot & { area: number }) | null = null;
-  for (let first = 0; first < columnCount; first++) {
+function zoneBoxes(width: number, height: number, imageCount: number, borderRight: boolean): CatalogImageBox[] {
+  const innerWidth = width - CATALOG_ZONE_PAD * 2 - (borderRight ? 1 : 0);
+  let count = Math.min(imageCount, CUSTOMER_MAX_IMAGES);
+  const heightFor = (k: number) => height - CATALOG_ZONE_PAD * 2 - CATALOG_ZONE_GAP * (k - 1);
+  while (count > 1 && heightFor(count) * Math.min(...ZONE_IMAGE_WEIGHTS[count]!) < ZONE_MIN_IMAGE_HEIGHT) count--;
+  if (count < 1) return [];
+  const innerHeight = heightFor(count);
+  const weights = ZONE_IMAGE_WEIGHTS[count]!;
+  const boxes: CatalogImageBox[] = [];
+  let y = CATALOG_ZONE_PAD;
+  weights.forEach((weight, index) => {
+    const boxHeight = index === weights.length - 1 ? CATALOG_ZONE_PAD + innerHeight + CATALOG_ZONE_GAP * (count - 1) - y : Math.floor(innerHeight * weight);
+    boxes.push({ imageIndex: index, x: CATALOG_ZONE_PAD, y, width: innerWidth, height: boxHeight });
+    y += boxHeight + CATALOG_ZONE_GAP;
+  });
+  return boxes;
+}
+
+interface ColumnSpan {
+  first: number;
+  count: number;
+  topRows: number;
+  rows: number;
+}
+
+/** The largest rectangle of ADJACENT columns that all finish early: it starts
+ * under the tallest column of the span, runs to the end of the table, and is
+ * only used when tall and wide enough to look intentional. */
+function bestColumnSpan(lengths: number[], rowCount: number, rowHeight: number, columnWidth: number): ColumnSpan | null {
+  let best: (ColumnSpan & { area: number }) | null = null;
+  for (let first = 0; first < lengths.length; first++) {
     let tallest = 0;
-    for (let last = first; last < columnCount; last++) {
+    for (let last = first; last < lengths.length; last++) {
       tallest = Math.max(tallest, lengths[last]!);
-      if (tallest >= rowCount) break;
-      const width = (last - first + 1) * table.columnWidth;
-      const top = table.rowHeights.slice(0, tallest).reduce((sum, height) => sum + height, 0);
-      const height = table.rowHeights.slice(tallest).reduce((sum, rowHeight) => sum + rowHeight, 0);
-      if (width < MIN_SLOT_WIDTH || height < MIN_SLOT_HEIGHT) continue;
-      const area = width * height;
-      if (!best || area > best.area) best = { firstColumn: first, columnCount: last - first + 1, top, width, height, area };
+      const rows = rowCount - tallest;
+      if (rows < ZONE_MIN_ROWS || rows * rowHeight < ZONE_MIN_HEIGHT) continue;
+      const area = (last - first + 1) * columnWidth * rows * rowHeight;
+      if (!best || area > best.area) best = { first, count: last - first + 1, topRows: tallest, rows, area };
     }
   }
   if (!best) return null;
-  const { area: _area, ...slot } = best;
-  void _area;
-  return slot;
-}
-
-function collageFor(count: number, hasSlotImage: boolean): { height: number; boxes: Omit<CatalogImageBox, "imageIndex">[] } | null {
-  if (count <= 0) return null;
-  if (hasSlotImage) {
-    if (count === 1) return { height: 400, boxes: [{ x: 250, y: 0, width: 500, height: 400 }] };
-    return { height: 360, boxes: [{ x: 0, y: 0, width: 490, height: 360 }, { x: 510, y: 0, width: 490, height: 360 }] };
-  }
-  if (count === 1) return { height: 680, boxes: [{ x: 100, y: 0, width: 800, height: 680 }] };
-  if (count === 2) return { height: 440, boxes: [{ x: 0, y: 0, width: 490, height: 440 }, { x: 510, y: 0, width: 490, height: 440 }] };
-  return {
-    height: 520,
-    boxes: [
-      { x: 0, y: 0, width: 590, height: 520 },
-      { x: 610, y: 0, width: 390, height: 250 },
-      { x: 610, y: 270, width: 390, height: 250 },
-    ],
-  };
+  return { first: best.first, count: best.count, topRows: best.topRows, rows: best.rows };
 }
 
 export interface CatalogInput {
@@ -342,112 +401,178 @@ export interface CatalogInput {
   imageCount: number;
 }
 
-/** Null when there is nothing a customer could choose from (a simple stock
- * product, or no model reaches the warehouse minimum). */
-export function buildCustomerCatalogLayout({ sheet, imageCount }: CatalogInput): CatalogLayout | null {
-  if (sheet.mode === "TOTAL_STOCK" || !sheet.hasAvailability) return null;
+export type CatalogPlan =
+  | { status: "OK"; layout: CatalogLayout }
+  /** Nothing a customer could choose from: a simple stock product, or no
+   * model reaches the warehouse minimum. */
+  | { status: "NONE" }
+  /** Even the tightest legible arrangement cannot put every model on one A4
+   * sheet. The canvas is NEVER enlarged; the caller reports this state. */
+  | { status: "TOO_LARGE"; longestColumn: number; capacity: number };
+
+/** Decides the one-A4 arrangement, or reports that none exists. */
+export function planCustomerCatalog({ sheet, imageCount }: CatalogInput): CatalogPlan {
+  if (sheet.mode === "TOTAL_STOCK" || !sheet.hasAvailability) return { status: "NONE" };
   const showColors = sheet.mode === "DEVICE_MODEL_COLOR";
-  const tables = buildAvailabilityTables(customerBrandsFromSheet(sheet.brands), showColors, CUSTOMER_MAX_BRAND_COLUMNS);
-  if (tables.length === 0) return null;
+  const brands = customerBrandsFromSheet(sheet.brands);
   const images = Math.max(0, Math.min(CUSTOMER_MAX_IMAGES, Math.floor(imageCount)));
+  const title = sheet.product.nameAr?.trim() || sheet.product.name;
 
-  const laidOut: CatalogTable[] = tables.map((table) => {
-    const columnCount = table.brands.length;
-    const width = columnCount === 1 ? SINGLE_BRAND_TABLE_WIDTH : Math.floor(CONTENT_WIDTH / columnCount) * columnCount;
-    const columnWidth = width / columnCount;
-    const textWidth = columnWidth - CELL_PAD_X * 2;
-
-    const modelFontSize = uniformModelFontSize(table, textWidth);
-    const brandBlocks = table.brands.map((brand) => ({
-      id: brand.id,
-      text: fitText(brand.label, textWidth, { maxFontSize: 30, singleLineMinFontSize: 22, multiLineMinFontSize: 20, maxLines: 2, uppercase: true }),
-    }));
-    const headHeight = Math.max(HEAD_MIN_HEIGHT, ...brandBlocks.map((brand) => brand.text.height + CELL_PAD_Y * 2));
-
-    const rows = table.rows.map((row) =>
-      row.map((cell): CatalogCell | null => {
-        if (!cell) return null;
-        const model = fitText(cell.label, textWidth, { maxFontSize: modelFontSize, singleLineMinFontSize: modelFontSize, multiLineMinFontSize: 20, maxLines: 2 });
-        const colors =
-          cell.colors.length > 0
-            ? fitText(cell.colors.join(" · "), textWidth, { maxFontSize: 22, singleLineMinFontSize: 18, multiLineMinFontSize: 18, maxLines: 3, bold: false, uppercase: true })
-            : null;
-        return { model, colors };
-      }),
-    );
-    const rowHeights = rows.map((row) =>
-      Math.max(ROW_MIN_HEIGHT, ...row.map((cell) => (cell ? CELL_PAD_Y * 2 + cell.model.height + (cell.colors ? 6 + cell.colors.height : 0) : 0))),
-    );
-    const bodyHeight = rowHeights.reduce((sum, height) => sum + height, 0);
-    return { width, columnWidth, headHeight, brands: brandBlocks, rowHeights, rows, bodyHeight, imageSlot: null, height: headHeight + bodyHeight + TABLE_FRAME * 2 };
-  });
-
-  // The primary photo goes into the largest free rectangle under the shorter
-  // columns of any table, when one is big enough to look intentional;
-  // otherwise it joins the collage below the tables.
-  let slotImageIndex: number | null = null;
-  if (images > 0) {
-    let bestTable = -1;
-    let bestSlot: CatalogImageSlot | null = null;
-    laidOut.forEach((table, index) => {
-      const slot = buildSlot(table, table.brands.length);
-      if (slot && (!bestSlot || slot.width * slot.height > bestSlot.width * bestSlot.height)) {
-        bestSlot = slot;
-        bestTable = index;
-      }
-    });
-    if (bestSlot && bestTable >= 0) {
-      laidOut[bestTable]!.imageSlot = bestSlot;
-      slotImageIndex = 0;
+  // brand-group rebalancing only changes anything for 5+ brands
+  const groupings = brands.length <= CUSTOMER_MAX_BRAND_COLUMNS ? [CUSTOMER_MAX_BRAND_COLUMNS] : [...FIT_GROUPINGS];
+  let longestColumn = 0;
+  let capacity = 0;
+  for (const density of ["NORMAL", "COMPACT"] as const) {
+    for (const maxColumns of groupings) {
+      const attempt = layoutAttempt(brands, showColors, maxColumns, density, images, title);
+      if (attempt.layout) return { status: "OK", layout: attempt.layout };
+      longestColumn = attempt.longestColumn;
+      capacity = attempt.capacity;
     }
   }
-
-  const remaining = images - (slotImageIndex === null ? 0 : 1);
-  const collageSpec = collageFor(remaining, slotImageIndex !== null);
-  const firstCollageImage = slotImageIndex === null ? 0 : 1;
-  const collage = collageSpec
-    ? {
-        width: CONTENT_WIDTH,
-        height: collageSpec.height,
-        boxes: collageSpec.boxes.map((box, index) => ({ ...box, imageIndex: firstCollageImage + index })),
-      }
-    : null;
-
-  const title = fitText(sheet.product.nameAr?.trim() || sheet.product.name, TITLE_TEXT_WIDTH, {
-    maxFontSize: 62,
-    singleLineMinFontSize: 44,
-    multiLineMinFontSize: 36,
-    maxLines: 3,
-  });
-  const brandLine = "OVI MOBILE";
-  const titleHeight = 40 + 28 + 16 + title.height + 14 + 30 + 38;
-
-  const imageBoxes: { width: number; height: number }[] = [];
-  const slotTable = laidOut.find((table) => table.imageSlot);
-  if (slotImageIndex !== null && slotTable?.imageSlot) {
-    imageBoxes[0] = { width: slotTable.imageSlot.width - SLOT_PAD * 2, height: slotTable.imageSlot.height - SLOT_PAD * 2 };
-  }
-  for (const box of collage?.boxes ?? []) imageBoxes[box.imageIndex] = { width: box.width - SLOT_PAD * 2, height: box.height - SLOT_PAD * 2 };
-
-  const tablesHeight = laidOut.reduce((sum, table) => sum + table.height, 0) + SECTION_GAP * Math.max(0, laidOut.length - 1);
-  const height = titleHeight + SECTION_GAP + tablesHeight + (collage ? SECTION_GAP + collage.height : 0) + BOTTOM_PAD + FOOTER_BAR_HEIGHT;
-
-  return {
-    width: CUSTOMER_IMAGE_WIDTH,
-    height,
-    titleHeight,
-    brandLine,
-    title,
-    sku: sheet.product.sku,
-    tables: laidOut,
-    slotImageIndex,
-    collage,
-    sectionGap: SECTION_GAP,
-    bottomPad: BOTTOM_PAD,
-    footerBarHeight: FOOTER_BAR_HEIGHT,
-    imageBoxes,
-  };
+  return { status: "TOO_LARGE", longestColumn, capacity };
 }
 
-export const CATALOG_SLOT_PAD = SLOT_PAD;
-export const CATALOG_TABLE_FRAME = TABLE_FRAME;
+/** Layout for callers that only need the sheet itself: null for NONE and for
+ * TOO_LARGE alike (use planCustomerCatalog to tell them apart). */
+export function buildCustomerCatalogLayout(input: CatalogInput): CatalogLayout | null {
+  const plan = planCustomerCatalog(input);
+  return plan.status === "OK" ? plan.layout : null;
+}
+
+function layoutAttempt(
+  brands: AvailabilityBrand[],
+  showColors: boolean,
+  maxColumns: number,
+  density: CatalogDensity,
+  images: number,
+  titleText: string,
+): { layout: CatalogLayout | null; longestColumn: number; capacity: number } {
+  const chrome = CHROME[density];
+  const rawTables = buildAvailabilityTables(brands, showColors, maxColumns);
+  const innerWidth = CATALOG_PAGE.width - chrome.marginX * 2 - CATALOG_FRAME * 2;
+  const title = fitText(titleText, innerWidth - 40, { maxFontSize: density === "NORMAL" ? 30 : 26, singleLineMinFontSize: 22, multiLineMinFontSize: 18, maxLines: 3 });
+  const titleHeight = Math.max(chrome.titleMin, title.height + chrome.titlePad);
+
+  const prepared = rawTables.map((raw) => {
+    const columnCount = raw.brands.length;
+    const width = columnCount === 1 ? Math.min(innerWidth, SINGLE_BRAND_MAX_WIDTH) : Math.floor(innerWidth / columnCount) * columnCount;
+    const columnWidth = width / columnCount;
+    const columns = raw.brands.map((brand, column) => ({
+      brand,
+      models: raw.rows.map((row) => row[column]).filter((cell): cell is NonNullable<typeof cell> => cell !== null),
+    }));
+    const lengths = columns.map((column) => column.models.length);
+    return { width, columnWidth, columns, lengths, rowCount: Math.max(...lengths) };
+  });
+
+  const rowsTotal = prepared.reduce((sum, table) => sum + table.rowCount, 0);
+  const overhead = prepared.reduce((sum, _table, index) => sum + CATALOG_FRAME * 2 + chrome.headHeight + (index === 0 ? titleHeight : 0), 0) + chrome.tableGap * (prepared.length - 1);
+  const bodyAvailable = CATALOG_PAGE.height - chrome.marginTop - chrome.marginBottom - overhead;
+  const fitRow = Math.floor(bodyAvailable / rowsTotal);
+  const longestColumn = Math.max(...prepared.map((table) => table.rowCount));
+  const capacity = Math.floor(bodyAvailable / chrome.rowMin);
+  if (fitRow < chrome.rowMin) return { layout: null, longestColumn, capacity };
+
+  let rowHeight = Math.min(ROW_MAX, fitRow);
+
+  // 1) preferred: merge the unused area under adjacent shorter columns
+  let columnZone: { table: number; span: ColumnSpan } | null = null;
+  if (images > 0) {
+    let bestArea = 0;
+    prepared.forEach((table, index) => {
+      const span = bestColumnSpan(table.lengths, table.rowCount, rowHeight, table.columnWidth);
+      const area = span ? span.count * table.columnWidth * span.rows * rowHeight : 0;
+      if (span && area > bestArea) {
+        bestArea = area;
+        columnZone = { table: index, span };
+      }
+    });
+  }
+  // 2) otherwise reserve a merged full-width area under the last table
+  let bottomZoneHeight = 0;
+  if (images > 0 && !columnZone) {
+    const reserved = Math.round(bodyAvailable * BOTTOM_ZONE_RESERVE);
+    const reservedRow = Math.min(ROW_MAX, Math.floor((bodyAvailable - reserved) / rowsTotal));
+    const leftover = bodyAvailable - rowsTotal * reservedRow;
+    if (leftover >= BOTTOM_ZONE_MIN_HEIGHT && reservedRow >= BOTTOM_ZONE_MIN_ROW) {
+      rowHeight = reservedRow;
+      bottomZoneHeight = leftover;
+    }
+  }
+  const rowFontSize = Math.min(ROW_FONT_MAX, Math.max(ROW_FONT_MIN, Math.floor(rowHeight * ROW_FONT_RATIO)));
+
+  // Leftover pixels: a handful (fewer than there are rows) are spread 1px per
+  // row so the table fills the sheet exactly; a large leftover (rows capped at
+  // ROW_MAX) goes to the photo zone instead.
+  const leftover = bodyAvailable - rowsTotal * rowHeight - bottomZoneHeight;
+  const spread = leftover > 0 && leftover <= rowsTotal ? leftover : 0;
+  const bigLeftover = leftover > rowsTotal ? leftover : 0;
+  let rowsPlaced = 0;
+
+  const imageBoxes: { width: number; height: number }[] = [];
+  const tables: CatalogTable[] = prepared.map((table, tableIndex) => {
+    const span = columnZone && (columnZone as { table: number }).table === tableIndex ? (columnZone as { span: ColumnSpan }).span : null;
+    const isLast = tableIndex === prepared.length - 1;
+    const textWidth = table.columnWidth - CELL_PAD_X * 2;
+    const extraHeight = span ? bigLeftover : 0;
+    const rowHeights = Array.from({ length: table.rowCount }, (_, index) => rowHeight + (rowsPlaced + index < spread ? 1 : 0));
+    rowsPlaced += table.rowCount;
+    const sumRows = (from: number, to: number) => rowHeights.slice(from, to).reduce((sum, value) => sum + value, 0);
+
+    const columns: CatalogColumn[] = table.columns.map((column, index) => {
+      const inSpan = span !== null && index >= span.first && index < span.first + span.count;
+      const blankUntil = inSpan ? span!.topRows : table.rowCount;
+      return {
+        brand: { text: column.brand.label, fontSize: fitSingleLine(column.brand.label, textWidth, chrome.headFont, { uppercase: true }) },
+        cells: column.models.map((cell) => {
+          const colors = cell.colors.length > 0 ? cell.colors.join(" · ") : null;
+          const display = colors ? `${cell.label} — ${colors}` : cell.label;
+          return { text: cell.label, colors, fontSize: fitSingleLine(display, textWidth, rowFontSize) };
+        }),
+        tailRows: blankUntil - column.models.length,
+      };
+    });
+
+    let zone: CatalogZone | null = null;
+    if (span) {
+      const width = span.count * table.columnWidth;
+      const height = sumRows(span.topRows, table.rowCount) + extraHeight;
+      const boxes = zoneBoxes(width, height, images, span.first + span.count < columns.length);
+      zone = { kind: "COLUMNS", firstColumn: span.first, columnCount: span.count, topRows: span.topRows, rows: span.rows, width, height, boxes };
+    } else if (bottomZoneHeight > 0 && isLast) {
+      zone = { kind: "BOTTOM", firstColumn: 0, columnCount: columns.length, topRows: table.rowCount, rows: 0, width: table.width, height: bottomZoneHeight, boxes: zoneBoxes(table.width, bottomZoneHeight, images, false) };
+    }
+    for (const box of zone?.boxes ?? []) imageBoxes[box.imageIndex] = { width: box.width, height: box.height };
+
+    return {
+      width: table.width,
+      columnWidth: table.columnWidth,
+      rowCount: table.rowCount,
+      rowHeights,
+      columns,
+      zone,
+      extraHeight,
+      title: tableIndex === 0 ? title : null,
+      titleHeight: tableIndex === 0 ? titleHeight : 0,
+      height: CATALOG_FRAME * 2 + (tableIndex === 0 ? titleHeight : 0) + chrome.headHeight + sumRows(0, table.rowCount) + extraHeight + (zone?.kind === "BOTTOM" ? zone.height : 0),
+    };
+  });
+
+  return {
+    layout: {
+      width: CATALOG_PAGE.width,
+      height: CATALOG_PAGE.height,
+      density,
+      headHeight: chrome.headHeight,
+      marginTop: chrome.marginTop,
+      rowHeight,
+      rowFontSize,
+      tableGap: chrome.tableGap,
+      tables,
+      imageBoxes,
+    },
+    longestColumn,
+    capacity,
+  };
+}

@@ -3,10 +3,11 @@
  * للزبون", src/lib/inventory-customer-catalog.ts + inventory-customer-image.ts,
  * GET /admin/inventory/overview/product/[productId]/customer-image).
  *
- * The image is built from the existing warehouse-only availability sheet
- * (>= 5 in WAREHOUSE locations, REP_CAR never read), shows only brand + model
- * (+ real colors for DEVICE_MODEL_COLOR), never a quantity, and is a pure
- * read: nothing is written anywhere.
+ * The image is ONE fixed A4 sheet (1240x1754) in the style of a wholesaler's
+ * catalog table, built from the existing warehouse-only availability sheet
+ * (>= 5 in WAREHOUSE locations, REP_CAR never read). It shows only brand +
+ * model (+ real colors for DEVICE_MODEL_COLOR), never a quantity, and is a
+ * pure read: nothing is written anywhere.
  *
  * Safety rails via resolveVerifyDatabaseUrl (prisma/verify-guardrails.ts):
  * never runs against a shared/production database. Temporary product photos
@@ -42,7 +43,21 @@ async function main() {
   const prisma = new PrismaClient();
   const { ROLES, STOCK_LOCATION_TYPES } = constants;
   const { loadProductAvailabilitySheet } = sheetLib;
-  const { buildCustomerCatalogLayout, selectCustomerImageUrls, isGenericCustomerLabel, normalizeCustomerLabel, splitBidiItems, hasArabic, fitText, estimateTextWidth, customerImageFilename, CUSTOMER_IMAGE_WIDTH } = catalog;
+  const {
+    buildCustomerCatalogLayout,
+    planCustomerCatalog,
+    selectCustomerImageUrls,
+    isGenericCustomerLabel,
+    normalizeCustomerLabel,
+    splitBidiItems,
+    hasArabic,
+    fitSingleLine,
+    estimateTextWidth,
+    customerImageFilename,
+    chooseImageFit,
+    CATALOG_PAGE,
+    CATALOG_FRAME,
+  } = catalog;
   const { generateCustomerCatalogPng } = imageLib;
   const runId = `verify-cat-${Date.now()}`;
   const publicDir = path.join(process.cwd(), "public", "uploads", "products");
@@ -68,7 +83,7 @@ async function main() {
   const wh = await prisma.stockLocation.create({ data: { type: STOCK_LOCATION_TYPES.WAREHOUSE, name: `${runId}-wh`, isDefault: false } });
   const car = await prisma.stockLocation.create({ data: { type: STOCK_LOCATION_TYPES.REP_CAR, name: `${runId}-car`, salesRepId: rep.id } });
 
-  const brandNames = ["IPHONE", "TECNO", "REDMI", "SAMSUNG"];
+  const brandNames = ["APPLE", "TECNO", "SAMSUNG", "XIAOMI"];
   const brands: Record<string, { id: string }> = {};
   for (const [index, name] of brandNames.entries()) {
     brands[name] = await prisma.phoneBrand.create({ data: { name: `${runId}-${name}`, slug: `${runId}-${name.toLowerCase()}`, sortOrder: index + 1 } });
@@ -78,15 +93,13 @@ async function main() {
     modelOrder += 1;
     return prisma.phoneModel.create({ data: { phoneBrandId: brands[brand]!.id, name: `${runId} ${name}`, slug: `${runId}-m${modelOrder}`, sortOrder: modelOrder } });
   }
-  async function colorNamed(name: string) {
-    const existing = await prisma.color.findFirst({ where: { name } });
-    return existing ? { color: existing, created: false } : { color: await prisma.color.create({ data: { name, hexCode: "#cccccc" } }), created: true };
-  }
   const createdColorIds: string[] = [];
   async function color(name: string) {
-    const { color: row, created } = await colorNamed(name);
-    if (created) createdColorIds.push(row.id);
-    return row;
+    const existing = await prisma.color.findFirst({ where: { name } });
+    if (existing) return existing;
+    const created = await prisma.color.create({ data: { name, hexCode: "#cccccc" } });
+    createdColorIds.push(created.id);
+    return created;
   }
   const clear = await color("شفاف");
   const mixed = await color("مشكل");
@@ -94,10 +107,10 @@ async function main() {
   const black = await color(`${runId}-Black`);
   const blue = await color(`${runId}-Blue`);
 
-  async function photo(name: string, bg: string): Promise<string> {
+  async function photo(name: string, bg: string, width = 640, height = 800): Promise<string> {
     fs.mkdirSync(publicDir, { recursive: true });
     const file = `_verify-${runId}-${name}.png`;
-    await sharp({ create: { width: 640, height: 800, channels: 3, background: bg } }).png().toFile(path.join(publicDir, file));
+    await sharp({ create: { width, height, channels: 3, background: bg } }).png().toFile(path.join(publicDir, file));
     tempFiles.push(path.join(publicDir, file));
     return `/uploads/products/${file}`;
   }
@@ -125,20 +138,20 @@ async function main() {
     if (carQty) await stock(productId, car.id, carQty, { variantId: variant.id });
   }
 
-  // A) PHONE_COMPATIBILITY, 4 brands, product name that contains the generic words, 3 photos + 1 video + 1 duplicate URL
-  const photoA = await photo("a", "#18B7D3");
-  const photoB = await photo("b", "#E85D75");
-  const photoC = await photo("c", "#F59E0B");
+  // A) the reference shape: Apple 16, Tecno 13, Samsung 30, Xiaomi 50 + 3 photos (+ video, duplicate URL, 4th photo)
+  const photoA = await photo("a", "#18B7D3", 900, 1100);
+  const photoB = await photo("b", "#E85D75", 1200, 800);
+  const photoC = await photo("c", "#F59E0B", 800, 800);
   const photoD = await photo("d", "#10B981");
   const catalogProduct = await product("catalog", "COMPAT", "كفر شفاف مشكل للهواتف");
-  for (const name of ["iPhone 11", "iPhone 12", "iPhone 13", "iPhone 14"]) await compatModel(catalogProduct.id, "IPHONE", name, 12, 800);
-  await compatModel(catalogProduct.id, "IPHONE", "iPhone 4Q", 4, 1000); //   wh 4  + REP_CAR 1000 -> absent
-  await compatModel(catalogProduct.id, "IPHONE", "iPhone 5Q", 5, 0); //      wh 5                 -> present
-  await compatModel(catalogProduct.id, "IPHONE", "iPhone CarOnly", 0, 900); // REP_CAR only        -> absent
-  await compatModel(catalogProduct.id, "IPHONE", "iPhone Big4321", 4321, 0); // exposes no quantity
-  for (const name of ["Spark 8", "Spark 10"]) await compatModel(catalogProduct.id, "TECNO", name, 7);
-  for (let i = 1; i <= 9; i++) await compatModel(catalogProduct.id, "REDMI", `Redmi ${i}`, 9);
-  for (let i = 1; i <= 12; i++) await compatModel(catalogProduct.id, "SAMSUNG", `A${String(i).padStart(2, "0")}`, 15);
+  for (let i = 1; i <= 14; i++) await compatModel(catalogProduct.id, "APPLE", `iPhone ${i}`, 12, 800);
+  await compatModel(catalogProduct.id, "APPLE", "iPhone 4Q", 4, 1000); //    wh 4  + REP_CAR 1000 -> absent
+  await compatModel(catalogProduct.id, "APPLE", "iPhone 5Q", 5, 0); //       wh 5                 -> present
+  await compatModel(catalogProduct.id, "APPLE", "iPhone CarOnly", 0, 900); // REP_CAR only         -> absent
+  await compatModel(catalogProduct.id, "APPLE", "iPhone Big4321", 4321, 0); // exposes no quantity
+  for (let i = 1; i <= 13; i++) await compatModel(catalogProduct.id, "TECNO", `Spark ${i}`, 7);
+  for (let i = 1; i <= 30; i++) await compatModel(catalogProduct.id, "SAMSUNG", `A${String(i).padStart(2, "0")}`, 15);
+  for (let i = 1; i <= 50; i++) await compatModel(catalogProduct.id, "XIAOMI", `Redmi ${String(i).padStart(2, "0")}`, 9);
   await prisma.productImage.createMany({
     data: [
       { productId: catalogProduct.id, url: photoC, mediaType: "IMAGE", isMain: false, sortOrder: 7 },
@@ -152,8 +165,8 @@ async function main() {
 
   // B) DEVICE_MODEL_COLOR with generic + real colors
   const deviceProduct = await product("device", "DEVICE", "غطاء سمارت");
-  const m1 = await model("IPHONE", "DM1 Black+Clear");
-  const m2 = await model("IPHONE", "DM2 OnlyClear");
+  const m1 = await model("APPLE", "DM1 Black+Clear");
+  const m2 = await model("APPLE", "DM2 OnlyClear");
   const m3 = await model("SAMSUNG", "DM3 OnlyMixed");
   const m4 = await model("SAMSUNG", "DM4 Blue wh3");
   const m5 = await model("SAMSUNG", "DM5 BlueBlack");
@@ -173,32 +186,57 @@ async function main() {
 
   // C) no image
   const noImage = await product("noimage", "COMPAT", "بدون صورة");
-  await compatModel(noImage.id, "IPHONE", "iPhone 11", 6);
+  await compatModel(noImage.id, "APPLE", "iPhone 11", 6);
   await compatModel(noImage.id, "SAMSUNG", "S21", 6);
 
-  // D) long list: 2 brands x 45 models + one photo
+  // D) long lists: 2 x 45 (one A4) and 2 x 95 (documented multi-A4 fallback)
   const longProduct = await product("long", "COMPAT", "قائمة طويلة");
-  for (let i = 1; i <= 45; i++) await compatModel(longProduct.id, "IPHONE", `iPhone ${i} Pro Max`, 10);
+  for (let i = 1; i <= 45; i++) await compatModel(longProduct.id, "APPLE", `iPhone ${i} Pro Max`, 10);
   for (let i = 1; i <= 45; i++) await compatModel(longProduct.id, "SAMSUNG", `Galaxy S${i} Ultra`, 10);
   await prisma.productImage.create({ data: { productId: longProduct.id, url: photoA, mediaType: "IMAGE", isMain: true, sortOrder: 0 } });
+  const denseProduct = await product("dense", "COMPAT", "قائمة كثيفة");
+  for (let i = 1; i <= 75; i++) await compatModel(denseProduct.id, "APPLE", `iPhone ${i} Pro Max`, 10);
+  for (let i = 1; i <= 75; i++) await compatModel(denseProduct.id, "SAMSUNG", `Galaxy S${i} Ultra`, 10);
+  await prisma.productImage.create({ data: { productId: denseProduct.id, url: photoA, mediaType: "IMAGE", isMain: true, sortOrder: 0 } });
+  const hugeProduct = await product("huge", "COMPAT", "قائمة ضخمة");
+  for (let i = 1; i <= 95; i++) await compatModel(hugeProduct.id, "APPLE", `iPhone ${i} Pro Max`, 10);
+  for (let i = 1; i <= 95; i++) await compatModel(hugeProduct.id, "SAMSUNG", `Galaxy S${i} Ultra`, 10);
 
-  // E) simple product + nothing >= 5
+  // E) short two-brand product with two photos: the sheet must still be filled
+  const shortProduct = await product("short", "COMPAT", "زجاج ماركتين");
+  for (let i = 1; i <= 5; i++) await compatModel(shortProduct.id, "APPLE", `iPhone ${i + 10}`, 6);
+  for (let i = 1; i <= 13; i++) await compatModel(shortProduct.id, "SAMSUNG", `S${i}`, 6);
+  await prisma.productImage.createMany({
+    data: [
+      { productId: shortProduct.id, url: photoA, mediaType: "IMAGE", isMain: true, sortOrder: 0 },
+      { productId: shortProduct.id, url: photoB, mediaType: "IMAGE", isMain: false, sortOrder: 1 },
+    ],
+  });
+
+  // F) simple product + nothing >= 5
   const simple = await product("simple", "SIMPLE", "منتج بسيط");
   await stock(simple.id, wh.id, 20);
   const lowStock = await product("low", "COMPAT", "مخزون منخفض");
-  await compatModel(lowStock.id, "IPHONE", "iPhone 11", 4, 900);
+  await compatModel(lowStock.id, "APPLE", "iPhone 11", 4, 900);
 
-  const allProductIds = [catalogProduct, deviceProduct, noImage, longProduct, simple, lowStock].map((p) => p.id);
+  const allProductIds = [catalogProduct, deviceProduct, noImage, longProduct, denseProduct, hugeProduct, shortProduct, simple, lowStock].map((p) => p.id);
 
+  type Layout = NonNullable<ReturnType<typeof buildCustomerCatalogLayout>>;
   async function layoutFor(productId: string, imageCount = 0) {
     const sheet = await loadProductAvailabilitySheet(productId);
     assert(sheet, "sheet exists");
     return { sheet, layout: buildCustomerCatalogLayout({ sheet, imageCount }) };
   }
-  const cellsOf = (layout: NonNullable<ReturnType<typeof buildCustomerCatalogLayout>>) =>
-    layout.tables.flatMap((table) => table.rows.flat()).filter((cell): cell is NonNullable<typeof cell> => cell !== null);
-  const modelText = (cell: { model: { lines: string[] } }) => labelOf(cell.model.lines.join(" "));
+  const cellsOf = (layout: Layout) => layout.tables.flatMap((table) => table.columns.flatMap((column) => column.cells));
+  const modelText = (cell: { text: string }) => labelOf(cell.text);
   const png = (buffer: Buffer) => ({ signature: buffer.subarray(1, 4).toString("latin1"), width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20) });
+  /** top-left of a table's inner area on the page (tables are centred) */
+  const tableOrigin = (layout: Layout, tableIndex: number) => {
+    let y = layout.marginTop;
+    for (let i = 0; i < tableIndex; i++) y += layout.tables[i]!.height + layout.tableGap;
+    const table = layout.tables[tableIndex]!;
+    return { x: Math.round((layout.width - (table.width + CATALOG_FRAME * 2)) / 2) + CATALOG_FRAME, y: y + CATALOG_FRAME };
+  };
 
   async function snapshot() {
     const [items, qty, movements, products, images, variants, activeVariants, products2] = await Promise.all([
@@ -222,22 +260,87 @@ async function main() {
       assert(!models.includes("iPhone 4Q"), "wh 4 (REP_CAR 1000) is absent");
       assert(models.includes("iPhone 5Q"), "wh exactly 5 is present");
       assert(!models.includes("iPhone CarOnly"), "REP_CAR-only stock never appears");
-      assert(models.includes("iPhone 11") && models.includes("Redmi 9") && models.includes("A12"), "qualifying models appear");
+      assert(models.includes("iPhone 11") && models.includes("Redmi 09") && models.includes("A12"), "qualifying models appear");
     });
 
-    await check("4. brand columns: 4 brands -> ONE table with 4 equal columns; 5 -> 3+2; 6 -> 3+3; 7 -> 4+3; 9 -> 3+3+3; never a lone column", async () => {
+    await check("A4. the sheet is a fixed 1240x1754 A4 portrait PNG (ratio 1.414), never a tall strip", async () => {
+      const result = await generateCustomerCatalogPng(catalogProduct.id);
+      assert(result.ok, "generated");
+      const info = png(result.png);
+      assert(info.signature === "PNG" && info.width === 1240 && info.height === 1754, `fixed A4 size, got ${JSON.stringify(info)}`);
+      assert(Math.abs(info.height / info.width - Math.SQRT2) < 0.002, "A4 proportions");
+      assert(CATALOG_PAGE.width === 1240 && CATALOG_PAGE.height === 1754, "documented page constants");
+      const { layout } = await layoutFor(catalogProduct.id, 3);
+      assert(layout && layout.density === "NORMAL" && layout.height === 1754 && layout.width === 1240, "normal products use normal chrome on the A4 canvas");
+      assert(layout.rowHeight >= 28 && layout.rowHeight <= 34, `compact rows (28-34px) for the reference shape, got ${layout.rowHeight}`);
+      assert(layout.rowFontSize >= 18 && layout.rowFontSize <= 24, `readable row font, got ${layout.rowFontSize}`);
+    });
+
+    await check("4. four brands -> ONE table, 4 equal columns, configured order; 5 -> 3+2, 6 -> 3+3, 7 -> 4+3; a single brand is a centred narrower table", async () => {
       const { sheet, layout } = await layoutFor(catalogProduct.id);
-      assert(layout && layout.tables.length === 1 && layout.tables[0]!.brands.length === 4, "4 brands share one 4-column table");
+      assert(layout && layout.tables.length === 1 && layout.tables[0]!.columns.length === 4, "4 brands share one 4-column table");
       assert(layout.tables[0]!.columnWidth * 4 === layout.tables[0]!.width, "columns are equal width");
-      assert(layout.tables[0]!.brands.map((brand) => labelOf(brand.text.lines.join(" "))).join(",") === "IPHONE,TECNO,REDMI,SAMSUNG", "configured brand order kept (not hardcoded, not re-sorted)");
+      assert(layout.tables[0]!.columns.map((column) => labelOf(column.brand.text)).join(",") === "APPLE,TECNO,SAMSUNG,XIAOMI", "configured brand order kept (not hardcoded, not re-sorted)");
       const fakeSheet = (n: number) => ({
         ...sheet,
         brands: Array.from({ length: n }, (_, i) => ({ brandId: `b${i}`, label: `B${i}`, models: [{ modelId: `m${i}`, label: `M${i}`, colors: [] }] })),
       });
-      const widths = (n: number) => buildCustomerCatalogLayout({ sheet: fakeSheet(n), imageCount: 0 })!.tables.map((table) => table.brands.length).join("+");
+      const widths = (n: number) => buildCustomerCatalogLayout({ sheet: fakeSheet(n), imageCount: 0 })!.tables.map((table) => table.columns.length).join("+");
       assert(widths(1) === "1" && widths(2) === "2" && widths(3) === "3" && widths(4) === "4", "1-4 brands: a single table");
-      assert(widths(5) === "3+2" && widths(6) === "3+3" && widths(7) === "4+3" && widths(9) === "3+3+3", "5+ brands: balanced sections");
-      assert(buildCustomerCatalogLayout({ sheet: fakeSheet(1), imageCount: 0 })!.tables[0]!.width < CUSTOMER_IMAGE_WIDTH, "a single brand is a centered narrower table");
+      assert(widths(5) === "3+2" && widths(6) === "3+3" && widths(7) === "4+3", "5+ brands: balanced sections on the same page");
+      assert(buildCustomerCatalogLayout({ sheet: fakeSheet(6), imageCount: 0 })!.height === 1754, "even 6 brands stay on one A4 sheet");
+      assert(buildCustomerCatalogLayout({ sheet: fakeSheet(1), imageCount: 0 })!.tables[0]!.width < 1100, "a single brand is a narrower table");
+    });
+
+    await check("ZONE. short adjacent columns become ONE merged photo area; the long columns continue beside it; no blank grid", async () => {
+      const { layout } = await layoutFor(catalogProduct.id, 3);
+      assert(layout, "layout built");
+      const table = layout.tables[0]!;
+      const zone = table.zone;
+      assert(zone && zone.kind === "COLUMNS", "a merged photo zone exists");
+      assert(zone.firstColumn === 0 && zone.columnCount === 2, `the zone spans APPLE + TECNO (2 columns), got ${zone.firstColumn}+${zone.columnCount}`);
+      assert(zone.topRows === 16 && zone.rows === table.rowCount - 16 && zone.rows >= 30, `it starts under the taller of the two (APPLE: 16 models) and runs to the table end, got ${zone.topRows}/${zone.rows}`);
+      assert(table.columns[2]!.cells.length === 30 && table.columns[3]!.cells.length === 50, "SAMSUNG (30) and XIAOMI (50) keep listing models beside the zone");
+      assert(table.columns[3]!.tailRows === 0 && table.columns[2]!.tailRows === table.rowCount - 30, "the shorter long column ends in ONE merged blank cell");
+      assert(table.columns[0]!.tailRows + table.columns[0]!.cells.length === zone.topRows && table.columns[1]!.tailRows + table.columns[1]!.cells.length === zone.topRows, "spanned columns have no blank cells under the zone start except one merged tail");
+      assert(cellsOf(layout).every((cell) => cell.text.trim() !== ""), "no empty model cells exist");
+      assert(zone.height === table.rowHeights.slice(zone.topRows).reduce((sum, value) => sum + value, 0) + table.extraHeight, "zone height is the sum of the rows it covers (+ any large leftover page height)");
+      assert(table.extraHeight === 0 && table.columns[3]!.tailRows === 0, "the leftover pixels are spread over the rows: no blank strip under the longest column");
+      assert(table.rowHeights.length === 50 && table.rowHeights.every((value) => value === layout.rowHeight || value === layout.rowHeight + 1), "rows differ by at most 1px");
+      // the three photos are stacked vertically, edge to edge inside the zone
+      assert(zone.boxes.length === 3, "three photos placed");
+      assert(zone.boxes.every((box) => box.x === zone.boxes[0]!.x && box.width === zone.boxes[0]!.width), "photos share one left edge and width (stacked)");
+      assert(zone.boxes.every((box, index) => index === 0 || box.y > zone.boxes[index - 1]!.y + zone.boxes[index - 1]!.height - 1), "photos are stacked top to bottom without overlap");
+      assert(zone.boxes[0]!.width > 500 && zone.boxes[0]!.height > zone.boxes[1]!.height && zone.boxes[1]!.height > zone.boxes[2]!.height, "main photo is the largest");
+      assert(zone.boxes[0]!.width === zone.width - 12 - 1, "photos fill the merged width (6px inner gap, 1px grid line)");
+      assert(table.height + layout.marginTop * 2 === 1754, "the table fills the sheet down to the bottom margin");
+
+      // pixel check on the real PNG: the zone is filled with photo content, not a grid of empty bordered cells
+      const result = await generateCustomerCatalogPng(catalogProduct.id);
+      assert(result.ok, "generated");
+      const raw = await sharp(result.png).raw().toBuffer({ resolveWithObject: true });
+      const origin = tableOrigin(layout, 0);
+      const x0 = origin.x + zone.firstColumn * table.columnWidth;
+      const y0 = origin.y + table.titleHeight + layout.headHeight + table.rowHeights.slice(0, zone.topRows).reduce((sum, value) => sum + value, 0);
+      const at = (x: number, y: number): [number, number, number] => {
+        const offset = (y * raw.info.width + x) * raw.info.channels;
+        return [raw.data[offset]!, raw.data[offset + 1]!, raw.data[offset + 2]!];
+      };
+      let nonWhite = 0;
+      let samples = 0;
+      let worstBlackRow = 0;
+      for (let y = y0 + 8; y < y0 + zone.height - 8; y += 2) {
+        let blackInRow = 0;
+        for (let x = x0 + 8; x < x0 + zone.width - 8; x += 2) {
+          const [r, g, b] = at(x, y);
+          samples += 1;
+          if (r < 245 || g < 245 || b < 245) nonWhite += 1;
+          if (r < 70 && g < 70 && b < 70) blackInRow += 1;
+        }
+        worstBlackRow = Math.max(worstBlackRow, blackInRow / ((zone.width - 16) / 2));
+      }
+      assert(nonWhite / samples > 0.5, `the zone is covered by photos (${Math.round((nonWhite / samples) * 100)}% non-white)`);
+      assert(worstBlackRow < 0.5, `no full-width grid line runs through the photo zone (worst row ${Math.round(worstBlackRow * 100)}% black)`);
     });
 
     await check("5,6. generic labels (شفاف / مشكل / مشكّل / assorted) never reach the customer layout", async () => {
@@ -250,80 +353,133 @@ async function main() {
       for (const label of ["Black", "أسود", "Blue", "شفاف أسود"]) assert(!isGenericCustomerLabel(label), `"${label}" is a real color`);
     });
 
-    await check("7. a product NAME containing شفاف / مشكل is kept exactly (only per-model color metadata is cleaned)", async () => {
-      const { layout } = await layoutFor(catalogProduct.id);
+    await check("7. title band shows the REAL product name (even with شفاف / مشكل in it) and nothing else: no brand line, SKU, date or quantities", async () => {
+      const { layout, sheet } = await layoutFor(catalogProduct.id, 3);
       assert(layout, "layout built");
-      assert(layout.title.lines.join(" ") === "كفر شفاف مشكل للهواتف", `title is the real product name, got "${layout.title.lines.join(" ")}"`);
+      const title = layout.tables[0]!.title;
+      assert(title && title.lines.join(" ") === "كفر شفاف مشكل للهواتف", `title is the real product name, got "${title?.lines.join(" ")}"`);
+      assert(layout.tables.slice(1).every((table) => table.title === null), "only the first table has the title band");
+      const json = JSON.stringify(layout);
+      assert(!json.includes(sheet.product.sku) && !/OVI MOBILE/i.test(json) && !/جرد الصنف/.test(json), "no SKU, no Ovi Mobile header, no admin wording");
+      const source = fs.readFileSync(new URL("../src/lib/inventory-customer-image.ts", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+      assert(!/OVI MOBILE|toLocale|new Date\(|\.sku/.test(source.replace("sku: sheet.product.sku", "")), "the renderer draws no brand line, date or SKU");
     });
 
     await check("8. DEVICE_MODEL_COLOR: real colors kept, generic ones dropped, color-less models stay as models, wh 3 excluded", async () => {
       const { layout } = await layoutFor(deviceProduct.id);
       assert(layout, "layout built");
-      const cells = cellsOf(layout);
-      const byModel = new Map(cells.map((cell) => [modelText(cell), cell.colors ? labelOf(cell.colors.lines.join(" ")) : null]));
+      const byModel = new Map(cellsOf(layout).map((cell) => [modelText(cell), cell.colors ? labelOf(cell.colors) : null]));
       assert(byModel.get("DM1 Black+Clear") === "Black", `DM1 keeps only Black, got ${byModel.get("DM1 Black+Clear")}`);
-      assert(byModel.has("DM2 OnlyClear") && byModel.get("DM2 OnlyClear") === null, "a model whose only color is شفاف is listed with no color line");
-      assert(byModel.has("DM3 OnlyMixed") && byModel.get("DM3 OnlyMixed") === null, "a model whose only colors are مشكل / مشكّل is listed with no color line");
+      assert(byModel.has("DM2 OnlyClear") && byModel.get("DM2 OnlyClear") === null, "a model whose only color is شفاف is listed with no color");
+      assert(byModel.has("DM3 OnlyMixed") && byModel.get("DM3 OnlyMixed") === null, "a model whose only colors are مشكل / مشكّل is listed with no color");
       assert(!byModel.has("DM4 Blue wh3"), "warehouse 3 still excluded");
       const dm5 = byModel.get("DM5 BlueBlack");
       assert(dm5 !== null && dm5 !== undefined && dm5.includes("Blue") && dm5.includes("Black") && !dm5.includes("شفاف"), `DM5 shows its two real colors, got ${dm5}`);
-      // PHONE_COMPATIBILITY never shows a color line
       const { layout: compatLayout } = await layoutFor(catalogProduct.id);
       assert(compatLayout && cellsOf(compatLayout).every((cell) => cell.colors === null), "compatibility products show model only");
     });
 
-    await check("9,10. images: IMAGE rows only, main first then sortOrder, no duplicates, max 3; the primary photo is placed in the layout", async () => {
+    await check("9,10. photos: IMAGE rows only, main first then sortOrder, no duplicates, max 3; the primary photo is the largest and first", async () => {
       const rows = await prisma.productImage.findMany({ where: { productId: catalogProduct.id }, select: { url: true, mediaType: true, isMain: true, sortOrder: true } });
       const picked = selectCustomerImageUrls(rows);
       assert(JSON.stringify(picked) === JSON.stringify([photoA, photoB, photoC]), `expected main, then sortOrder, no video/duplicate/4th; got ${JSON.stringify(picked)}`);
       assert(JSON.stringify(selectCustomerImageUrls([...rows].reverse())) === JSON.stringify(picked), "selection does not depend on row order");
       assert(selectCustomerImageUrls([{ url: "x", mediaType: "VIDEO", isMain: true, sortOrder: 0 }]).length === 0, "videos are never used");
       const { layout } = await layoutFor(catalogProduct.id, 3);
-      assert(layout, "layout built");
-      const used = [layout.slotImageIndex, ...(layout.collage?.boxes.map((box) => box.imageIndex) ?? [])].filter((index) => index !== null).sort();
-      assert(JSON.stringify(used) === "[0,1,2]", `all three photos have a place, got ${JSON.stringify(used)}`);
-      assert(layout.slotImageIndex === 0 || layout.collage?.boxes.some((box) => box.imageIndex === 0), "the primary photo (index 0) is placed");
+      assert(layout && layout.tables[0]!.zone!.boxes[0]!.imageIndex === 0 && layout.imageBoxes.length === 3, "image 0 (the main photo) takes the first, largest box");
       const full = await generateCustomerCatalogPng(catalogProduct.id);
       assert(full.ok && full.imageCount === 3, `3 photos used end to end, got ${full.ok ? full.imageCount : full.reason}`);
+      assert(chooseImageFit(900, 1100, 540, 600) === "cover" && chooseImageFit(800, 800, 540, 200) === "contain", "photos are cropped only when close to the box shape, otherwise contained (never stretched)");
+      const one = buildCustomerCatalogLayout({ sheet: (await layoutFor(catalogProduct.id)).sheet, imageCount: 1 });
+      assert(one && one.tables[0]!.zone!.boxes.length === 1 && one.imageBoxes.length === 1, "a single photo is used once, never duplicated");
     });
 
-    await check("11. no image -> a valid PNG with no placeholder", async () => {
+    await check("11. no image -> a valid A4 PNG, no photo zone, no placeholder, no blank grid", async () => {
       const result = await generateCustomerCatalogPng(noImage.id);
       assert(result.ok && result.imageCount === 0, "generated without images");
       const info = png(result.png);
-      assert(info.signature === "PNG" && info.width === CUSTOMER_IMAGE_WIDTH && info.height > 300, `valid PNG, got ${JSON.stringify(info)}`);
+      assert(info.signature === "PNG" && info.width === 1240 && info.height === 1754, `A4 PNG, got ${JSON.stringify(info)}`);
       const { layout } = await layoutFor(noImage.id, 0);
-      assert(layout && layout.slotImageIndex === null && layout.collage === null, "no slot and no collage without photos");
-      assert(info.height === layout.height, "canvas height equals the computed layout height");
+      assert(layout && layout.tables.every((table) => table.zone === null) && layout.imageBoxes.length === 0, "no zone without photos");
+      assert(layout.tables[0]!.columns.every((column) => column.tailRows <= layout.tables[0]!.rowCount), "unused rows are merged blank tails, not cells");
     });
 
-    await check("12. long list -> ONE tall PNG whose height matches the layout, last row + footer intact (nothing clipped)", async () => {
+    await check("12. the canvas NEVER grows: 45 rows fit normally, 75 rows fit only by tightening (COMPACT), 95 rows return the controlled TOO_LARGE state", async () => {
       const result = await generateCustomerCatalogPng(longProduct.id);
       assert(result.ok, "generated");
       const info = png(result.png);
       const { layout } = await layoutFor(longProduct.id, 1);
       assert(layout, "layout built");
-      assert(info.width === CUSTOMER_IMAGE_WIDTH && info.height === layout.height && info.height > 3000, `one tall image, got ${JSON.stringify(info)} vs layout ${layout.height}`);
-      assert(cellsOf(layout).length === 90, "all 90 models are laid out");
-      assert(layout.tables.length === 1 && layout.tables[0]!.rowHeights.length === 45, "45 rows in a single table (no pagination)");
+      assert(info.width === 1240 && info.height === 1754 && layout.density === "NORMAL", `one A4 sheet, got ${JSON.stringify(info)}`);
+      assert(cellsOf(layout).length === 90 && layout.tables.length === 1 && layout.tables[0]!.rowCount === 45, "all 90 models in one 45-row table (no pagination)");
+      assert(layout.rowHeight >= 30 && layout.rowFontSize >= 19, `rows stay comfortable at 45 rows, got ${layout.rowHeight}px / ${layout.rowFontSize}px font`);
       const raw = await sharp(result.png).raw().toBuffer({ resolveWithObject: true });
-      const pixel = (x: number, y: number) => {
-        const offset = (y * raw.info.width + x) * raw.info.channels;
-        return [raw.data[offset]!, raw.data[offset + 1]!, raw.data[offset + 2]!];
-      };
-      const [r, g, b] = pixel(5, info.height - 5);
-      assert(r === 8 && g === 24 && b === 39, `the footer bar is the last thing drawn at the bottom edge, got ${[r, g, b]}`);
-      const above = pixel(5, info.height - layout.footerBarHeight - 10);
-      assert(above[0] === 255 && above[1] === 255 && above[2] === 255, "white padding sits between the last table and the footer");
+      const bottom = (y: number) => [raw.data[(y * raw.info.width + 5) * raw.info.channels]!, raw.data[(y * raw.info.width + 5) * raw.info.channels + 1]!, raw.data[(y * raw.info.width + 5) * raw.info.channels + 2]!];
+      assert(bottom(info.height - 5).every((value) => value === 255), "white bottom margin (nothing clipped, no footer)");
+
+      // 75 rows: too many for NORMAL chrome, still legible in COMPACT — and still exactly A4
+      const dense = await generateCustomerCatalogPng(denseProduct.id);
+      const { layout: denseLayout } = await layoutFor(denseProduct.id, 1);
+      assert(dense.ok && denseLayout, "dense generated");
+      const denseInfo = png(dense.png);
+      assert(denseLayout.density === "COMPACT" && denseLayout.rowHeight >= 20 && denseLayout.rowFontSize >= 13, `75 rows tighten to COMPACT with readable rows, got ${denseLayout.density} ${denseLayout.rowHeight}px/${denseLayout.rowFontSize}px`);
+      assert(denseInfo.width === 1240 && denseInfo.height === 1754, `still exactly A4, got ${JSON.stringify(denseInfo)}`);
+
+      // 95 rows: cannot fit legibly -> controlled failure, NO image, NEVER a taller canvas
+      const sheet = (await layoutFor(hugeProduct.id)).sheet;
+      const plan = planCustomerCatalog({ sheet, imageCount: 1 });
+      assert(plan.status === "TOO_LARGE" && plan.longestColumn === 95 && plan.capacity < 95, `95 rows -> TOO_LARGE, got ${JSON.stringify(plan)}`);
+      assert(buildCustomerCatalogLayout({ sheet, imageCount: 1 }) === null, "no layout is produced for a product that cannot fit");
+      const huge = await generateCustomerCatalogPng(hugeProduct.id);
+      assert(!huge.ok && huge.reason === "TOO_LARGE", "the generator reports TOO_LARGE and returns no PNG at all");
+      const route = fs.readFileSync(new URL("../src/app/admin/inventory/overview/product/[productId]/customer-image/route.ts", import.meta.url), "utf8");
+      assert(route.includes('"TOO_LARGE"') && route.includes("422"), "the route answers 422 for TOO_LARGE");
+      // no code path can produce another size
+      const catalogSource = fs.readFileSync(new URL("../src/lib/inventory-customer-catalog.ts", import.meta.url), "utf8");
+      const imageSource = fs.readFileSync(new URL("../src/lib/inventory-customer-image.ts", import.meta.url), "utf8");
+      assert(!/MULTI_PAGE|fallback:|pageHeight|pages \*|3508/.test(catalogSource + imageSource), "no multi-page / growing-canvas code path exists");
+      assert(/readUInt32BE\(20\) !== CATALOG_PAGE\.height/.test(imageSource) && imageSource.includes("height: CATALOG_PAGE.height"), "the renderer hard-codes the A4 size and verifies the PNG header");
     });
 
-    await check("13. no quantities: nothing numeric from stock reaches the layout; simple / empty products produce no catalog", async () => {
+    await check("A4-ALL. EVERY rendered customer PNG is exactly 1240x1754 — and a failed fit renders nothing", async () => {
+      let rendered = 0;
+      for (const id of allProductIds) {
+        const result = await generateCustomerCatalogPng(id);
+        if (!result.ok) {
+          assert(result.reason === "NO_MODELS" || result.reason === "TOO_LARGE", "only the controlled failure states exist");
+          continue;
+        }
+        const info = png(result.png);
+        assert(info.signature === "PNG" && info.width === 1240 && info.height === 1754, `product ${id} rendered ${info.width}x${info.height}`);
+        assert(result.width === 1240 && result.height === 1754, "the result metadata says A4 too");
+        rendered += 1;
+      }
+      assert(rendered === 6, `6 supported products rendered, got ${rendered}`);
+    });
+
+    await check("13. short products still fill the sheet; very long lists keep readable rows instead of squeezing in a photo", async () => {
+      const { layout } = await layoutFor(shortProduct.id, 2);
+      assert(layout && layout.height === 1754, "A4");
+      const table = layout.tables[0]!;
+      assert(table.zone && table.zone.kind === "COLUMNS" && table.zone.columnCount === 1 && table.zone.firstColumn === 0, "the photo zone sits under the short APPLE column");
+      assert(table.height + layout.marginTop * 2 === 1754 && table.extraHeight > 0, "leftover page height goes to the photo zone (no blank footer)");
+      assert(table.zone.boxes.length === 2, "both photos fit the tall zone");
+      const dense = await layoutFor(longProduct.id, 1);
+      assert(dense.layout && dense.layout.rowHeight >= 30, "45 rows + a photo keep 30px+ rows (photo area only when rows stay comfortable)");
+      const crowded = buildCustomerCatalogLayout({ sheet: (await layoutFor(longProduct.id)).sheet, imageCount: 0 });
+      assert(crowded, "layout without photo");
+      const sixty = { ...(await layoutFor(longProduct.id)).sheet };
+      sixty.brands = sixty.brands.map((brand) => ({ ...brand, models: [...brand.models, ...Array.from({ length: 15 }, (_, i) => ({ modelId: `x${brand.brandId}${i}`, label: `Extra ${i}`, colors: [] }))] }));
+      const withPhoto = buildCustomerCatalogLayout({ sheet: sixty, imageCount: 2 });
+      assert(withPhoto && withPhoto.height === 1754 && withPhoto.rowHeight >= 22 && withPhoto.tables.every((table) => table.zone === null), "60 rows: no photo area is squeezed in, rows stay readable on one A4");
+    });
+
+    await check("14. no quantities: nothing numeric from stock reaches the layout; simple / empty products produce no catalog", async () => {
       const { layout } = await layoutFor(catalogProduct.id, 3);
       assert(layout, "layout built");
       const json = JSON.stringify(layout);
       assert(!json.split("iPhone Big4321").join("").includes("4321"), "the stock figure 4321 appears nowhere except inside that model's own name");
-      const texts = cellsOf(layout).map(modelText);
-      assert(texts.includes("iPhone Big4321"), "the model with 4321 in stock is listed by name only");
+      assert(cellsOf(layout).map(modelText).includes("iPhone Big4321"), "the model with 4321 in stock is listed by name only");
       assert(!/quantity|simpleWarehouseQuantity|byLocation/i.test(json), "layout has no quantity fields");
       assert((await layoutFor(simple.id)).layout === null, "a simple stock product has no model choices");
       assert((await layoutFor(lowStock.id)).layout === null, "nothing >= 5 -> no catalog");
@@ -333,7 +489,7 @@ async function main() {
       assert(!missing.ok && missing.reason === "NOT_FOUND", "unknown id is NOT_FOUND (HTTP 404)");
     });
 
-    await check("14. ADMIN-only route (401 without a session, 403 for any non-ADMIN role) and a modal action that never prefetches", async () => {
+    await check("15. ADMIN-only route (401 without a session, 403 for any non-ADMIN role) and a modal action that never prefetches", async () => {
       const route = fs.readFileSync(new URL("../src/app/admin/inventory/overview/product/[productId]/customer-image/route.ts", import.meta.url), "utf8");
       assert(route.includes("getSession()") && route.includes('"Unauthorized", 401') && route.includes("user.role !== ROLES.ADMIN") && route.includes('"Forbidden", 403'), "session + ADMIN gate with 401/403");
       assert(route.indexOf("user.role !== ROLES.ADMIN") < route.indexOf("generateCustomerCatalogPng("), "the gate runs before anything is generated");
@@ -344,7 +500,7 @@ async function main() {
       assert(anchorAt > modal.lastIndexOf("<Link", modal.indexOf("customer-image?download=1")), "plain <a>, not next/link (a PNG endpoint must never be prefetched)");
     });
 
-    await check("15. read-only: generating every catalog changes no inventory, movement, variant or product row; no write calls in the new code", async () => {
+    await check("16. read-only: generating every catalog changes no inventory, movement, variant or product row; no write calls in the new code", async () => {
       const before = await snapshot();
       for (const id of allProductIds) await generateCustomerCatalogPng(id);
       const after = await snapshot();
@@ -362,30 +518,34 @@ async function main() {
       assert(!/Product\.stock|\.stock\b/.test(sources) && !/REP_CAR/.test(sources), "no Product.stock and REP_CAR is never referenced in code");
     });
 
-    await check("16. PNG response: image/png + attachment filename, non-empty crisp 1080px-wide image, safe file names", async () => {
+    await check("17. PNG response: image/png + attachment filename, non-empty A4 image, safe file names", async () => {
       const route = fs.readFileSync(new URL("../src/app/admin/inventory/overview/product/[productId]/customer-image/route.ts", import.meta.url), "utf8");
       assert(route.includes('"Content-Type": "image/png"') && route.includes("attachment") && route.includes("customerImageFilename"), "route sets content type and a download name");
       const result = await generateCustomerCatalogPng(catalogProduct.id);
       assert(result.ok && result.png.byteLength > 20_000, "non-empty PNG bytes");
       const info = png(result.png);
-      assert(info.signature === "PNG" && info.width === 1080, "PNG signature, 1080 wide");
+      assert(info.signature === "PNG" && info.width === 1240 && info.height === 1754, "PNG signature, A4");
       assert(customerImageFilename("OVI177") === "OVI177-models.png", "plain SKU");
       assert(customerImageFilename('../we ird"/SKU:1') === "we_ird_SKU_1-models.png", "unsafe characters are neutralised");
       assert(customerImageFilename("") === "product-models.png", "empty SKU falls back");
     });
 
-    await check("17. right-to-left + fitting helpers: Arabic words become separate display items, Latin runs stay whole, text never needs more width than the box", async () => {
+    await check("18. right-to-left + single-line fitting: Arabic words are separate items, an exceptional long name shrinks ALONE and never wraps", async () => {
       assert(JSON.stringify(splitBidiItems("كفر iPhone 12 Pro مجسيف")) === JSON.stringify(["كفر", "iPhone 12 Pro", "مجسيف"]), "mixed run order");
       assert(JSON.stringify(splitBidiItems("جير فور")) === JSON.stringify(["جير", "فور"]), "arabic words are separate items");
       assert(JSON.stringify(splitBidiItems("iPhone 12 Pro Max")) === JSON.stringify(["iPhone 12 Pro Max"]), "latin text is one item");
       assert(hasArabic("ايفون") && hasArabic("ﻣﺮﺣﺒﺎ") && !hasArabic("Redmi"), "arabic detection (incl. presentation forms)");
-      for (const text of ["iPhone 14 Pro Max Plus Limited Edition", "Redmi-Note-12-Pro-Plus-5G-Global", "ايفون 12 برو ماكس", "A03"]) {
-        for (const width of [222, 472]) {
-          const block = fitText(text, width, { maxFontSize: 32, singleLineMinFontSize: 26, multiLineMinFontSize: 20, maxLines: 2 });
-          assert(block.height === block.lines.length * block.lineHeight, "height covers every line");
-          assert(block.lines.every((line) => line.split(" ").every((word) => estimateTextWidth(word, block.fontSize) <= width + 0.5)), `no word wider than the cell for "${text}" @${width}`);
-        }
+      assert(fitSingleLine("A03", 265, 20) === 20, "a short model keeps the full row font");
+      for (const text of ["iPhone 14 Pro Max Plus Limited Edition", "Redmi-Note-12-Pro-Plus-5G-Global"]) {
+        const size = fitSingleLine(text, 265, 20);
+        assert(size < 20 && size >= 12 && estimateTextWidth(text, size) <= 265 + 0.5, `"${text}" shrinks to fit ONE line (${size}px)`);
       }
+      const { sheet } = await layoutFor(catalogProduct.id);
+      const odd = { ...sheet, brands: [{ brandId: "b", label: "B", models: [{ modelId: "1", label: "A03", colors: [] }, { modelId: "2", label: "Redmi-Note-12-Pro-Plus-5G-Global", colors: [] }] }, { brandId: "c", label: "C", models: [{ modelId: "3", label: "S24", colors: [] }] }, { brandId: "d", label: "D", models: [{ modelId: "4", label: "P40", colors: [] }] }, { brandId: "e", label: "E", models: [{ modelId: "5", label: "X1", colors: [] }] }] };
+      const oddLayout = buildCustomerCatalogLayout({ sheet: odd, imageCount: 0 });
+      assert(oddLayout, "odd layout");
+      const [short, long] = oddLayout.tables[0]!.columns[0]!.cells;
+      assert(short!.fontSize === oddLayout.rowFontSize && long!.fontSize < oddLayout.rowFontSize, "only the exceptional name is smaller; the others keep the table font");
     });
 
     console.log("ALL PASS");
