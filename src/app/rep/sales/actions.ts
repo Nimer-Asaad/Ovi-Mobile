@@ -9,6 +9,7 @@ import { ACCOUNT_PAYMENT_ORIGINS, ADMIN_AUDIT_ACTIONS } from "@/lib/constants";
 import { repSaleSchema } from "@/lib/validation/repSale";
 import { recordReplacementPaymentSchema } from "@/lib/validation/accounts";
 import { createRepSaleCore } from "@/lib/rep-sales";
+import { normalizeSourceOrderIds, parseSourceOrderIdsField } from "@/lib/rep-customer-order-groups";
 import { correctSale } from "@/lib/sale-correction";
 import { cancelManualPayment } from "@/lib/payment-correction";
 import { recordManualAccountPayment } from "@/lib/accounts";
@@ -48,6 +49,7 @@ export async function createRepSale(_prevState: RepSaleState, formData: FormData
     address: formData.get("address")?.toString().trim() || undefined,
     notes: formData.get("notes")?.toString().trim() || undefined,
     repCustomerOrderId: formData.get("repCustomerOrderId")?.toString().trim() || null,
+    repCustomerOrderIds: parseSourceOrderIdsField(formData.get("repCustomerOrderIds")),
     discountCents: formData.get("discountCents")?.toString() || "0",
     paidNowCents: formData.get("paidNowCents")?.toString() ?? "0",
     paidNowMethod: formData.get("paidNowMethod")?.toString() || undefined,
@@ -77,7 +79,12 @@ export async function createRepSale(_prevState: RepSaleState, formData: FormData
               adminUserId: effectiveRep.realUser.id,
               targetUserId: effectiveRep.actingUserId,
               action: ADMIN_AUDIT_ACTIONS.IMPERSONATED_REP_SALE_CREATED,
-              newValue: { salesRepId: effectiveRep.repId, orderId: order.id, orderNumber: order.orderNumber },
+              newValue: {
+                salesRepId: effectiveRep.repId,
+                orderId: order.id,
+                orderNumber: order.orderNumber,
+                ...(normalizeSourceOrderIds(parsed.data).length > 0 ? { repCustomerOrderIds: normalizeSourceOrderIds(parsed.data) } : {}),
+              },
             },
           });
         }

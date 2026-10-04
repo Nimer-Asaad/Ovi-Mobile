@@ -12,6 +12,7 @@ import { resolveOrCreateRepMerchant } from "@/lib/rep-merchants";
 import { repStockTransferBatchSchema, repCarReturnSchema, type RepStockTransferBatchInput } from "@/lib/validation/reps";
 import { repSaleSchema } from "@/lib/validation/repSale";
 import { createRepSaleCore } from "@/lib/rep-sales";
+import { parseSourceOrderIdsField } from "@/lib/rep-customer-order-groups";
 import type { RepSaleState } from "@/app/rep/sales/actions";
 import {
   decrementInventoryAtomic,
@@ -729,6 +730,7 @@ export async function createRepSaleForRep(repId: string, _prevState: RepSaleStat
     address: formData.get("address")?.toString().trim() || undefined,
     notes: formData.get("notes")?.toString().trim() || undefined,
     repCustomerOrderId: formData.get("repCustomerOrderId")?.toString().trim() || null,
+    repCustomerOrderIds: parseSourceOrderIdsField(formData.get("repCustomerOrderIds")),
     discountCents: formData.get("discountCents")?.toString() || "0",
     paidNowCents: formData.get("paidNowCents")?.toString() ?? "0",
     paidNowMethod: formData.get("paidNowMethod")?.toString() || undefined,

@@ -43,6 +43,11 @@ export const repSaleSchema = z
      * freely first, `items` above always wins as the actual sale content.
      * Null/omitted for a normal blank sale. */
     repCustomerOrderId: z.string().nullable().optional(),
+    /** Every source customer order this sale consumes — the grouped
+     * "طلبات الزبائن" card of ONE customer submits all of that customer's
+     * OPEN orders here. createRepSaleCore completes ALL of them in the sale's
+     * own transaction (or none). Absent/empty for a blank sale. */
+    repCustomerOrderIds: z.array(z.string().min(1)).max(25, "عدد كبير جداً من الطلبيات في عملية بيع واحدة").optional(),
     /** خصم الفاتورة — a single fixed-money (agorot) discount applied to the
      * sale's chargeable subtotal (never a percentage, never per-line). 0 by
      * default. Bounds (0 <= discountCents <= chargeable subtotal) are

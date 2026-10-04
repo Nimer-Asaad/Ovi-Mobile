@@ -9,6 +9,7 @@ import { getOrCreateMerchantAccount, getAccountBalanceCents, lockAccountForBalan
 import { resolveOrCreateRepMerchant, RepMerchantAmbiguousPhoneError } from "@/lib/rep-merchants";
 import { calculateLineChargeCents, calculateChargeableSubtotalCents, validateBonusQuantity, validateInvoiceDiscount, calculateInvoiceTotalCents, derivePaymentStatus } from "@/lib/sale-pricing";
 import { generateDailyOrderNumber } from "@/lib/order-number";
+import { normalizeSourceOrderIds } from "@/lib/rep-customer-order-groups";
 import type { SaleProductOption } from "@/components/reps/ProductSalePicker";
 
 export function revalidateRepSalePaths(orderNumber: string): void {
@@ -140,7 +141,7 @@ export type CreateRepSaleResult = { ok: true; orderNumber: string } | { ok: fals
  * for-byte the same steps createRepSale always ran inline before this was
  * extracted. */
 export async function createRepSaleCore(input: RepSaleInput, context: CreateRepSaleContext): Promise<CreateRepSaleResult> {
-  const { items: saleItems, customerName, customerPhone, city, address, notes, repCustomerOrderId, discountCents, paidNowCents, paidNowMethod } = input;
+  const { items: saleItems, customerName, customerPhone, city, address, notes, discountCents, paidNowCents, paidNowMethod } = input;
   const { salesRepId, carStockLocationId: locationId, actorUserId, onOrderCreated } = context;
 
   // A customer order is only ever a starting template (see the
@@ -153,17 +154,34 @@ export async function createRepSaleCore(input: RepSaleInput, context: CreateRepS
   // with an admin cancellation) — the real single-use enforcement is the
   // atomic conditional update inside the transaction below, this is just an
   // early, cheap rejection.
-  if (repCustomerOrderId) {
-    const customerOrder = await prisma.repCustomerOrder.findUnique({
-      where: { id: repCustomerOrderId },
-      select: { salesRepId: true, status: true },
+  //
+  // A sale may consume SEVERAL templates: the grouped "طلبات الزبائن" card of
+  // one customer submits all of that customer's OPEN orders (see
+  // src/lib/rep-customer-order-groups.ts). Every id is validated here and all
+  // of them are completed together inside the transaction below — never a
+  // subset. Order.repCustomerOrderId is a single UNIQUE link, so the sale is
+  // linked to the OLDEST source; the others complete with the very same
+  // completedAt instant (traceable siblings).
+  const sourceOrderIds = normalizeSourceOrderIds(input);
+  let primarySourceOrderId: string | null = null;
+  if (sourceOrderIds.length > 0) {
+    const sources = await prisma.repCustomerOrder.findMany({
+      where: { id: { in: sourceOrderIds } },
+      select: { id: true, salesRepId: true, status: true, merchantId: true, createdAt: true },
     });
-    if (!customerOrder || customerOrder.salesRepId !== salesRepId) {
+    if (sources.length !== sourceOrderIds.length || sources.some((source) => source.salesRepId !== salesRepId)) {
       return { ok: false, error: "طلبية الزبون غير موجودة" };
     }
-    if (customerOrder.status !== REP_CUSTOMER_ORDER_STATUSES.OPEN) {
+    if (sources.some((source) => source.status !== REP_CUSTOMER_ORDER_STATUSES.OPEN)) {
       return { ok: false, error: "لم تعد هذه الطلبية نشطة" };
     }
+    // Several orders may only be combined when they provably belong to ONE
+    // customer (same real merchantId) — a tampered submission can never
+    // sweep different customers' orders into one sale.
+    if (sources.length > 1 && (sources.some((source) => !source.merchantId) || new Set(sources.map((source) => source.merchantId)).size !== 1)) {
+      return { ok: false, error: "الطلبيات المحددة لا تعود لنفس الزبون" };
+    }
+    primarySourceOrderId = [...sources].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id))[0]!.id;
   }
 
   const productIds = saleItems.map((item) => item.productId);
@@ -297,12 +315,15 @@ export async function createRepSaleCore(input: RepSaleInput, context: CreateRepS
         // cancelRepCustomerOrder) can never both succeed. Whichever lands
         // first wins; the other's whole sale transaction rolls back via the
         // thrown error below, exactly like the INACTIVE_VARIANT checks above.
-        if (repCustomerOrderId) {
+        if (sourceOrderIds.length > 0) {
+          // ALL sources or none: one conditional update over every id, whose
+          // count must equal the number submitted — otherwise the whole sale
+          // (stock, order, payment) rolls back via the throw below.
           const transitioned = await tx.repCustomerOrder.updateMany({
-            where: { id: repCustomerOrderId, status: REP_CUSTOMER_ORDER_STATUSES.OPEN },
+            where: { id: { in: sourceOrderIds }, salesRepId, status: REP_CUSTOMER_ORDER_STATUSES.OPEN },
             data: { status: REP_CUSTOMER_ORDER_STATUSES.COMPLETED, completedAt: new Date() },
           });
-          if (transitioned.count !== 1) throw new Error("CUSTOMER_ORDER_NOT_OPEN");
+          if (transitioned.count !== sourceOrderIds.length) throw new Error("CUSTOMER_ORDER_NOT_OPEN");
         }
 
         // Resolve this rep's trader for the sale by phone — reuses whichever
@@ -397,7 +418,7 @@ export async function createRepSaleCore(input: RepSaleInput, context: CreateRepS
             merchantId: merchant.id,
             accountId,
             createdByRepId: salesRepId,
-            repCustomerOrderId,
+            repCustomerOrderId: primarySourceOrderId,
             subtotalCents,
             discountCents,
             totalCents,

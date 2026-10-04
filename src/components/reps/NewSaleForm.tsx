@@ -20,6 +20,7 @@ import {
 } from "@/components/reps/ProductSalePicker";
 import { calculateInvoiceTotalCents } from "@/lib/sale-pricing";
 import type { RepCustomerOrderOption } from "@/lib/rep-customer-orders";
+import { groupCustomerOrders, requestedQuantityByProduct, type CustomerOrderGroup } from "@/lib/rep-customer-order-groups";
 
 export type { SaleProductOption } from "@/components/reps/ProductSalePicker";
 
@@ -137,7 +138,10 @@ export function NewSaleForm({ products, customers, customerOrders, action = crea
   const [paidNowInput, setPaidNowInput] = useState("0");
   const [paidNowMethod, setPaidNowMethod] = useState<string>(ACCOUNT_PAYMENT_METHODS.CASH);
 
-  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
+  // The selected "طلبات الزبائن" card: ALL of that customer's OPEN orders are
+  // imported together and submitted together (see handleSelectGroup).
+  const [selectedGroup, setSelectedGroup] = useState<{ key: string; orderIds: string[] } | null>(null);
+  const orderGroups = useMemo(() => groupCustomerOrders(customerOrders), [customerOrders]);
   const [orderNotices, setOrderNotices] = useState<string[]>([]);
 
   function handleQuantityChange(productKey: string, quantity: number) {
@@ -212,11 +216,12 @@ export function NewSaleForm({ products, customers, customerOrders, action = crea
    * silently dropped with a notice instead of crashing or submitting a
    * phantom line. Product prices are left untouched: the order never
    * carried one, so the rep still types it. */
-  function handleSelectOrder(order: RepCustomerOrderOption) {
-    const requestedByProduct = new Map<string, number>();
-    for (const item of order.items) {
-      requestedByProduct.set(item.productId, (requestedByProduct.get(item.productId) ?? 0) + item.quantity);
-    }
+  function handleSelectGroup(group: CustomerOrderGroup<RepCustomerOrderOption>) {
+    // One card = one customer. Several OPEN orders of the same customer
+    // (same merchantId — never merely the same name) arrive pre-combined:
+    // identical lines are already summed, and every source order id travels
+    // with the sale so the server completes them all, or none.
+    const requestedByProduct = requestedQuantityByProduct(group.lines);
 
     const notices: string[] = [];
     const nextQuantities: Record<string, number> = {};
@@ -238,13 +243,13 @@ export function NewSaleForm({ products, customers, customerOrders, action = crea
     }
     setQuantities(nextQuantities);
     setBonusQuantities({});
-    setCustomerName(order.customerName);
+    setCustomerName(group.customerName);
     setCustomerPhone("");
     setCity("");
     setAddress("");
     setCustomerPicked(false);
     setCurrentBalanceCents(null);
-    setSelectedOrderId(order.id);
+    setSelectedGroup({ key: group.key, orderIds: group.orderIds });
     setOrderNotices(notices);
   }
 
@@ -260,7 +265,7 @@ export function NewSaleForm({ products, customers, customerOrders, action = crea
     setNotes("");
     setCustomerPicked(false);
     setCurrentBalanceCents(null);
-    setSelectedOrderId(null);
+    setSelectedGroup(null);
     setOrderNotices([]);
     setPaidNowInput("0");
     setPaidNowMethod(ACCOUNT_PAYMENT_METHODS.CASH);
@@ -313,7 +318,7 @@ export function NewSaleForm({ products, customers, customerOrders, action = crea
     <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
       <form action={formAction} className="order-1 flex min-w-0 flex-1 flex-col gap-6 lg:order-2">
         <input type="hidden" name="items" value={itemsJson} />
-        <input type="hidden" name="repCustomerOrderId" value={selectedOrderId ?? ""} />
+        <input type="hidden" name="repCustomerOrderIds" value={JSON.stringify(selectedGroup?.orderIds ?? [])} />
         <input type="hidden" name="discountCents" value={discountInput} />
         <input type="hidden" name="paidNowCents" value={paidNowInput} />
         <input type="hidden" name="paidNowMethod" value={paidNowMethod} />
@@ -544,7 +549,7 @@ export function NewSaleForm({ products, customers, customerOrders, action = crea
       </form>
 
       <div className="order-2 flex w-full flex-col gap-3 lg:order-1 lg:w-72 lg:shrink-0">
-        <Button type="button" variant={selectedOrderId ? "outline" : "primary"} onClick={handleStartBlankSale}>
+        <Button type="button" variant={selectedGroup ? "outline" : "primary"} onClick={handleStartBlankSale}>
           بيع جديد فارغ
         </Button>
 
@@ -557,13 +562,13 @@ export function NewSaleForm({ products, customers, customerOrders, action = crea
               <p className="py-6 text-center text-sm text-neutral-bg/50">لا توجد طلبات زبائن نشطة حالياً</p>
             ) : (
               <div className="flex flex-col gap-2">
-                {customerOrders.map((order) => {
-                  const isSelected = selectedOrderId === order.id;
+                {orderGroups.map((group) => {
+                  const isSelected = selectedGroup?.key === group.key;
                   return (
                     <button
-                      key={order.id}
+                      key={group.key}
                       type="button"
-                      onClick={() => handleSelectOrder(order)}
+                      onClick={() => handleSelectGroup(group)}
                       aria-pressed={isSelected}
                       className={cn(
                         "rounded-card border px-3 py-2 text-start transition-colors",
@@ -573,12 +578,13 @@ export function NewSaleForm({ products, customers, customerOrders, action = crea
                       )}
                     >
                       <p className={cn("text-sm font-medium", isSelected ? "text-gold-champagne" : "text-neutral-bg")}>
-                        {order.customerName}
+                        {group.customerName}
                       </p>
                       <p className="mt-0.5 text-xs text-neutral-bg/50">
-                        {order.itemCount} صنف — {order.totalQuantity} قطعة
+                        {group.orderCount > 1 ? `${group.orderCount} طلبيات — ` : ""}
+                        {group.itemCount} صنف — {group.totalQuantity} قطعة
                       </p>
-                      <p className="text-xs text-neutral-bg/40">{new Date(order.createdAt).toLocaleDateString("ar")}</p>
+                      <p className="text-xs text-neutral-bg/40">{new Date(group.createdAt).toLocaleDateString("ar")}</p>
                     </button>
                   );
                 })}

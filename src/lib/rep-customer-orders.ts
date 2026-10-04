@@ -12,6 +12,10 @@ export interface RepCustomerOrderItemOption {
 export interface RepCustomerOrderOption {
   id: string;
   customerName: string;
+  /** RepCustomerOrder.merchantId — the stable customer identity the sale
+   * page groups by (never the display name); null for a legacy order. */
+  merchantId: string | null;
+  merchantName: string | null;
   createdAt: Date;
   itemCount: number;
   totalQuantity: number;
@@ -32,6 +36,8 @@ export async function getOpenCustomerOrdersForRep(salesRepId: string): Promise<R
     select: {
       id: true,
       customerName: true,
+      merchantId: true,
+      merchant: { select: { businessName: true } },
       createdAt: true,
       items: { select: { productId: true, variantId: true, deviceColorVariantId: true, quantity: true } },
     },
@@ -40,6 +46,8 @@ export async function getOpenCustomerOrdersForRep(salesRepId: string): Promise<R
   return orders.map((order) => ({
     id: order.id,
     customerName: order.customerName,
+    merchantId: order.merchantId,
+    merchantName: order.merchant?.businessName ?? null,
     createdAt: order.createdAt,
     itemCount: order.items.length,
     totalQuantity: order.items.reduce((sum, item) => sum + item.quantity, 0),
