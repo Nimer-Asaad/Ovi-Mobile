@@ -21,6 +21,7 @@
     "verify:rep-payment-attribution": "node --conditions=react-server --import tsx prisma/verify-rep-payment-attribution.ts",
     "verify:rep-month-sales": "node --conditions=react-server --import tsx prisma/verify-rep-month-sales.ts",
     "verify:product-availability-sheet": "node --conditions=react-server --import tsx prisma/verify-product-availability-sheet.ts",
+    "verify:customer-catalog-image": "node --conditions=react-server --import tsx prisma/verify-customer-catalog-image.ts",
     "postinstall": "prisma generate",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",

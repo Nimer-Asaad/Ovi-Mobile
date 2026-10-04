@@ -164,9 +164,13 @@ export function visibleColorLabels(colors: AvailabilityColor[]): string[] {
 /** Pure presentation: lays the already-filtered brands out as brand-column
  * tables. Brands are spread evenly over ceil(n / 3) tables (4 -> 2+2,
  * 5 -> 3+2, 7 -> 3+2+2) so no table is left with a lone column. */
-export function buildAvailabilityTables(brands: AvailabilityBrand[], showColors: boolean): AvailabilityTable[] {
+export function buildAvailabilityTables(
+  brands: AvailabilityBrand[],
+  showColors: boolean,
+  maxBrandColumns: number = MAX_BRAND_COLUMNS_PER_TABLE,
+): AvailabilityTable[] {
   if (brands.length === 0) return [];
-  const tableCount = Math.ceil(brands.length / MAX_BRAND_COLUMNS_PER_TABLE);
+  const tableCount = Math.ceil(brands.length / Math.max(1, maxBrandColumns));
   // Balanced split (sizes differ by at most one): 4 -> 2+2, 5 -> 3+2, 7 -> 3+2+2.
   const baseSize = Math.floor(brands.length / tableCount);
   const largerTables = brands.length % tableCount;

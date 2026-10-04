@@ -364,6 +364,17 @@ function ProductInventoryDetailModal({
                 >
                   جرد الصنف
                 </Link>
+                {product.displayMode !== "TOTAL_STOCK" && (
+                  // Plain <a> on purpose (not next/link): this URL generates a PNG, so it must never be prefetched.
+                  <a
+                    href={`/admin/inventory/overview/product/${product.id}/customer-image?download=1`}
+                    download
+                    title="صورة جاهزة للإرسال للزبون على واتساب — الموديلات المتوفرة في المخزن فقط، بدون كميات"
+                    className="inline-block rounded-card border border-gold-champagne/40 px-3 py-1 text-xs text-gold-dark transition-colors hover:bg-gold-champagne/10"
+                  >
+                    صورة للزبون
+                  </a>
+                )}
               </div>
             )}
           </div>
