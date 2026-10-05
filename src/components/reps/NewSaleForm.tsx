@@ -21,10 +21,23 @@ import {
 import { calculateInvoiceTotalCents } from "@/lib/sale-pricing";
 import type { RepCustomerOrderOption } from "@/lib/rep-customer-orders";
 import { groupCustomerOrders, requestedQuantityByProduct, type CustomerOrderGroup } from "@/lib/rep-customer-order-groups";
+import {
+  editSaleCustomerField,
+  editSaleCustomerName,
+  emptySaleCustomer,
+  initialSaleCustomer,
+  pickSaleCustomer,
+  selectGroupSaleCustomer,
+  type SaleCustomerFormState,
+} from "@/lib/rep-sale-customer-form";
 
 export type { SaleProductOption } from "@/components/reps/ProductSalePicker";
 
 export interface SaleCustomerOption {
+  /** Merchant.id of a real known trader — lets a grouped "طلبات الزبائن"
+   * card fill this customer by identity (never by name). Absent for the
+   * merchantId-prefilled initialCustomer. */
+  id?: string;
   name: string;
   phone: string;
   city: string | null;
@@ -112,12 +125,12 @@ export function NewSaleForm({ products, customers, customerOrders, action = crea
   // validateInvoiceDiscount) is the real authority — this is only a preview.
   const [discountInput, setDiscountInput] = useState("0");
 
-  const [customerName, setCustomerName] = useState(initialCustomer?.name ?? "");
-  const [customerPhone, setCustomerPhone] = useState(initialCustomer?.phone ?? "");
-  const [city, setCity] = useState(initialCustomer?.city ?? "");
-  const [address, setAddress] = useState(initialCustomer?.address ?? "");
+  // ONE canonical customer state (see src/lib/rep-sale-customer-form.ts): the
+  // visible inputs below bind straight to it, so an auto-filled phone and a
+  // typed phone are the same value everywhere — display, validation, submit.
+  const [customer, setCustomer] = useState<SaleCustomerFormState>(() => initialSaleCustomer(initialCustomer));
+  const { name: customerName, phone: customerPhone, city, address, picked: customerPicked, balanceCents: currentBalanceCents } = customer;
   const [notes, setNotes] = useState("");
-  const [customerPicked, setCustomerPicked] = useState(Boolean(initialCustomer));
 
   // The selected trader's account balance BEFORE this sale — null means "no
   // known merchant resolved yet" (a brand-new name/phone the rep is still
@@ -126,7 +139,7 @@ export function NewSaleForm({ products, customers, customerOrders, action = crea
   // below). Only ever set from a REAL SaleCustomerOption (a known contact or
   // the merchantId-prefilled initialCustomer) — never guessed or computed
   // client-side.
-  const [currentBalanceCents, setCurrentBalanceCents] = useState<number | null>(initialCustomer?.currentBalanceCents ?? null);
+  // (currentBalanceCents is part of the canonical customer state above.)
 
   // "المبلغ المدفوع الآن" — how much of this invoice the trader is paying
   // right now, 0 by default (the normal "fully on account" case). Kept as
@@ -172,14 +185,8 @@ export function NewSaleForm({ products, customers, customerOrders, action = crea
    * brand-new phone themselves, so a stale phone can never silently survive
    * a name edit. */
   function handleCustomerNameChange(event: ChangeEvent<HTMLInputElement>) {
-    setCustomerName(event.target.value);
-    if (customerPicked) {
-      setCustomerPhone("");
-      setCity("");
-      setAddress("");
-    }
-    setCustomerPicked(false);
-    setCurrentBalanceCents(null);
+    const value = event.target.value;
+    setCustomer((previous) => editSaleCustomerName(previous, value));
   }
 
   const filteredCustomers = useMemo(() => {
@@ -191,21 +198,19 @@ export function NewSaleForm({ products, customers, customerOrders, action = crea
       .slice(0, 8);
   }, [customerName, customers, customerPicked]);
 
-  function handlePickCustomer(customer: SaleCustomerOption) {
-    setCustomerName(customer.name);
-    setCustomerPhone(customer.phone);
-    setCity(customer.city ?? "");
-    setAddress(customer.address ?? "");
-    setCustomerPicked(true);
-    setCurrentBalanceCents(customer.currentBalanceCents);
+  function handlePickCustomer(contact: SaleCustomerOption) {
+    setCustomer(pickSaleCustomer(contact));
   }
 
   /** Selecting a customer order REPLACES the current selection/customer name
    * with that order's template — it's a fresh starting point, not a merge
    * with whatever the rep had already been building manually (matches how
-   * clicking a second, different order should behave too). Phone/city/
-   * address are cleared rather than left stale, since the order itself only
-   * ever carries a name — see the RepCustomerOrder doc comment.
+   * clicking a second, different order should behave too). The customer
+   * fields are replaced as ONE unit (selectGroupSaleCustomer): a card whose
+   * merchantId is a known contact with a stored phone fills name, phone, city,
+   * address and balance; any other card sets only the name and clears the rest,
+   * since the order itself only ever carries a name (never a phone) — see the
+   * RepCustomerOrder doc comment. Never matched by name.
    *
    * The order's own lines are still stored per phone model (that's the
    * WAREHOUSE-side breakdown the admin picked when loading the car — see
@@ -243,12 +248,11 @@ export function NewSaleForm({ products, customers, customerOrders, action = crea
     }
     setQuantities(nextQuantities);
     setBonusQuantities({});
-    setCustomerName(group.customerName);
-    setCustomerPhone("");
-    setCity("");
-    setAddress("");
-    setCustomerPicked(false);
-    setCurrentBalanceCents(null);
+    // A card whose customer (merchantId) is a known contact with a stored
+    // phone fills name + phone + city + address + balance in one step, exactly
+    // like picking that contact from the suggestions; otherwise only the name
+    // is set and the rep enters the phone (nothing is invented).
+    setCustomer(selectGroupSaleCustomer(group, customers));
     setSelectedGroup({ key: group.key, orderIds: group.orderIds });
     setOrderNotices(notices);
   }
@@ -258,13 +262,8 @@ export function NewSaleForm({ products, customers, customerOrders, action = crea
     setProductPrices({});
     setBonusQuantities({});
     setDiscountInput("0");
-    setCustomerName("");
-    setCustomerPhone("");
-    setCity("");
-    setAddress("");
+    setCustomer(emptySaleCustomer());
     setNotes("");
-    setCustomerPicked(false);
-    setCurrentBalanceCents(null);
     setSelectedGroup(null);
     setOrderNotices([]);
     setPaidNowInput("0");
@@ -511,20 +510,33 @@ export function NewSaleForm({ products, customers, customerOrders, action = crea
               name="customerPhone"
               label="هاتف العميل"
               value={customerPhone}
-              onChange={(event) => setCustomerPhone(event.target.value)}
+              onChange={(event) => {
+                const value = event.target.value;
+                setCustomer((previous) => editSaleCustomerField(previous, "phone", value));
+              }}
+              // Same as the name field: the browser must never silently fill a
+              // value React does not hold (the customer's phone only ever
+              // comes from a picked contact, a card, or the rep's own typing).
+              autoComplete="off"
               required
             />
             <Input
               name="city"
               label="المدينة / المنطقة (اختياري)"
               value={city}
-              onChange={(event) => setCity(event.target.value)}
+              onChange={(event) => {
+                const value = event.target.value;
+                setCustomer((previous) => editSaleCustomerField(previous, "city", value));
+              }}
             />
             <Input
               name="address"
               label="العنوان (اختياري)"
               value={address}
-              onChange={(event) => setAddress(event.target.value)}
+              onChange={(event) => {
+                const value = event.target.value;
+                setCustomer((previous) => editSaleCustomerField(previous, "address", value));
+              }}
             />
             <Textarea
               name="notes"
