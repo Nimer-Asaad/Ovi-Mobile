@@ -9,11 +9,16 @@ import { ProductThumbnail } from "@/components/catalog/ProductThumbnail";
 import { ProductImagePlaceholder } from "@/components/catalog/ProductImagePlaceholder";
 import { LOW_STOCK_THRESHOLD } from "@/lib/constants";
 import type { InventoryOverviewLocation, InventoryOverviewProduct, InventoryOverviewDimensionGroup } from "@/lib/inventory-overview";
+import { brandIdForModel, deviceModelQuantity, filterOverviewProducts, type DeviceFilterBrand, type DeviceModelQuantity } from "@/lib/inventory-device-filter";
 
 export interface CompanyInventoryOverviewProps {
   locations: InventoryOverviewLocation[];
   categories: { id: string; label: string }[];
   products: InventoryOverviewProduct[];
+  /** Active phone brands → active models for the "حسب نوع الجهاز" filter. */
+  deviceBrands?: DeviceFilterBrand[];
+  /** ?deviceModelId from the URL, already validated by the page ("" = off). */
+  initialDeviceModelId?: string;
   /** ADMIN only — shows the "طباعة كشف المنتج" link in the product modal. */
   canPrintProduct?: boolean;
 }
@@ -70,12 +75,41 @@ function groupDimensions(groups: InventoryOverviewDimensionGroup[]): BrandGroup[
   return [...byBrand.values()];
 }
 
+/** Secondary "لهذا الجهاز" line shown under the unchanged main quantity when a
+ * device is selected. Only warehouse stock is tracked per phone model; rep-car
+ * stock is one product-level balance, so it is never attributed to the model —
+ * it is named separately instead (see deviceModelQuantity). */
+function DeviceModelLine({ info }: { info: DeviceModelQuantity }) {
+  const { modelQuantity, hasModelScope, unattributedQuantity } = info;
+  if (!hasModelScope) {
+    return (
+      <p className="text-[11px] text-gold-champagne" data-testid="device-qty">
+        {unattributedQuantity > 0 ? "لهذا الجهاز: غير محدد — مخزون السيارات بدون تفصيل موديل" : "لهذا الجهاز: 0"}
+      </p>
+    );
+  }
+  return (
+    <>
+      <p className="text-[11px] text-gold-champagne" data-testid="device-qty">
+        لهذا الجهاز: {modelQuantity}
+        {unattributedQuantity > 0 ? " في المخزن" : ""}
+      </p>
+      {unattributedQuantity > 0 && <p className="text-[10px] text-neutral-bg/50">+ {unattributedQuantity} في السيارات بدون تفصيل موديل</p>}
+    </>
+  );
+}
+
 /** Visual, read-only stock catalog for ADMIN/ADMIN_ASSISTANT — every number
  * shown here is a pre-computed field already handed down from
  * buildInventoryOverviewData (server-side, sourced from InventoryItem rows).
  * This component only selects/sums/sorts/filters those numbers for display;
  * it never recomputes stock itself and never calls a mutation. */
-export function CompanyInventoryOverview({ locations, categories, products, canPrintProduct = false }: CompanyInventoryOverviewProps) {
+export function CompanyInventoryOverview({ locations, categories, products, deviceBrands = [], initialDeviceModelId = "", canPrintProduct = false }: CompanyInventoryOverviewProps) {
+  // "حسب نوع الجهاز": a pure product SELECTION filter (compatible with the
+  // chosen phone model) — it never touches the quantity calculation below.
+  const [deviceMode, setDeviceMode] = useState(Boolean(initialDeviceModelId));
+  const [deviceBrandId, setDeviceBrandId] = useState(() => brandIdForModel(deviceBrands, initialDeviceModelId));
+  const [deviceModelId, setDeviceModelId] = useState(initialDeviceModelId);
   const [scope, setScope] = useState<Scope>("COMPANY");
   const [selectedRepId, setSelectedRepId] = useState("");
   const [search, setSearch] = useState("");
@@ -115,40 +149,45 @@ export function CompanyInventoryOverview({ locations, categories, products, canP
     }
   }, [scope, warehouseLocationIds, repCarLocationIds, selectedRepLocation]);
 
-  const visibleProducts = useMemo(() => {
-    const trimmedQuery = search.trim().toLowerCase();
-    const withScopeTotal = products.map((product) => ({
-      product,
-      scopeTotal: sumRecord(product.byLocation, scopeLocationIds),
-    }));
+  // The shared pipeline (src/lib/inventory-device-filter.ts): scope quantity →
+  // device / category / search → zero stock → sort.
+  const visibleProducts = useMemo(
+    () => filterOverviewProducts(products, { scopeLocationIds, deviceModelId, categoryId, search, showZeroStock, sort }),
+    [products, scopeLocationIds, deviceModelId, categoryId, search, showZeroStock, sort],
+  );
 
-    let filtered = withScopeTotal.filter(({ product }) => {
-      if (categoryId && product.categoryId !== categoryId) return false;
-      if (trimmedQuery) {
-        const haystack = `${product.name} ${product.nameAr ?? ""} ${product.sku}`.toLowerCase();
-        if (!haystack.includes(trimmedQuery)) return false;
-      }
-      return true;
-    });
+  const deviceModels = useMemo(() => deviceBrands.find((brand) => brand.id === deviceBrandId)?.models ?? [], [deviceBrands, deviceBrandId]);
 
-    if (!showZeroStock) {
-      filtered = filtered.filter(({ scopeTotal }) => scopeTotal > 0);
+  // Keeps ?deviceModelId in the address bar (refresh / share) without a
+  // server round-trip — the dataset is already in the page.
+  function syncDeviceUrl(modelId: string) {
+    try {
+      const url = new URL(window.location.href);
+      if (modelId) url.searchParams.set("deviceModelId", modelId);
+      else url.searchParams.delete("deviceModelId");
+      window.history.replaceState(window.history.state, "", url);
+    } catch {
+      /* the filter still works without the URL */
     }
-
-    filtered.sort((a, b) => {
-      switch (sort) {
-        case "highest":
-          return b.scopeTotal - a.scopeTotal;
-        case "lowest":
-          return a.scopeTotal - b.scopeTotal;
-        case "name":
-        default:
-          return (a.product.nameAr ?? a.product.name).localeCompare(b.product.nameAr ?? b.product.name);
-      }
-    });
-
-    return filtered;
-  }, [products, scopeLocationIds, categoryId, search, showZeroStock, sort]);
+  }
+  function chooseDeviceMode(on: boolean) {
+    setDeviceMode(on);
+    if (!on) clearDeviceFilter();
+  }
+  function clearDeviceFilter() {
+    setDeviceBrandId("");
+    setDeviceModelId("");
+    syncDeviceUrl("");
+  }
+  function chooseDeviceBrand(brandId: string) {
+    setDeviceBrandId(brandId);
+    setDeviceModelId("");
+    syncDeviceUrl("");
+  }
+  function chooseDeviceModel(modelId: string) {
+    setDeviceModelId(modelId);
+    syncDeviceUrl(modelId);
+  }
 
   return (
     <div className="flex flex-col gap-6">
@@ -197,6 +236,59 @@ export function CompanyInventoryOverview({ locations, categories, products, canP
           </Select>
         </div>
 
+        {deviceBrands.length > 0 && (
+          <div className="flex flex-col gap-3 border-t border-navy-soft pt-4" data-testid="device-filter">
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                aria-pressed={!deviceMode}
+                onClick={() => chooseDeviceMode(false)}
+                className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                  !deviceMode ? "border-gold-champagne/60 bg-gold-champagne/10 text-gold-champagne" : "border-navy-soft text-neutral-bg/70"
+                }`}
+              >
+                كل الأصناف
+              </button>
+              <button
+                type="button"
+                aria-pressed={deviceMode}
+                onClick={() => chooseDeviceMode(true)}
+                className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                  deviceMode ? "border-gold-champagne/60 bg-gold-champagne/10 text-gold-champagne" : "border-navy-soft text-neutral-bg/70"
+                }`}
+              >
+                حسب نوع الجهاز
+              </button>
+              {deviceMode && deviceModelId && (
+                <button type="button" onClick={() => chooseDeviceMode(false)} className="text-xs text-gold-dark underline-offset-2 hover:underline">
+                  مسح فلتر الجهاز
+                </button>
+              )}
+            </div>
+
+            {deviceMode && (
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <Select label="الماركة" value={deviceBrandId} onChange={(event) => chooseDeviceBrand(event.target.value)}>
+                  <option value="">— اختر الماركة —</option>
+                  {deviceBrands.map((brand) => (
+                    <option key={brand.id} value={brand.id}>
+                      {brand.label}
+                    </option>
+                  ))}
+                </Select>
+                <Select label="نوع الجهاز" value={deviceModelId} onChange={(event) => chooseDeviceModel(event.target.value)} disabled={!deviceBrandId}>
+                  <option value="">{deviceBrandId ? "— اختر نوع الجهاز —" : "اختر الماركة أولاً"}</option>
+                  {deviceModels.map((model) => (
+                    <option key={model.id} value={model.id}>
+                      {model.label}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="flex flex-wrap items-center justify-between gap-3">
           <label className="flex items-center gap-2 text-sm text-neutral-bg/80">
             <input
@@ -222,7 +314,9 @@ export function CompanyInventoryOverview({ locations, categories, products, canP
       </div>
 
       {visibleProducts.length === 0 ? (
-        <p className="py-12 text-center text-sm text-neutral-bg/50">لا توجد منتجات مطابقة</p>
+        <p className="py-12 text-center text-sm text-neutral-bg/50">
+          {deviceModelId ? "لا توجد أصناف متوافقة مع هذا الجهاز ضمن الفلاتر الحالية." : "لا توجد منتجات مطابقة"}
+        </p>
       ) : (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
           {visibleProducts.map(({ product, scopeTotal }) => {
@@ -256,6 +350,7 @@ export function CompanyInventoryOverview({ locations, categories, products, canP
                   <p className="line-clamp-2 text-xs font-medium text-neutral-bg">{product.nameAr ?? product.name}</p>
                   <p className="text-[11px] text-neutral-bg/50">{product.sku}</p>
                   <p className="mt-auto text-[11px] text-neutral-bg/70">المتوفر: {scopeTotal} قطعة</p>
+                  {deviceModelId && <DeviceModelLine info={deviceModelQuantity(product, deviceModelId, scopeLocationIds, warehouseLocationIds)} />}
                   {!product.isActive && (
                     <Badge variant="neutral" className="self-start">
                       غير نشط
