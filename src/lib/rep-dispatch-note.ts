@@ -1,9 +1,12 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
 import { STOCK_LOCATION_TYPES } from "@/lib/constants";
+import { assertGroupsReconcile, classifyDispatchProduct, groupDispatchQuantities, type DispatchGroupKey, type DispatchGroupRow } from "@/lib/rep-dispatch-groups";
 
-/** "إرسالية مخزون سيارة المندوب" — the printable hand-over note for one
- * representative's car.
+/** "إرسالية مخزون سيارة المندوب" — the printable hand-over SUMMARY for one
+ * representative's car: a few business groups (كوابل، شواحن، ستكرات، …) each
+ * with its total quantity — see src/lib/rep-dispatch-groups.ts — instead of one
+ * row per product.
  *
  * SOURCE OF TRUTH: the canonical current REP_CAR InventoryItem rows of that
  * rep's own car location with quantity > 0 — exactly the rows
@@ -33,15 +36,18 @@ export interface DispatchNoteRow {
   /** Arabic name when present, else the base name. */
   name: string;
   categoryName: string | null;
-  /** Current quantity in the rep's car — a positive integer, the number the
-   * physical count is checked against. */
+  /** Current quantity in the rep's car — a positive integer. */
   quantity: number;
+  /** The ONE business group this product belongs to. */
+  groupKey: DispatchGroupKey;
 }
 
 export interface DispatchNoteTotals {
-  /** Distinct positive REP-car product lines shown. */
-  itemCount: number;
-  /** Exact sum of the visible quantity column. */
+  /** Distinct positive REP-car products behind the note (NOT printed as rows). */
+  productCount: number;
+  /** Printed group rows. */
+  groupCount: number;
+  /** Exact sum of the printed group quantities (= every product's quantity). */
   totalPieces: number;
 }
 
@@ -68,6 +74,7 @@ export function buildDispatchNoteRows(items: DispatchNoteRawItem[]): DispatchNot
       name: item.product.nameAr?.trim() || item.product.name,
       categoryName: item.product.category ? item.product.category.nameAr?.trim() || item.product.category.name : null,
       quantity: item.quantity,
+      groupKey: classifyDispatchProduct(item.product),
     });
   }
   return [...byProduct.values()].sort((a, b) => {
@@ -81,10 +88,13 @@ export function buildDispatchNoteRows(items: DispatchNoteRawItem[]): DispatchNot
   });
 }
 
-/** The two totals, derived from the VISIBLE rows only — the sheet can never
- * show a total that differs from the sum of its own quantity cells. */
-export function summarizeDispatchNote(rows: DispatchNoteRow[]): DispatchNoteTotals {
-  return { itemCount: rows.length, totalPieces: rows.reduce((sum, row) => sum + row.quantity, 0) };
+/** The totals, derived from the PRINTED groups: the pieces total is the exact
+ * sum of the visible group quantities, and — because every product is in
+ * exactly one group — also the exact sum of every product's quantity. Throws if
+ * a product were ever lost or counted twice. */
+export function summarizeDispatchNote(rows: DispatchNoteRow[], groups: DispatchGroupRow[]): DispatchNoteTotals {
+  assertGroupsReconcile(rows, groups);
+  return { productCount: rows.length, groupCount: groups.length, totalPieces: groups.reduce((sum, group) => sum + group.quantity, 0) };
 }
 
 const BUSINESS_TIMEZONE = "Asia/Hebron";
@@ -133,8 +143,13 @@ export interface RepDispatchNoteData {
   repPhone: string | null;
   /** The car's StockLocation.name when the rep has one. */
   carLocationName: string | null;
+  /** The underlying products (NOT printed — the detailed inventory sheet
+   * is the place for those). */
   rows: DispatchNoteRow[];
-  itemCount: number;
+  /** What is printed: one row per non-empty group, in the fixed business order. */
+  groups: DispatchGroupRow[];
+  productCount: number;
+  groupCount: number;
   totalPieces: number;
 }
 
@@ -169,6 +184,7 @@ export async function loadRepDispatchNote(repId: string, now: Date = new Date())
     : [];
 
   const rows = buildDispatchNoteRows(items);
+  const groups = groupDispatchQuantities(rows);
   return {
     reference: formatDispatchReference(rep.employeeCode, now),
     date: formatDispatchDate(now),
@@ -178,6 +194,7 @@ export async function loadRepDispatchNote(repId: string, now: Date = new Date())
     repPhone: rep.user.phone,
     carLocationName: rep.carStockLocation?.name ?? null,
     rows,
-    ...summarizeDispatchNote(rows),
+    groups,
+    ...summarizeDispatchNote(rows, groups),
   };
 }
