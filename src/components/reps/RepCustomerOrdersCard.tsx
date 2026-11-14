@@ -201,18 +201,33 @@ export interface RepCustomerOrdersCardProps {
  * for exactly how grouping/dedup is decided). A completed template's own
  * resulting sale is never listed a second time here, and no two rows here
  * ever represent the same real event twice. */
+/** How many rows the card shows before the admin asks for "عرض كل الطلبات". */
+const COLLAPSED_ROW_COUNT = 10;
+
 export function RepCustomerOrdersCard({ repId, rows, merchants }: RepCustomerOrdersCardProps) {
+  // The page loads EVERY order of this rep; the card starts compact (latest
+  // rows) and expands/collapses client-side — no reload, no query.
+  const [expanded, setExpanded] = useState(false);
+  const canCollapse = rows.length > COLLAPSED_ROW_COUNT;
+  const visibleRows = canCollapse && !expanded ? rows.slice(0, COLLAPSED_ROW_COUNT) : rows;
+  const toggleButton = canCollapse ? (
+    <Button type="button" variant="outline" size="sm" onClick={() => setExpanded((value) => !value)}>
+      {expanded ? "عرض أقل" : `عرض كل الطلبات (${rows.length})`}
+    </Button>
+  ) : null;
+
   return (
     <Card>
-      <CardHeader>
+      <CardHeader className="flex flex-row items-center justify-between gap-3">
         <CardTitle>طلبات الزبائن</CardTitle>
+        {toggleButton}
       </CardHeader>
       <CardContent>
         {rows.length === 0 ? (
           <p className="py-6 text-center text-sm text-neutral-bg/50">لا توجد طلبات زبائن بعد</p>
         ) : (
           <div className="flex flex-col divide-y divide-navy-soft">
-            {rows.map((row) => {
+            {visibleRows.map((row) => {
               if (row.kind === "merchantGroup") {
                 return <MerchantGroupRow key={row.id} repId={repId} row={row} merchants={merchants} />;
               }
@@ -241,6 +256,8 @@ export function RepCustomerOrdersCard({ repId, rows, merchants }: RepCustomerOrd
             })}
           </div>
         )}
+        {/* the same button at the bottom, so a long expanded list can be collapsed without scrolling back up */}
+        {expanded && toggleButton && <div className="mt-3 flex justify-center">{toggleButton}</div>}
       </CardContent>
     </Card>
   );

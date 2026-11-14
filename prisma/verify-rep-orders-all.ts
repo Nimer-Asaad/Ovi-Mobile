@@ -184,11 +184,12 @@ async function main() {
     assert(!full.some((row) => row.kind === "sale" && row.orderNumber === orderB), "another rep's sale is never in this rep's list");
   });
 
-  await check("2. wiring: the page loads every order; the card has NO cancel/return control and no show-all toggle; loader stays read-only", async () => {
+  await check("2. wiring: the page loads every order; the card has NO cancel/return control and a compact/expand toggle; loader stays read-only", async () => {
     const page = codeOnly(read("../src/app/admin/reps/[id]/page.tsx"));
     assert(/requireRole\(\[ROLES\.ADMIN\]\)/.test(page) && page.includes("getRepCustomerEngagementRows(rep.id, 10, { all: true })"), "ADMIN-only page, every order loaded");
     const card = codeOnly(read("../src/components/reps/RepCustomerOrdersCard.tsx"));
-    assert(!card.includes("إلغاء وإرجاع للسيارة") && !card.includes("correctRepOrderSale") && !card.includes("CorrectionDialog") && !card.includes("orders=all"), "no sale cancel/return control, no toggle");
+    assert(!card.includes("إلغاء وإرجاع للسيارة") && !card.includes("correctRepOrderSale") && !card.includes("CorrectionDialog") && !card.includes("orders=all"), "no sale cancel/return control, no URL toggle");
+    assert(card.includes("COLLAPSED_ROW_COUNT = 10") && card.includes("عرض كل الطلبات") && card.includes("عرض أقل") && card.includes("rows.slice(0, COLLAPSED_ROW_COUNT)"), "compact by default (10 rows) with a client-side expand / collapse button");
     assert(card.includes("REP_CUSTOMER_ORDER_STATUSES.OPEN && <CancelOrderButton"), "the pre-existing OPEN-template cancel is untouched");
     const actions = codeOnly(read("../src/app/admin/reps/actions.ts"));
     assert(!actions.includes("correctRepOrderSale"), "no new correction action");
