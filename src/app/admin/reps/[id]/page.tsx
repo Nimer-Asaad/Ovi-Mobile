@@ -26,8 +26,6 @@ import type { RepTransferHistoryRow } from "@/components/reps/RepTransferHistory
 
 interface AdminRepDetailPageProps {
   params: Promise<{ id: string }>;
-  /** ?orders=all → the "طلبات الزبائن" card lists every order, not only the latest. */
-  searchParams: Promise<{ orders?: string }>;
 }
 
 // Full rep management dashboard (stock requests, sales, customer-order
@@ -36,10 +34,9 @@ interface AdminRepDetailPageProps {
 // instead (see that page.tsx). Explicit re-guard here even though the
 // nested layout.tsx now allows both roles, since this specific page must
 // stay narrower than the rest of the subtree.
-export default async function AdminRepDetailPage({ params, searchParams }: AdminRepDetailPageProps) {
+export default async function AdminRepDetailPage({ params }: AdminRepDetailPageProps) {
   await requireRole([ROLES.ADMIN]);
   const { id } = await params;
-  const showAllOrders = (await searchParams).orders === "all";
 
   const rep = await prisma.salesRepresentative.findUnique({
     where: { id },
@@ -128,7 +125,8 @@ export default async function AdminRepDetailPage({ params, searchParams }: Admin
     prisma.order.count({
       where: { createdByRepId: rep.id, source: ORDER_SOURCES.REP_SALE, createdAt: { gte: startOfToday } },
     }),
-    getRepCustomerEngagementRows(rep.id, 10, { all: showAllOrders }),
+    // every order of this rep, not only the latest 10 / today's (see the doc comment)
+    getRepCustomerEngagementRows(rep.id, 10, { all: true }),
     getMerchantsForRep(rep.id),
   ]);
 
@@ -313,7 +311,7 @@ export default async function AdminRepDetailPage({ params, searchParams }: Admin
        * workflow at different lifecycle stages) in two disconnected places.
        * See getRepCustomerEngagementRows for how the two sources are merged
        * without ever duplicating one real event. */}
-      <RepCustomerOrdersCard repId={rep.id} rows={customerEngagementRows} merchants={repMerchants} showingAll={showAllOrders} />
+      <RepCustomerOrdersCard repId={rep.id} rows={customerEngagementRows} merchants={repMerchants} />
 
       <RepCarProductGrid items={gridItems} />
 

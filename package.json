@@ -25,7 +25,7 @@
     "verify:rep-dispatch-note": "node --conditions=react-server --import tsx prisma/verify-rep-dispatch-note.ts",
     "verify:rep-customer-order-groups": "node --conditions=react-server --import tsx prisma/verify-rep-customer-order-groups.ts",
     "verify:inventory-device-filter": "node --conditions=react-server --import tsx prisma/verify-inventory-device-filter.ts",
-    "verify:rep-order-return-to-car": "node --conditions=react-server --import tsx prisma/verify-rep-order-return-to-car.ts",
+    "verify:rep-orders-all": "node --conditions=react-server --import tsx prisma/verify-rep-orders-all.ts",
     "postinstall": "prisma generate",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",

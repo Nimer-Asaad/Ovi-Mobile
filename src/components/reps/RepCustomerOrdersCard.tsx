@@ -3,13 +3,12 @@
 import Link from "next/link";
 import { useActionState, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { cancelRepCustomerOrder, correctRepOrderSale, linkRepCustomerOrderMerchant, type CancelCustomerOrderState, type LinkCustomerOrderMerchantState } from "@/app/admin/reps/actions";
+import { cancelRepCustomerOrder, linkRepCustomerOrderMerchant, type CancelCustomerOrderState, type LinkCustomerOrderMerchantState } from "@/app/admin/reps/actions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Spinner";
 import { ConfirmDialog } from "@/components/admin/ConfirmDialog";
-import { CorrectionDialog } from "@/components/shared/CorrectionDialog";
 import { ORDER_STATUSES, REP_CUSTOMER_ORDER_STATUSES } from "@/lib/constants";
 import { getRepCustomerOrderStatusLabel, getRepCustomerOrderStatusBadgeVariant } from "@/lib/rep-customer-order-labels";
 import { getOrderStatusLabel, getOrderStatusBadgeVariant } from "@/lib/order-labels";
@@ -50,24 +49,6 @@ function CancelOrderButton({ repId, orderId }: { repId: string; orderId: string 
         </p>
       )}
     </form>
-  );
-}
-
-/** "إلغاء وإرجاع للسيارة" for a COMPLETED sale (the order a template produced,
- * or an ad-hoc rep sale): cancels it and puts every unit back into the rep's
- * car through the canonical sale correction (see correctRepOrderSale). Only
- * ever rendered while the order is still DELIVERED — an already cancelled /
- * returned sale has nothing left to give back. A reason is mandatory. */
-function ReturnSaleToCarButton({ repId, orderNumber }: { repId: string; orderNumber: string }) {
-  return (
-    <CorrectionDialog
-      action={correctRepOrderSale.bind(null, repId)}
-      hiddenFields={{ orderNumber }}
-      triggerLabel="إلغاء وإرجاع للسيارة"
-      title="إلغاء المبيعة وإرجاع المخزون للسيارة"
-      description="سيتم إلغاء هذه المبيعة وإرجاع كامل كمياتها إلى مخزون سيارة المندوب، وإلغاء الدفعة المسجلة معها إن وُجدت. لا يمكن التراجع عن ذلك، ويُحفظ السبب في سجل الطلب."
-      confirmLabel="تأكيد الإلغاء والإرجاع"
-    />
   );
 }
 
@@ -135,7 +116,6 @@ function CustomerOrderRowActions({ repId, row, merchants }: { repId: string; row
   // A COMPLETED template whose resulting sale was later cancelled/returned
   // must not keep reading "مكتمل" — show the real order status instead.
   const saleWasReversed = row.status === REP_CUSTOMER_ORDER_STATUSES.COMPLETED && (row.saleOrderStatus === ORDER_STATUSES.RETURNED || row.saleOrderStatus === ORDER_STATUSES.CANCELLED);
-  const canReturnToCar = row.status === REP_CUSTOMER_ORDER_STATUSES.COMPLETED && row.saleOrderStatus === ORDER_STATUSES.DELIVERED && Boolean(row.saleOrderNumber);
   return (
     <>
       {saleWasReversed && row.saleOrderStatus ? (
@@ -143,7 +123,6 @@ function CustomerOrderRowActions({ repId, row, merchants }: { repId: string; row
       ) : (
         <Badge variant={getRepCustomerOrderStatusBadgeVariant(row.status)}>{getRepCustomerOrderStatusLabel(row.status)}</Badge>
       )}
-      {canReturnToCar && row.saleOrderNumber && <ReturnSaleToCarButton repId={repId} orderNumber={row.saleOrderNumber} />}
       {row.status === REP_CUSTOMER_ORDER_STATUSES.OPEN && <CancelOrderButton repId={repId} orderId={row.id} />}
       {row.status === REP_CUSTOMER_ORDER_STATUSES.OPEN && !row.merchantId && merchants.length > 0 && (
         <LinkMerchantControl repId={repId} orderId={row.id} merchants={merchants} />
@@ -208,8 +187,6 @@ export interface RepCustomerOrdersCardProps {
    * no merchants yet, in which case the link control simply never renders
    * (nothing to link to). */
   merchants: RepMerchantSummary[];
-  /** true when the list was loaded with "عرض كل الطلبات" (?orders=all). */
-  showingAll?: boolean;
 }
 
 /** Admin-facing visibility into this rep's customer engagement — merges two
@@ -224,14 +201,11 @@ export interface RepCustomerOrdersCardProps {
  * for exactly how grouping/dedup is decided). A completed template's own
  * resulting sale is never listed a second time here, and no two rows here
  * ever represent the same real event twice. */
-export function RepCustomerOrdersCard({ repId, rows, merchants, showingAll = false }: RepCustomerOrdersCardProps) {
+export function RepCustomerOrdersCard({ repId, rows, merchants }: RepCustomerOrdersCardProps) {
   return (
     <Card>
-      <CardHeader className="flex flex-row items-center justify-between gap-3">
+      <CardHeader>
         <CardTitle>طلبات الزبائن</CardTitle>
-        <Link href={showingAll ? `/admin/reps/${repId}` : `/admin/reps/${repId}?orders=all`} className="text-xs text-gold-champagne hover:underline">
-          {showingAll ? "عرض آخر الطلبات فقط" : "عرض كل الطلبات"}
-        </Link>
       </CardHeader>
       <CardContent>
         {rows.length === 0 ? (
@@ -256,7 +230,6 @@ export function RepCustomerOrdersCard({ repId, rows, merchants, showingAll = fal
                     ) : (
                       <>
                         <Badge variant={getOrderStatusBadgeVariant(row.orderStatus)}>{getOrderStatusLabel(row.orderStatus)}</Badge>
-                        {row.orderStatus === ORDER_STATUSES.DELIVERED && <ReturnSaleToCarButton repId={repId} orderNumber={row.orderNumber} />}
                         <Link href={`/admin/orders/${row.orderNumber}`} className="text-xs text-gold-champagne hover:underline">
                           فتح الطلب
                         </Link>

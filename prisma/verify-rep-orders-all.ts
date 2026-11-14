@@ -1,22 +1,17 @@
 /**
- * Real-database verification for "إلغاء وإرجاع للسيارة" and "عرض كل الطلبات" on
- * the rep's "طلبات الزبائن" list (/admin/reps/[id]):
- * src/lib/rep-order-correction.ts (ownership gate over the canonical
- * correctSale), src/lib/rep-customer-orders.ts (getRepCustomerEngagementRows
- * with { all }), RepCustomerOrdersCard and the page/action wiring.
+ * Real-database verification for "كل الطلبات" in the rep's "طلبات الزبائن" list
+ * (/admin/reps/[id]): getRepCustomerEngagementRows(repId, 10, { all: true }).
  *
- * Rules under test: cancelling a COMPLETED rep sale puts exactly the sold
- * quantities back into THAT rep's car (never the warehouse, never another
- * rep), through the one canonical lifecycle (history + compensation + payment
- * cancellation), exactly once; a reason is mandatory; another rep's / unknown
- * orders are unreachable; the default list is unchanged and "all" lists
- * everything. No schema change, no new write path.
+ * Rules under test: the default view is unchanged (latest 10 templates +
+ * today's ad-hoc sales); with { all: true } EVERY template and EVERY ad-hoc
+ * sale of that rep is listed, never another rep's; a completed template carries
+ * its sale's real status. Read-only — no cancel/return control exists.
  *
  * Safety rails via resolveVerifyDatabaseUrl (prisma/verify-guardrails.ts):
  * never runs against a shared/production database.
  *
- * Run with: node --conditions=react-server --import tsx prisma/verify-rep-order-return-to-car.ts
- * REP_ORDER_RETURN_VERIFY_DATABASE_URL must point at a disposable localhost
+ * Run with: node --conditions=react-server --import tsx prisma/verify-rep-orders-all.ts
+ * REP_ORDERS_ALL_VERIFY_DATABASE_URL must point at a disposable localhost
  * PostgreSQL database whose name contains "verify".
  */
 
@@ -24,27 +19,25 @@ export {};
 
 import { resolveVerifyDatabaseUrl } from "./verify-guardrails";
 
-const resolved = resolveVerifyDatabaseUrl("REP_ORDER_RETURN_VERIFY_DATABASE_URL");
-console.log(`[verify-rep-order-return-to-car] target: ${resolved.masked}`);
+const resolved = resolveVerifyDatabaseUrl("REP_ORDERS_ALL_VERIFY_DATABASE_URL");
+console.log(`[verify-rep-orders-all] target: ${resolved.masked}`);
 
 process.env.DATABASE_URL = resolved.url;
 process.env.DIRECT_URL = resolved.url;
 
 async function main() {
   const fs = await import("node:fs");
-  const [{ PrismaClient }, constants, ordersLib, repSales, correction] = await Promise.all([
+  const [{ PrismaClient }, constants, ordersLib, repSales] = await Promise.all([
     import("@prisma/client"),
     import("../src/lib/constants"),
     import("../src/lib/rep-customer-orders"),
     import("../src/lib/rep-sales"),
-    import("../src/lib/rep-order-correction"),
   ]);
   const prisma = new PrismaClient();
   const { ROLES, STOCK_LOCATION_TYPES, REP_CUSTOMER_ORDER_STATUSES, ACCOUNT_PAYMENT_METHODS, ORDER_STATUSES } = constants;
   const { getRepCustomerEngagementRows } = ordersLib;
   const { createRepSaleCore } = repSales;
-  const { correctRepOrderSaleCore } = correction;
-  const runId = `verify-rtc-${Date.now()}`;
+  const runId = `verify-all-${Date.now()}`;
 
   function assert(condition: unknown, message: string): asserts condition {
     if (!condition) throw new Error(message);
@@ -62,7 +55,6 @@ async function main() {
   const codeOnly = (source: string) => source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 
   // ---------- fixtures ----------
-  const admin = await prisma.user.create({ data: { role: ROLES.ADMIN, name: `${runId}-admin`, email: `${runId}-admin@example.invalid`, isActive: true } });
   async function makeRep(label: string) {
     const user = await prisma.user.create({ data: { role: ROLES.SALES_REPRESENTATIVE, name: `${runId}-${label}`, email: `${runId}-${label}@example.invalid`, isActive: true } });
     const rep = await prisma.salesRepresentative.create({ data: { userId: user.id, employeeCode: `${runId}-${label}` } });
@@ -169,51 +161,7 @@ async function main() {
     assert((await warehouseTotal()) === 0, "warehouse is empty");
   });
 
-  await check("1. a COMPLETED template's sale is cancelled: exactly the sold quantities return to rep A's car, once, via the canonical lifecycle", async () => {
-    const result = await correctRepOrderSaleCore({ repId: A.rep.id, orderNumber: order1, reason: "طلب خاطئ", actorUserId: admin.id });
-    assert(result.ok, `correction failed: ${JSON.stringify(result)}`);
-    assert((await qty(A.car.id, P(1))) === 100 && (await qty(A.car.id, P(2))) === 100, "P1 / P2 are back to 100 in the car");
-    assert((await warehouseTotal()) === 0, "nothing went to the warehouse");
-    const order = await prisma.order.findUnique({ where: { orderNumber: order1 }, select: { status: true, inventoryRestoredAt: true, stockLocationId: true, inventoryCompensation: { select: { id: true } }, statusHistory: { select: { toStatus: true, reason: true } } } });
-    assert(order?.status === ORDER_STATUSES.RETURNED && order.inventoryRestoredAt && order.inventoryCompensation, "order is RETURNED with a compensation record");
-    assert(order.stockLocationId === A.car.id, "the order's own stock location is the rep's car");
-    assert(order.statusHistory.some((h) => h.toStatus === ORDER_STATUSES.RETURNED && (h.reason ?? "").includes("طلب خاطئ")), "the reason is stored in the status history");
-    const movements = await prisma.stockMovement.findMany({ where: { note: { contains: order1 }, toLocationId: A.car.id }, select: { quantity: true, fromLocationId: true } });
-    assert(movements.length === 2 && movements.reduce((sum, m) => sum + m.quantity, 0) === 8 && movements.every((m) => m.fromLocationId === null), `one restoring movement per line INTO the car (5 + 3), got ${JSON.stringify(movements)}`);
-  });
-
-  await check("2. cancelling the same sale again restores NOTHING more (no double return)", async () => {
-    const again = await correctRepOrderSaleCore({ repId: A.rep.id, orderNumber: order1, reason: "مرة ثانية", actorUserId: admin.id });
-    assert(!again.ok, "second correction is refused");
-    assert((await qty(A.car.id, P(1))) === 100 && (await qty(A.car.id, P(2))) === 100, "stock did not change again");
-  });
-
-  await check("3. an ad-hoc sale with a payment: stock returns to the car and the linked payment is cancelled", async () => {
-    const result = await correctRepOrderSaleCore({ repId: A.rep.id, orderNumber: order2, reason: "مبيعة خاطئة", actorUserId: admin.id });
-    assert(result.ok, `correction failed: ${JSON.stringify(result)}`);
-    assert((await qty(A.car.id, P(3))) === 100, "P3 back to 100");
-    const order = await prisma.order.findUnique({ where: { orderNumber: order2 }, select: { status: true, initialPayment: { select: { cancellation: { select: { id: true } } } } } });
-    assert(order?.status === ORDER_STATUSES.RETURNED && order.initialPayment?.cancellation, "order RETURNED and its initial payment cancelled");
-  });
-
-  await check("4. a reason is mandatory: nothing changes without one", async () => {
-    const result = await correctRepOrderSaleCore({ repId: B.rep.id, orderNumber: orderB, reason: "   ", actorUserId: admin.id });
-    assert(!result.ok, "blank reason refused");
-    assert((await qty(B.car.id, P(4))) === 94, "rep B stock unchanged");
-    assert((await prisma.order.findUnique({ where: { orderNumber: orderB }, select: { status: true } }))?.status === ORDER_STATUSES.DELIVERED, "order still DELIVERED");
-  });
-
-  await check("5. ownership: rep B's sale (or an unknown number) cannot be cancelled through rep A's card", async () => {
-    const wrongRep = await correctRepOrderSaleCore({ repId: A.rep.id, orderNumber: orderB, reason: "محاولة", actorUserId: admin.id });
-    assert(!wrongRep.ok && wrongRep.error === "الطلب غير موجود", "another rep's order is 'not found'");
-    const unknown = await correctRepOrderSaleCore({ repId: A.rep.id, orderNumber: "NOPE-0", reason: "محاولة", actorUserId: admin.id });
-    assert(!unknown.ok, "unknown order refused");
-    assert((await qty(B.car.id, P(4))) === 94 && (await qty(A.car.id, P(4))) === 100, "no stock moved on either car");
-    const right = await correctRepOrderSaleCore({ repId: B.rep.id, orderNumber: orderB, reason: "تصحيح", actorUserId: admin.id });
-    assert(right.ok && (await qty(B.car.id, P(4))) === 100, "through the owning rep it works and returns to B's own car");
-  });
-
-  await check("6. the list: default = latest 10 templates (+ today's ad-hoc), 'all' = every template and every ad-hoc sale; a reversed sale shows its real status", async () => {
+  await check("1. default = latest 10 templates (+ today's ad-hoc); { all: true } = every template and every ad-hoc sale of THIS rep", async () => {
     for (let i = 0; i < 14; i++) await template(10 + i, [[5, 1]]);
     // an ad-hoc sale from "yesterday": only the full list may show it
     await sell({ items: [[6, 2]], phone: `${runId}-m` });
@@ -227,29 +175,23 @@ async function main() {
     assert(full.some((row) => row.kind === "sale" && row.orderNumber === old), "'all' shows the older ad-hoc sale");
     const countTemplates = (rows: typeof full) => rows.reduce((n, row) => n + (row.kind === "merchantGroup" ? row.children.length : row.kind === "customerOrder" ? 1 : 0), 0);
     assert(countTemplates(normal) === 10, `default shows 10 templates, got ${countTemplates(normal)}`);
-    assert(countTemplates(full) === 1 + 14 + 0, `'all' shows every template (1 + 14), got ${countTemplates(full)}`);
+    assert(countTemplates(full) === 1 + 14, `'all' shows every template (1 + 14), got ${countTemplates(full)}`);
     assert(templatesNormal.length > 0, "default list still renders");
     const t1Row = full.flatMap((row) => (row.kind === "merchantGroup" ? row.children : [row])).find((row) => row.id === t1.id);
-    assert(t1Row && t1Row.kind === "customerOrder" && t1Row.status === REP_CUSTOMER_ORDER_STATUSES.COMPLETED && t1Row.saleOrderStatus === ORDER_STATUSES.RETURNED, "the completed template carries its sale's real status (RETURNED) so the card stops saying 'مكتمل'");
-    const adHocB = full.find((row) => row.kind === "sale" && row.orderNumber === order2);
-    assert(adHocB && adHocB.kind === "sale" && adHocB.orderStatus === ORDER_STATUSES.RETURNED, "the cancelled ad-hoc sale shows RETURNED");
+    assert(t1Row && t1Row.kind === "customerOrder" && t1Row.status === REP_CUSTOMER_ORDER_STATUSES.COMPLETED && t1Row.saleOrderStatus === ORDER_STATUSES.DELIVERED && t1Row.saleOrderNumber === order1, "the completed template carries its sale (number + real status)");
+    const adHoc = full.find((row) => row.kind === "sale" && row.orderNumber === order2);
+    assert(adHoc && adHoc.kind === "sale" && adHoc.orderStatus === ORDER_STATUSES.DELIVERED, "today's ad-hoc sale is listed with its status");
     assert(!full.some((row) => row.kind === "sale" && row.orderNumber === orderB), "another rep's sale is never in this rep's list");
   });
 
-  await check("7. UI/page wiring: the button exists only for DELIVERED sales, ADMIN-only page + action, no Product.stock / schema change", async () => {
-    const card = codeOnly(read("../src/components/reps/RepCustomerOrdersCard.tsx"));
-    assert(card.includes("إلغاء وإرجاع للسيارة") && card.includes("correctRepOrderSale.bind(null, repId)"), "button wired to the new action with the repId bound");
-    assert(/canReturnToCar\s*=\s*row\.status === REP_CUSTOMER_ORDER_STATUSES\.COMPLETED && row\.saleOrderStatus === ORDER_STATUSES\.DELIVERED/.test(card), "template rows: only when COMPLETED and the sale is still DELIVERED");
-    assert(/row\.orderStatus === ORDER_STATUSES\.DELIVERED && <ReturnSaleToCarButton/.test(card), "ad-hoc rows: only while DELIVERED");
-    assert(card.includes("عرض كل الطلبات") && card.includes("?orders=all"), "the 'show all' link");
-    assert(card.includes("CancelOrderButton") && card.includes("REP_CUSTOMER_ORDER_STATUSES.OPEN && <CancelOrderButton"), "the existing OPEN-template cancel is untouched");
-    const actions = codeOnly(read("../src/app/admin/reps/actions.ts"));
-    const actionBody = actions.slice(actions.indexOf("export async function correctRepOrderSale("));
-    assert(/requireRole\(\[ROLES\.ADMIN\]\)/.test(actionBody.slice(0, 400)), "the action is ADMIN-only");
+  await check("2. wiring: the page loads every order; the card has NO cancel/return control and no show-all toggle; loader stays read-only", async () => {
     const page = codeOnly(read("../src/app/admin/reps/[id]/page.tsx"));
-    assert(/requireRole\(\[ROLES\.ADMIN\]\)/.test(page) && page.includes("showAllOrders"), "the page stays ADMIN-only and reads ?orders=all");
-    const core = codeOnly(read("../src/lib/rep-order-correction.ts"));
-    assert(core.includes("correctSale(") && !/\.(create|update|updateMany|delete|upsert)\(|incrementInventory|recordStockMovement|\.stock\b/.test(core), "the new lib only gates ownership and delegates to correctSale — no stock/inventory code of its own");
+    assert(/requireRole\(\[ROLES\.ADMIN\]\)/.test(page) && page.includes("getRepCustomerEngagementRows(rep.id, 10, { all: true })"), "ADMIN-only page, every order loaded");
+    const card = codeOnly(read("../src/components/reps/RepCustomerOrdersCard.tsx"));
+    assert(!card.includes("إلغاء وإرجاع للسيارة") && !card.includes("correctRepOrderSale") && !card.includes("CorrectionDialog") && !card.includes("orders=all"), "no sale cancel/return control, no toggle");
+    assert(card.includes("REP_CUSTOMER_ORDER_STATUSES.OPEN && <CancelOrderButton"), "the pre-existing OPEN-template cancel is untouched");
+    const actions = codeOnly(read("../src/app/admin/reps/actions.ts"));
+    assert(!actions.includes("correctRepOrderSale"), "no new correction action");
     const loader = codeOnly(read("../src/lib/rep-customer-orders.ts"));
     assert(!/\.(create|update|updateMany|delete|upsert)\(|\.stock\b/.test(loader), "the list loader stays read-only");
   });
