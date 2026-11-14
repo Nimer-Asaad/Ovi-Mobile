@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth/guards";
 import { ROLES, STOCK_MOVEMENT_TYPES, REP_LOAD_TYPES, REP_CUSTOMER_ORDER_STATUSES, ADMIN_AUDIT_ACTIONS } from "@/lib/constants";
+import { correctRepOrderSaleCore } from "@/lib/rep-order-correction";
 import { setImpersonationCookie, clearImpersonationCookie, readValidatedImpersonationTarget } from "@/lib/auth/impersonation";
 import { getMainWarehouse } from "@/lib/inventory";
 import { getOrCreateRepLocation } from "@/lib/reps";
@@ -631,6 +632,54 @@ export async function cancelRepCustomerOrder(
   revalidatePath(`/admin/reps/${repId}`);
   revalidatePath("/rep/sales/new");
   return { success: "تم إلغاء طلبية الزبون" };
+}
+
+export interface CorrectRepOrderSaleState {
+  error?: string;
+  success?: string;
+}
+
+/** ADMIN-only "إلغاء وإرجاع للسيارة" from the rep's "طلبات الزبائن" list: cancels
+ * a COMPLETED rep sale (the order a customer-order template produced, or an
+ * ad-hoc rep sale) and puts every unit back into that sale's own original
+ * stock location — the rep's car. It is deliberately NOT a second
+ * implementation: correctRepOrderSaleCore (src/lib/rep-order-correction.ts)
+ * delegates 100% to correctSale (src/lib/sale-correction.ts) →
+ * transitionOrderStatusInTransaction, the one canonical lifecycle core,
+ * which also records OrderInventoryCompensation + RETURN StockMovement +
+ * OrderStatusHistory (with the mandatory reason) and cancels the sale's linked
+ * initial payment when eligible. It refuses a sale that already has active
+ * sales returns, a legacy sale without stock provenance, and anything already
+ * cancelled/returned — surfacing the lifecycle's own Arabic message.
+ *
+ * Ownership: the order must be a REP sale created by THIS rep (repId comes
+ * from the bound page argument), so a manipulated orderNumber can never reach
+ * another rep's sale from this card. */
+export async function correctRepOrderSale(
+  repId: string,
+  _prevState: CorrectRepOrderSaleState,
+  formData: FormData,
+): Promise<CorrectRepOrderSaleState> {
+  const actor = await requireRole([ROLES.ADMIN]);
+
+  const orderNumber = formData.get("orderNumber")?.toString();
+  const reason = formData.get("reason")?.toString() ?? "";
+  if (!orderNumber) return { error: "الطلب غير موجود" };
+
+  const result = await correctRepOrderSaleCore({ repId, orderNumber, reason, actorUserId: actor.id });
+  if (!result.ok) return { error: result.error };
+
+  revalidatePath(`/admin/reps/${repId}`);
+  revalidatePath("/admin/reports");
+  revalidatePath("/admin/orders");
+  revalidatePath(`/admin/orders/${orderNumber}`);
+  revalidatePath("/admin/inventory/overview");
+  revalidatePath("/admin/merchants");
+  revalidatePath("/rep");
+  revalidatePath("/rep/sales");
+  revalidatePath("/rep/stock");
+  revalidatePath("/rep/movements");
+  return { success: "تم إلغاء المبيعة وإرجاع الكميات إلى مخزون السيارة" };
 }
 
 export interface LinkCustomerOrderMerchantState {

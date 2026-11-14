@@ -80,6 +80,10 @@ export type RepCustomerOrderEngagementRow = RepCustomerEngagementRowBase & {
    * produced (via Order.repCustomerOrderId), so the row can link
    * straight to it instead of just showing a static "مكتمل" badge. */
   saleOrderNumber: string | null;
+  /** ORDER_STATUSES value of that resulting Order (null until COMPLETED).
+   * Lets the card show "مرتجع" once the sale was corrected, and offer the
+   * correction only while the order is still DELIVERED. */
+  saleOrderStatus: string | null;
   /** Real trader identity, when one has been resolved/linked (see the
    * RepCustomerOrder.merchantId doc comment) — null for a legacy or
    * genuinely unlinked row, which stays standalone (see
@@ -148,15 +152,24 @@ export type RepCustomerEngagementRow =
  * an unusually large number of sales in one day already produced an
  * unbounded "مبيعات اليوم" card; this list is exactly as large as that card
  * plus the customer-order card would have been combined, never larger. */
-export async function getRepCustomerEngagementRows(salesRepId: string, customerOrderLimit = 10): Promise<RepCustomerEngagementRow[]> {
+export async function getRepCustomerEngagementRows(
+  salesRepId: string,
+  customerOrderLimit = 10,
+  /** `all: true` ("عرض كل الطلبات"): every customer-order template of this rep
+   * and every ad-hoc sale ever made, not just the latest 10 / today's — the
+   * default view is exactly the original bounded one. Still one query per
+   * source, no per-row follow-up. */
+  options: { all?: boolean } = {},
+): Promise<RepCustomerEngagementRow[]> {
   const startOfToday = new Date();
   startOfToday.setHours(0, 0, 0, 0);
+  const all = options.all === true;
 
   const [customerOrders, adHocSalesToday] = await Promise.all([
     prisma.repCustomerOrder.findMany({
       where: { salesRepId },
       orderBy: { createdAt: "desc" },
-      take: customerOrderLimit,
+      ...(all ? {} : { take: customerOrderLimit }),
       select: {
         id: true,
         customerName: true,
@@ -165,11 +178,11 @@ export async function getRepCustomerEngagementRows(salesRepId: string, customerO
         merchantId: true,
         merchant: { select: { businessName: true } },
         items: { select: { id: true } },
-        saleOrder: { select: { orderNumber: true } },
+        saleOrder: { select: { orderNumber: true, status: true } },
       },
     }),
     prisma.order.findMany({
-      where: { createdByRepId: salesRepId, source: ORDER_SOURCES.REP_SALE, repCustomerOrderId: null, createdAt: { gte: startOfToday } },
+      where: { createdByRepId: salesRepId, source: ORDER_SOURCES.REP_SALE, repCustomerOrderId: null, ...(all ? {} : { createdAt: { gte: startOfToday } }) },
       orderBy: { createdAt: "desc" },
       select: {
         orderNumber: true,
@@ -189,6 +202,7 @@ export async function getRepCustomerEngagementRows(salesRepId: string, customerO
     itemCount: order.items.length,
     status: order.status,
     saleOrderNumber: order.saleOrder?.orderNumber ?? null,
+    saleOrderStatus: order.saleOrder?.status ?? null,
     merchantId: order.merchantId,
   }));
   const merchantNameById = new Map(customerOrders.filter((order) => order.merchantId).map((order) => [order.merchantId as string, order.merchant!.businessName]));
