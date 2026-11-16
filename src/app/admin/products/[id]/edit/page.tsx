@@ -2,6 +2,8 @@ import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { getBrandOptions, getCategoryOptions, getColorOptions, getSupplierOptions } from "../../options";
 import { ProductForm } from "../../ProductForm";
+import { ProductCompatibilityManager } from "@/components/admin/products/ProductCompatibilityManager";
+import { getCompatibilityBrandOptions, getProductCompatibilityLinks } from "@/lib/product-phone-compatibility";
 
 interface EditProductPageProps {
   params: Promise<{ id: string }>;
@@ -23,11 +25,16 @@ export default async function EditProductPage({ params }: EditProductPageProps) 
 
   const selectedColorIds = product.colorOptions.map((option) => option.colorId);
 
-  const [categories, brands, suppliers, colors] = await Promise.all([
+  const [categories, brands, suppliers, colors, compatibilityBrands, compatibilityLinks] = await Promise.all([
     getCategoryOptions(product.categoryId),
     getBrandOptions(product.brandId),
     getSupplierOptions(product.supplierId),
     getColorOptions(selectedColorIds),
+    // Isolated reads: the original product query above is untouched, and with
+    // the compatibility table not deployed yet the links come back null and the
+    // section is simply not shown.
+    getCompatibilityBrandOptions(),
+    getProductCompatibilityLinks(id),
   ]);
 
   const currentStock = product.inventoryItems.reduce((sum, item) => sum + item.quantity, 0);
@@ -45,6 +52,7 @@ export default async function EditProductPage({ params }: EditProductPageProps) 
         images={product.images}
         selectedColorIds={selectedColorIds}
       />
+      {compatibilityLinks && <ProductCompatibilityManager productId={product.id} brands={compatibilityBrands} linked={compatibilityLinks} />}
     </div>
   );
 }

@@ -75,6 +75,11 @@ export interface InventoryOverviewProduct {
    * story for that mode. Populated for PHONE_COMPATIBILITY/
    * DEVICE_MODEL_COLOR. */
   dimensionGroups: InventoryOverviewDimensionGroup[];
+  /** PhoneModel ids this product is marked compatible with — browse-by-device
+   * METADATA (ProductPhoneCompatibility), independent of stock: it has no
+   * quantity and never affects byLocation/total. Drives only the
+   * "حسب نوع الجهاز" filter. */
+  compatibleModelIds: string[];
 }
 
 export interface InventoryOverviewData {
@@ -93,6 +98,9 @@ interface RawProduct {
   images: { url: string; altText: string | null }[];
   variantMode: string;
   inventoryTrackingMode: string;
+  /** Optional: only the overview page selects it; every other caller of
+   * buildInventoryOverviewData simply gets compatibleModelIds: []. */
+  phoneCompatibilities?: { phoneModelId: string }[];
   variants: {
     id: string;
     phoneModel: {
@@ -295,6 +303,7 @@ export function buildInventoryOverviewData(
       byLocation,
       total,
       dimensionGroups,
+      compatibleModelIds: (product.phoneCompatibilities ?? []).map((link) => link.phoneModelId),
     };
   });
 }

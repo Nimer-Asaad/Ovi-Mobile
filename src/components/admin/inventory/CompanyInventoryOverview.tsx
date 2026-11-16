@@ -9,7 +9,7 @@ import { ProductThumbnail } from "@/components/catalog/ProductThumbnail";
 import { ProductImagePlaceholder } from "@/components/catalog/ProductImagePlaceholder";
 import { LOW_STOCK_THRESHOLD } from "@/lib/constants";
 import type { InventoryOverviewLocation, InventoryOverviewProduct, InventoryOverviewDimensionGroup } from "@/lib/inventory-overview";
-import { brandIdForModel, deviceModelQuantity, filterOverviewProducts, type DeviceFilterBrand, type DeviceModelQuantity } from "@/lib/inventory-device-filter";
+import { brandIdForModel, filterOverviewProducts, type DeviceFilterBrand } from "@/lib/inventory-device-filter";
 
 export interface CompanyInventoryOverviewProps {
   locations: InventoryOverviewLocation[];
@@ -75,38 +75,16 @@ function groupDimensions(groups: InventoryOverviewDimensionGroup[]): BrandGroup[
   return [...byBrand.values()];
 }
 
-/** Secondary "لهذا الجهاز" line shown under the unchanged main quantity when a
- * device is selected. Only warehouse stock is tracked per phone model; rep-car
- * stock is one product-level balance, so it is never attributed to the model —
- * it is named separately instead (see deviceModelQuantity). */
-function DeviceModelLine({ info }: { info: DeviceModelQuantity }) {
-  const { modelQuantity, hasModelScope, unattributedQuantity } = info;
-  if (!hasModelScope) {
-    return (
-      <p className="text-[11px] text-gold-champagne" data-testid="device-qty">
-        {unattributedQuantity > 0 ? "لهذا الجهاز: غير محدد — مخزون السيارات بدون تفصيل موديل" : "لهذا الجهاز: 0"}
-      </p>
-    );
-  }
-  return (
-    <>
-      <p className="text-[11px] text-gold-champagne" data-testid="device-qty">
-        لهذا الجهاز: {modelQuantity}
-        {unattributedQuantity > 0 ? " في المخزن" : ""}
-      </p>
-      {unattributedQuantity > 0 && <p className="text-[10px] text-neutral-bg/50">+ {unattributedQuantity} في السيارات بدون تفصيل موديل</p>}
-    </>
-  );
-}
-
 /** Visual, read-only stock catalog for ADMIN/ADMIN_ASSISTANT — every number
  * shown here is a pre-computed field already handed down from
  * buildInventoryOverviewData (server-side, sourced from InventoryItem rows).
  * This component only selects/sums/sorts/filters those numbers for display;
  * it never recomputes stock itself and never calls a mutation. */
 export function CompanyInventoryOverview({ locations, categories, products, deviceBrands = [], initialDeviceModelId = "", canPrintProduct = false }: CompanyInventoryOverviewProps) {
-  // "حسب نوع الجهاز": a pure product SELECTION filter (compatible with the
-  // chosen phone model) — it never touches the quantity calculation below.
+  // "حسب نوع الجهاز": a pure product SELECTION filter (products marked
+  // compatible with the chosen phone model — ProductPhoneCompatibility). It
+  // never touches the quantity calculation below: every card keeps its
+  // existing "المتوفر" figure for the chosen location scope.
   const [deviceMode, setDeviceMode] = useState(Boolean(initialDeviceModelId));
   const [deviceBrandId, setDeviceBrandId] = useState(() => brandIdForModel(deviceBrands, initialDeviceModelId));
   const [deviceModelId, setDeviceModelId] = useState(initialDeviceModelId);
@@ -350,7 +328,6 @@ export function CompanyInventoryOverview({ locations, categories, products, devi
                   <p className="line-clamp-2 text-xs font-medium text-neutral-bg">{product.nameAr ?? product.name}</p>
                   <p className="text-[11px] text-neutral-bg/50">{product.sku}</p>
                   <p className="mt-auto text-[11px] text-neutral-bg/70">المتوفر: {scopeTotal} قطعة</p>
-                  {deviceModelId && <DeviceModelLine info={deviceModelQuantity(product, deviceModelId, scopeLocationIds, warehouseLocationIds)} />}
                   {!product.isActive && (
                     <Badge variant="neutral" className="self-start">
                       غير نشط

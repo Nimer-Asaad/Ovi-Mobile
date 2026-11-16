@@ -3,16 +3,13 @@
  * the client component calls these on the dataset already built by
  * buildInventoryOverviewData.
  *
- * COMPATIBILITY SOURCE: the canonical structured relation, never product-name
- * text. A product is compatible with a phone model when it is a
- * PHONE_COMPATIBILITY product with an ACTIVE ProductVariant for that PhoneModel
- * (ProductVariant.phoneModelId — the same relation the customer product page,
- * admin variants page and manual-order picker use). buildInventoryOverviewData
- * already turns those variants into dimensionGroups, so this reads them
- * instead of re-querying anything.
- *
- * The filter only SELECTS products. It never changes a quantity: the card
- * number stays product.byLocation summed over the chosen location scope. */
+ * COMPATIBILITY SOURCE: ProductPhoneCompatibility ("this accessory fits this
+ * phone model") — explicit admin-chosen METADATA, carried on every overview
+ * product as compatibleModelIds. It is NOT ProductVariant (no stock bucket, no
+ * allocation status) and never name text. The filter only SELECTS products:
+ * the card quantity stays product.byLocation summed over the chosen location
+ * scope — there is no per-model quantity in this design, a case keeps ONE
+ * aggregate balance however many models it fits. */
 
 import type { InventoryOverviewProduct } from "@/lib/inventory-overview";
 
@@ -27,55 +24,9 @@ export interface DeviceFilterBrand {
   models: DeviceFilterModel[];
 }
 
-/** True when the product is compatible with this phone model (by id). The
- * synthetic "غير مصنّف" group (modelId "") never matches a real model, and a
- * DEVICE_MODEL_COLOR product is a phone itself, not an accessory. */
+/** True when the product is marked compatible with this phone model (by id). */
 export function productMatchesDeviceModel(product: InventoryOverviewProduct, modelId: string): boolean {
-  if (!modelId || product.displayMode !== "PHONE_COMPATIBILITY") return false;
-  return product.dimensionGroups.some((group) => !group.isUnclassified && group.modelId === modelId);
-}
-
-export interface DeviceModelQuantity {
-  /** Pieces held for the selected model alone — WAREHOUSE locations of the
-   * chosen scope only, the only place stock is tracked per phone model. */
-  modelQuantity: number;
-  /** True when the scope contains at least one WAREHOUSE location, i.e.
-   * modelQuantity is a real figure rather than "unknown". */
-  hasModelScope: boolean;
-  /** Pieces of this product in the scope's REP_CAR locations. Live rep-car
-   * stock is one plain product-level balance (variantId null — see
-   * company-inventory-report.ts and the InventoryItem doc in schema.prisma),
-   * so it can NOT be attributed to any phone model; it is reported here
-   * instead of being guessed into one. Part of the card's main quantity. */
-  unattributedQuantity: number;
-}
-
-/** The "لهذا الجهاز" figure, with exactly what it can and cannot prove.
- *
- *  - modelQuantity: the selected model's own ProductVariant stock in the
- *    scope's WAREHOUSE locations (fully dimensional).
- *  - REP_CAR stock never contributes to modelQuantity — not the plain
- *    aggregate balance, and not any legacy per-model REP_CAR row either (the
- *    one-time aggregate-rep-car-inventory conversion zeroed those, and every
- *    live car write path uses the plain bucket). Whatever the product holds in
- *    the scope's cars is returned as unattributedQuantity.
- *
- * Secondary information only: the card's main quantity (the scope total) is
- * never replaced or recomputed from this. */
-export function deviceModelQuantity(product: InventoryOverviewProduct, modelId: string, scopeLocationIds: string[], warehouseLocationIds: string[]): DeviceModelQuantity {
-  const warehouseIds = new Set(warehouseLocationIds);
-  const modelIds = scopeLocationIds.filter((id) => warehouseIds.has(id));
-  const carIds = scopeLocationIds.filter((id) => !warehouseIds.has(id));
-  let modelQuantity = 0;
-  for (const group of product.dimensionGroups) {
-    if (group.isUnclassified || group.modelId !== modelId) continue;
-    modelQuantity += modelIds.reduce((sum, id) => sum + (group.byLocation[id] ?? 0), 0);
-  }
-  return {
-    modelQuantity,
-    hasModelScope: modelIds.length > 0,
-    unattributedQuantity: carIds.reduce((sum, id) => sum + (product.byLocation[id] ?? 0), 0),
-  };
+  return Boolean(modelId) && product.compatibleModelIds.includes(modelId);
 }
 
 /** Brand that owns a model id, or "" when the id is not a known active model

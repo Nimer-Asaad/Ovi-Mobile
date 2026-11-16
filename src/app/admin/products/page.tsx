@@ -2,6 +2,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { Button } from "@/components/ui/Button";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { LinkButton } from "@/components/ui/LinkButton";
 import { AdminProductsSearch, type AdminProductRow } from "@/components/admin/products/AdminProductsSearch";
 import { removeProduct, toggleProductActive, setProductStorefrontVisibility } from "./actions";
 
@@ -86,9 +87,14 @@ export default async function AdminProductsPage() {
         title="المنتجات"
         subtitle="إدارة كتالوج المنتجات"
         actions={
-          <Link href="/admin/products/new">
-            <Button>إضافة منتج</Button>
-          </Link>
+          <div className="flex flex-wrap items-center gap-2">
+            <LinkButton href="/admin/products/compatibility" variant="outline">
+              توافق الأجهزة
+            </LinkButton>
+            <Link href="/admin/products/new">
+              <Button>إضافة منتج</Button>
+            </Link>
+          </div>
         }
       />
 

@@ -356,6 +356,7 @@ model PhoneModel {
 
   variants            ProductVariant[]
   deviceColorVariants DeviceColorVariant[]
+  compatibleProducts  ProductPhoneCompatibility[]
 
   @@unique([phoneBrandId, slug])
   @@index([phoneBrandId])
@@ -439,6 +440,8 @@ model Product {
   variantAllocationBatch ProductVariantAllocationBatch?
   deviceColorVariants    DeviceColorVariant[]
   repCustomerOrderItems  RepCustomerOrderItem[]
+  /// Browse-by-device metadata only — see ProductPhoneCompatibility.
+  phoneCompatibilities   ProductPhoneCompatibility[]
 
   @@map("products")
 }
@@ -518,6 +521,30 @@ model ProductVariant {
   @@index([productId, isActive])
   @@index([phoneModelId])
   @@map("product_variants")
+}
+
+/// "This accessory fits this phone model" — browse-by-device METADATA ONLY
+/// (the "حسب نوع الجهاز" filter on /admin/inventory/overview and its admin
+/// management screens). Deliberately NOT ProductVariant: a ProductVariant ties
+/// a phone model to a stock bucket (PHONE_COMPATIBILITY: stock split per model,
+/// allocation PENDING/READY, blocks rep-car assignment until distributed).
+/// A compatibility row has NO quantity, NO stock bucket and NO effect on
+/// Product.variantMode / variantAllocationStatus / inventoryTrackingMode,
+/// InventoryItem, StockMovement, sales, transfers or REP_CAR stock — a case
+/// keeps ONE aggregate balance however many models it fits. One product may
+/// fit many models; the pair is unique. Both foreign keys cascade because the
+/// row carries no history worth preserving once either side is gone.
+model ProductPhoneCompatibility {
+  id           String     @id @default(cuid())
+  productId    String
+  product      Product    @relation(fields: [productId], references: [id], onDelete: Cascade)
+  phoneModelId String
+  phoneModel   PhoneModel @relation(fields: [phoneModelId], references: [id], onDelete: Cascade)
+  createdAt    DateTime   @default(now())
+
+  @@unique([productId, phoneModelId])
+  @@index([phoneModelId])
+  @@map("product_phone_compatibilities")
 }
 
 /// Immutable baseline for the one-time manual conversion of legacy product

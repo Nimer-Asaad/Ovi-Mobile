@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { STOCK_LOCATION_TYPES } from "@/lib/constants";
 import { buildInventoryOverviewData, type InventoryOverviewLocation, type InventoryOverviewProduct } from "@/lib/inventory-overview";
 import type { DeviceFilterBrand } from "@/lib/inventory-device-filter";
+import { getCompatibleModelIdsByProduct } from "@/lib/product-phone-compatibility";
 
 // Brand → model[ → color] order, matching the same stable sequence used by
 // the device-inventory grouped UI, admin/inventory/adjust, and the
@@ -25,13 +26,13 @@ export interface InventoryOverviewPageData {
   deviceBrands: DeviceFilterBrand[];
 }
 
-/** READ-ONLY loader behind /admin/inventory/overview: five bounded, parallel
+/** READ-ONLY loader behind /admin/inventory/overview: bounded, parallel
  * queries — locations, categories, products, inventory rows, phone brands —
  * and no per-product or per-location follow-up query. Everything else
  * (stock aggregation, device compatibility) is computed in memory from these
  * rows, so adding the device filter costs one extra query, not one per card. */
 export async function loadInventoryOverviewPageData(): Promise<InventoryOverviewPageData> {
-  const [locationRows, categories, products, inventoryItems, phoneBrands] = await Promise.all([
+  const [locationRows, categories, products, inventoryItems, phoneBrands, compatibleByProduct] = await Promise.all([
     prisma.stockLocation.findMany({
       where: { type: { in: [STOCK_LOCATION_TYPES.WAREHOUSE, STOCK_LOCATION_TYPES.REP_CAR] } },
       select: {
@@ -109,6 +110,10 @@ export async function loadInventoryOverviewPageData(): Promise<InventoryOverview
         models: { where: { isActive: true }, orderBy: [{ sortOrder: "asc" }, { name: "asc" }], select: { id: true, name: true, nameAr: true } },
       },
     }),
+    // Browse-by-device metadata: ONE isolated query for every mapping (never
+    // per card). It cannot affect the queries above, and degrades to "no
+    // mappings" if the table is not deployed yet.
+    getCompatibleModelIdsByProduct(),
   ]);
 
   const locations: InventoryOverviewLocation[] = locationRows.map((location) => ({
@@ -123,7 +128,10 @@ export async function loadInventoryOverviewPageData(): Promise<InventoryOverview
   return {
     locations,
     categories: categories.map((category) => ({ id: category.id, label: category.nameAr ?? category.name })),
-    products: buildInventoryOverviewData(products, inventoryItems),
+    products: buildInventoryOverviewData(
+      products.map((product) => ({ ...product, phoneCompatibilities: (compatibleByProduct.get(product.id) ?? []).map((phoneModelId) => ({ phoneModelId })) })),
+      inventoryItems,
+    ),
     deviceBrands: phoneBrands
       .filter((brand) => brand.models.length > 0)
       .map((brand) => ({
