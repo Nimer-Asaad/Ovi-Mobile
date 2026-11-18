@@ -22,14 +22,16 @@
 
 export type DispatchGroupKey = "CABLES" | "CHARGERS" | "STICKERS" | "PROTECTORS" | "MAINTENANCE" | "OTHER_ACCESSORIES";
 
-/** The printed order — never alphabetical. */
+/** The printed order — never alphabetical. This is PRESENTATION order only; the
+ * classification priority above (which group wins when a product matches two)
+ * is separate and unchanged. */
 export const DISPATCH_GROUPS: readonly { key: DispatchGroupKey; label: string }[] = [
+  { key: "OTHER_ACCESSORIES", label: "باقي الإكسسوارات" },
+  { key: "STICKERS", label: "ستكرات" },
   { key: "CABLES", label: "كوابل" },
   { key: "CHARGERS", label: "شواحن وعضمات شحن" },
-  { key: "STICKERS", label: "ستكرات" },
   { key: "PROTECTORS", label: "لزقات وحماية" },
   { key: "MAINTENANCE", label: "صيانة" },
-  { key: "OTHER_ACCESSORIES", label: "باقي الإكسسوارات" },
 ];
 
 export interface DispatchClassifiable {

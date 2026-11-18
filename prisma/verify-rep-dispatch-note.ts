@@ -159,14 +159,14 @@ async function main() {
       assert(note, "note loaded");
       assert(note.productCount === 49 && note.rows.length === 49, `49 underlying products, got ${note.productCount}`);
       assert(note.groupCount === 6 && note.groups.length === 6, `6 printed group rows, got ${note.groupCount}`);
-      assert(JSON.stringify(note.groups.map((group) => group.label)) === JSON.stringify(["كوابل", "شواحن وعضمات شحن", "ستكرات", "لزقات وحماية", "صيانة", "باقي الإكسسوارات"]), "fixed business order and labels");
+      assert(JSON.stringify(note.groups.map((group) => group.label)) === JSON.stringify(["باقي الإكسسوارات", "ستكرات", "كوابل", "شواحن وعضمات شحن", "لزقات وحماية", "صيانة"]), "fixed business order and labels");
       assert(
-        JSON.stringify(note.groups.map((group) => group.quantity)) === JSON.stringify([251, 329, 480, 321, 100, 1330]),
-        `كوابل 251 / شواحن 329 / ستكرات 480 / لزقات 321 / صيانة 100 / باقي 1330, got ${JSON.stringify(note.groups.map((group) => group.quantity))}`,
+        JSON.stringify(note.groups.map((group) => group.quantity)) === JSON.stringify([1330, 480, 251, 329, 321, 100]),
+        `باقي 1330 / ستكرات 480 / كوابل 251 / شواحن 329 / لزقات 321 / صيانة 100, got ${JSON.stringify(note.groups.map((group) => group.quantity))}`,
       );
-      assert(JSON.stringify(note.groups.map((group) => group.productCount)) === JSON.stringify([8, 10, 1, 4, 1, 25]), "products per group 8 / 10 / 1 / 4 / 1 / 25");
+      assert(JSON.stringify(note.groups.map((group) => group.productCount)) === JSON.stringify([25, 1, 8, 10, 4, 1]), "products per group 25 / 1 / 8 / 10 / 4 / 1");
       const printedSum = note.groups.reduce((sum, group) => sum + group.quantity, 0);
-      assert(printedSum === 2811 && note.totalPieces === 2811, `251 + 329 + 480 + 321 + 100 + 1330 = ${printedSum}`);
+      assert(printedSum === 2811 && note.totalPieces === 2811, `1330 + 480 + 251 + 329 + 321 + 100 = ${printedSum}`);
       assert(note.totalPieces === note.rows.reduce((sum, row) => sum + row.quantity, 0), "the grouped total equals the sum of every product's quantity");
       const stats = await getRepStockStats(mahmoud.car!.id);
       assert(stats.totalUnits === 2811 && stats.distinctProducts === 49, `the canonical rep-car stats agree (${stats.distinctProducts} / ${stats.totalUnits})`);
@@ -210,7 +210,7 @@ async function main() {
       assert(note.totalPieces === 2811, "warehouse (999 each) and the other rep's 16 pieces are not in Mahmoud's total");
       assert(!note.rows.some((row) => row.name === "ستكر آخر" || row.name === "شاحن آخر"), "no product of another rep's car");
       const other = (await loadRepDispatchNote(otherRep.rep.id))!;
-      assert(other.totalPieces === 16 && JSON.stringify(byKey(other.groups)) === JSON.stringify({ CHARGERS: 9, STICKERS: 7 }), "the other rep's note holds only their own car");
+      assert(other.totalPieces === 16 && JSON.stringify(byKey(other.groups)) === JSON.stringify({ STICKERS: 7, CHARGERS: 9 }), "the other rep's note holds only their own car");
       const raw = (productId: string, quantity: number) => ({ productId, quantity, product: { sku: productId, name: "كيبل", nameAr: null, category: null } });
       assert(buildDispatchNoteRows([raw("a", -3), raw("b", 0), raw("c", 2.5), raw("d", Number.NaN), raw("e", 4)]).length === 1, "negative / zero / fractional / NaN quantities are dropped before grouping");
       assert(buildDispatchNoteRows([raw("p", 3), raw("p", 4)])[0]!.quantity === 7, "legacy per-variant rows of one product fold into one product");
@@ -218,7 +218,7 @@ async function main() {
 
     await check("F. a group with a zero total is not printed", async () => {
       const leanNote = (await loadRepDispatchNote(lean.rep.id))!;
-      assert(JSON.stringify(leanNote.groups.map((group) => group.label)) === JSON.stringify(["كوابل", "باقي الإكسسوارات"]) && leanNote.groupCount === 2, "only the two non-empty groups are printed (no ستكرات | 0, no صيانة | 0)");
+      assert(JSON.stringify(leanNote.groups.map((group) => group.label)) === JSON.stringify(["باقي الإكسسوارات", "كوابل"]) && leanNote.groupCount === 2, "only the two non-empty groups are printed (no ستكرات | 0, no صيانة | 0)");
       assert(leanNote.totalPieces === 20 && leanNote.groups.reduce((sum, group) => sum + group.quantity, 0) === 20, "the totals still reconcile");
       const none = groupDispatchQuantities([{ groupKey: "STICKERS", quantity: 0 }, { groupKey: "CABLES", quantity: 5 }]);
       assert(none.length === 1 && none[0]!.key === "CABLES", "a group whose total is 0 is dropped");
@@ -239,7 +239,7 @@ async function main() {
         assert(note.groups.reduce((sum, group) => sum + group.quantity, 0) === stats.totalUnits && note.totalPieces === stats.totalUnits, `${rep.user.name}: groups == canonical total (${stats.totalUnits})`);
       }
       const small191 = (await loadRepDispatchNote(small.rep.id))!;
-      assert(small191.totalPieces === 191 && small191.productCount === 5 && JSON.stringify(byKey(small191.groups)) === JSON.stringify({ CHARGERS: 65, OTHER_ACCESSORIES: 126 }), "the 26+42+65+23+35 = 191 car groups to 65 + 126");
+      assert(small191.totalPieces === 191 && small191.productCount === 5 && JSON.stringify(byKey(small191.groups)) === JSON.stringify({ OTHER_ACCESSORIES: 126, CHARGERS: 65 }), "the 26+42+65+23+35 = 191 car groups to 65 + 126");
       const rows = [{ groupKey: "CABLES" as const, quantity: 5 }, { groupKey: "OTHER_ACCESSORIES" as const, quantity: 6 }];
       const groups = groupDispatchQuantities(rows);
       assertGroupsReconcile(rows, groups);
